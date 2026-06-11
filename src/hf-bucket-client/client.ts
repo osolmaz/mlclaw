@@ -28,6 +28,7 @@ type BatchOperation =
   | { type: "deleteFile"; path: string };
 
 const RETRY_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+const REQUEST_TIMEOUT_MS = 30_000;
 
 /** RFC 5988 Link header, GitHub pagination style (per the Python reference). */
 function nextPageUrl(linkHeader: string | null): string | null {
@@ -86,10 +87,24 @@ export class BucketClient {
   private async fetchWithRetry(url: string, init?: RequestInit): Promise<Response> {
     const attempts = 4;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
-      const response = await this.fetchImpl(url, {
-        ...init,
-        headers: { ...this.authHeaders(), ...init?.headers },
-      });
+      let response: Response;
+      try {
+        response = await this.fetchImpl(url, {
+          ...init,
+          signal: init?.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          headers: { ...this.authHeaders(), ...init?.headers },
+        });
+      } catch (err) {
+        if (
+          attempt < attempts - 1 &&
+          err instanceof Error &&
+          (err.name === "AbortError" || err.name === "TimeoutError")
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
+          continue;
+        }
+        throw err;
+      }
       if (!RETRY_STATUSES.has(response.status) || attempt === attempts - 1) {
         return response;
       }

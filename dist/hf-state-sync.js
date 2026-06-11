@@ -4590,6 +4590,7 @@ async function uploadShard(shard, params) {
 // src/hf-bucket-client/client.ts
 var HUB_URL = "https://huggingface.co";
 var RETRY_STATUSES = /* @__PURE__ */ new Set([408, 429, 500, 502, 503, 504]);
+var REQUEST_TIMEOUT_MS = 3e4;
 function nextPageUrl(linkHeader) {
   if (!linkHeader) {
     return null;
@@ -4637,10 +4638,20 @@ var BucketClient = class {
   async fetchWithRetry(url, init) {
     const attempts = 4;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
-      const response = await this.fetchImpl(url, {
-        ...init,
-        headers: { ...this.authHeaders(), ...init?.headers }
-      });
+      let response;
+      try {
+        response = await this.fetchImpl(url, {
+          ...init,
+          signal: init?.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          headers: { ...this.authHeaders(), ...init?.headers }
+        });
+      } catch (err) {
+        if (attempt < attempts - 1 && err instanceof Error && (err.name === "AbortError" || err.name === "TimeoutError")) {
+          await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
+          continue;
+        }
+        throw err;
+      }
       if (!RETRY_STATUSES.has(response.status) || attempt === attempts - 1) {
         return response;
       }
