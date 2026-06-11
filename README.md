@@ -1,5 +1,9 @@
 # Hugging Claw
 
+<p align="center">
+  <img src="assets/huggingclaw.svg" alt="Hugging Claw" width="160">
+</p>
+
 Hugging Claw deploys a private [OpenClaw](https://openclaw.ai) agent to
 Hugging Face from a local CLI. This GitHub repo is the single source of truth:
 `hclaw` creates each user's private Space and bucket, then uploads generated

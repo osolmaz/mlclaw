@@ -154,6 +154,7 @@ async function generateSpaceRepo(sourceDir, outDir) {
     ["package.json", "package.json"],
     ["package-lock.json", "package-lock.json"],
     ["tsconfig.json", "tsconfig.json"],
+    ["assets/huggingclaw.svg", "assets/huggingclaw.svg"],
     ["space/README.md", "README.md"],
     ["scripts/configure-telegram.mjs", "scripts/configure-telegram.mjs"],
     ["scripts/report-telegram-probe.mjs", "scripts/report-telegram-probe.mjs"],

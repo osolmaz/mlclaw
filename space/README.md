@@ -17,6 +17,10 @@ secrets:
 
 # Hugging Claw
 
+<p align="center">
+  <img src="assets/huggingclaw.svg" alt="Hugging Claw" width="160">
+</p>
+
 This private Space runs your personal OpenClaw agent. Durable state is stored
 in a private Hugging Face Storage Bucket configured by `OPENCLAW_HF_STATE_BUCKET`.
 

@@ -43,6 +43,8 @@ Created per user:
 ```text
 README.md
 bootstrap.sh                  # compatibility entrypoint delegating to hclaw
+assets/
+  huggingclaw.svg             # shared GitHub and generated Space branding
 docs/
   openclaw-huggingface-implementation-plan.md
 src/
