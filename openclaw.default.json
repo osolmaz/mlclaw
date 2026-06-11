@@ -1,0 +1,60 @@
+{
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "${OPENCLAW_MODEL}"
+      }
+    }
+  },
+  "gateway": {
+    "mode": "local",
+    "bind": "lan",
+    "port": 7860,
+    "auth": {
+      "token": "${OPENCLAW_GATEWAY_TOKEN}"
+    },
+    "controlUi": {
+      "allowedOrigins": ["*"]
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": false,
+      "botToken": "${TELEGRAM_BOT_TOKEN}",
+      "dmPolicy": "allowlist",
+      "allowFrom": [],
+      "timeoutSeconds": 45,
+      "pollingStallThresholdMs": 60000,
+      "commands": {
+        "native": false
+      },
+      "network": {
+        "autoSelectFamily": false,
+        "dnsResultOrder": "ipv4first"
+      }
+    }
+  },
+  "messages": {
+    "queue": {
+      "byChannel": {
+        "telegram": "collect"
+      },
+      "debounceMsByChannel": {
+        "telegram": 1500
+      },
+      "cap": 20,
+      "drop": "summarize"
+    }
+  },
+  "session": {
+    "dmScope": "per-channel-peer",
+    "reset": {
+      "mode": "daily",
+      "atHour": 4,
+      "idleMinutes": 1440
+    }
+  },
+  "cron": {
+    "enabled": true
+  }
+}

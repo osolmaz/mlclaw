@@ -1,0 +1,92 @@
+import { createHfBucketHub } from "./hub.js";
+import type { BucketHub } from "./hub.js";
+import { log, logError, resolveSyncConfig } from "./paths.js";
+import { runRestore } from "./restore.js";
+import { runSnapshot } from "./snapshot.js";
+import { supervise } from "./supervise.js";
+
+const USAGE = `usage:
+  hf-state-sync restore
+  hf-state-sync snapshot
+  hf-state-sync supervise -- <command> [args...]`;
+
+function makeHub(bucket: string | null): BucketHub | null {
+  return bucket ? createHfBucketHub({ bucket }) : null;
+}
+
+async function main(argv: string[]): Promise<number> {
+  const config = resolveSyncConfig();
+  const hub = makeHub(config.bucket);
+  if (!hub) {
+    logError("OPENCLAW_HF_STATE_BUCKET is not set; state will NOT survive restarts");
+  }
+  const mode = argv[0];
+
+  switch (mode) {
+    case "restore": {
+      if (!hub) {
+        return 0;
+      }
+      const outcome = await runRestore({ config, hub });
+      switch (outcome.kind) {
+        case "restored":
+          return 0;
+        case "fresh-start":
+          log(`fresh start (${outcome.reason})`);
+          return 0;
+        case "invalid-manifest":
+          // Refuse to silently lose a bucket that claims to have state.
+          logError(`manifest exists but is invalid, refusing fresh start: ${outcome.reason}`);
+          return 1;
+        case "all-snapshots-failed":
+          logError(`all snapshots failed verification: ${outcome.tried.join(", ")}`);
+          return 1;
+      }
+      break;
+    }
+    case "snapshot": {
+      if (!hub) {
+        return 1;
+      }
+      const outcome = await runSnapshot({ config, hub, bootTime: new Date().toISOString() });
+      if (outcome.kind === "failed") {
+        logError(outcome.detail);
+        return 1;
+      }
+      log(`snapshot outcome: ${outcome.kind}`);
+      return 0;
+    }
+    case "supervise": {
+      const separator = argv.indexOf("--");
+      const command = separator >= 0 ? argv.slice(separator + 1) : [];
+      if (command.length === 0) {
+        logError(USAGE);
+        return 2;
+      }
+      if (!hub) {
+        // Still run the child: a Space without a bucket should serve, just
+        // without durability.
+        const { spawn } = await import("node:child_process");
+        const child = spawn(command[0] as string, command.slice(1), { stdio: "inherit" });
+        return await new Promise<number>((resolve) => {
+          process.on("SIGTERM", () => child.kill("SIGTERM"));
+          process.on("SIGINT", () => child.kill("SIGINT"));
+          child.on("exit", (code) => resolve(code ?? 1));
+        });
+      }
+      return await supervise({ config, hub, command });
+    }
+    default:
+      logError(USAGE);
+      return 2;
+  }
+  return 2;
+}
+
+main(process.argv.slice(2)).then(
+  (code) => process.exit(code),
+  (err) => {
+    logError(err instanceof Error ? (err.stack ?? err.message) : String(err));
+    process.exit(1);
+  },
+);
