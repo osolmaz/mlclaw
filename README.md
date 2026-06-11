@@ -4,8 +4,8 @@
 
 # Hugging Claw
 
-Deploy a private [OpenClaw](https://openclaw.ai) agent to Hugging Face with one
-local command.
+Deploy a private [OpenClaw](https://openclaw.ai) agent to Hugging Face from
+your own machine.
 
 Hugging Claw creates a private Hugging Face Docker Space for the agent and a
 private Hugging Face Storage Bucket for durable state. The Space can be rebuilt
@@ -14,30 +14,43 @@ or restarted; the bucket keeps the agent's snapshots.
 ## Requirements
 
 - A Hugging Face account.
-- The Hugging Face CLI installed as `hf`.
-- `hf auth login` completed locally.
+- A Hugging Face token available through `HF_TOKEN`, `HF_TOKEN_PATH`,
+  `$HF_HOME/token`, or `hf auth login`.
 - Optional: a Telegram bot token from BotFather.
 
 ## Deploy
 
-Run the installer from your own machine:
+If you have Node.js installed, run:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/osolmaz/huggingclaw/main/hclaw.sh) \
+npx huggingclaw \
   bootstrap \
-  --telegram-token-file ~/secrets/bob_bot.env \
+  --telegram-token-file ~/secrets/research_bot.env \
   --telegram-user-id 1234567890
 ```
 
-The command reads your Hugging Face token from `HF_TOKEN`, `HF_TOKEN_PATH`,
-`$HF_HOME/token`, or the normal `hf auth login` cache. It does not ask you to
-paste Hugging Face credentials into a hosted app.
+Or install it globally:
 
-If you do not want Telegram yet, omit the Telegram flags:
+```bash
+npm install -g huggingclaw
+hclaw bootstrap
+```
+
+If you do not have Node.js installed, use the launcher. It downloads a pinned
+Node runtime into your user cache, then runs the same npm package.
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/osolmaz/huggingclaw/main/hclaw.sh) bootstrap
 ```
+
+On Windows:
+
+```powershell
+irm https://raw.githubusercontent.com/osolmaz/huggingclaw/main/hclaw.ps1 | iex
+```
+
+Hugging Claw runs locally. It does not ask you to paste Hugging Face credentials
+into a hosted app.
 
 ## What It Creates
 
@@ -55,15 +68,13 @@ so the installer cannot read it back later.
 Update an existing deployment from the current Hugging Claw source:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/osolmaz/huggingclaw/main/hclaw.sh) \
-  update osolmaz/bob
+hclaw update your-hf-username/research-agent
 ```
 
 Check a deployment:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/osolmaz/huggingclaw/main/hclaw.sh) \
-  doctor osolmaz/bob
+hclaw doctor your-hf-username/research-agent
 ```
 
 `doctor --fix` only applies safe Space configuration repairs. It does not read

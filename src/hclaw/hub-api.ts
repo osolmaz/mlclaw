@@ -14,6 +14,7 @@ export class HubApiError extends Error {
 type SpaceSecret = { key: string; updatedAt?: string };
 type SpaceVariable = { key: string; value?: string; updatedAt?: string };
 export type SpaceRuntime = { stage?: string; hardware?: unknown; requested_hardware?: unknown };
+export type HubCommitFile = { path: string; content: Uint8Array | Buffer };
 
 export class HubApi {
   private readonly hubUrl: string;
@@ -167,6 +168,52 @@ export class HubApi {
       signal: AbortSignal.timeout(5000),
     }, true);
     return sseDataToText(await response.text());
+  }
+
+  async listSpaceFiles(repoId: string): Promise<string[]> {
+    const raw = await this.requestJson<{ siblings?: Array<{ rfilename?: string }> }>(`/api/spaces/${repoId}`);
+    return (raw.siblings ?? [])
+      .map((sibling) => sibling.rfilename)
+      .filter((name): name is string => typeof name === "string" && name.length > 0)
+      .sort();
+  }
+
+  async commitSpaceFiles(repoId: string, params: {
+    files: HubCommitFile[];
+    deletePaths?: string[];
+    title: string;
+    description?: string;
+    branch?: string;
+  }): Promise<void> {
+    const body = [
+      {
+        key: "header",
+        value: {
+          summary: params.title,
+          description: params.description,
+        },
+      },
+      ...params.files.map((file) => ({
+        key: "file",
+        value: {
+          path: file.path,
+          content: Buffer.from(file.content).toString("base64"),
+          encoding: "base64",
+        },
+      })),
+      ...(params.deletePaths ?? []).map((path) => ({
+        key: "deletedFile",
+        value: { path },
+      })),
+    ]
+      .map((entry) => JSON.stringify(entry))
+      .join("\n");
+
+    await this.request(`/api/spaces/${repoId}/commit/${encodeURIComponent(params.branch ?? "main")}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-ndjson" },
+      body,
+    });
   }
 
   async assertBucketAccessible(bucketId: string): Promise<void> {

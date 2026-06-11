@@ -1,14 +1,38 @@
 {
   "name": "huggingclaw",
-  "private": true,
   "version": "0.1.0",
   "license": "MIT",
   "type": "module",
+  "bin": {
+    "hclaw": "dist/hclaw.mjs",
+    "huggingclaw": "dist/hclaw.mjs"
+  },
+  "files": [
+    ".gitattributes",
+    "assets/",
+    "dist/hclaw.mjs",
+    "Dockerfile",
+    "entrypoint.sh",
+    "hclaw.ps1",
+    "hclaw.sh",
+    "LICENSE",
+    "openclaw.default.json",
+    "README.md",
+    "scripts/configure-telegram.mjs",
+    "scripts/report-telegram-probe.mjs",
+    "space/",
+    "src/hf-bucket-client/",
+    "src/hf-state-sync/",
+    "src/vendor/",
+    "tsconfig.json"
+  ],
   "scripts": {
     "build": "npm run build:state-sync && npm run build:hclaw",
     "build:state-sync": "esbuild src/hf-state-sync/cli.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/hf-state-sync.js --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
     "build:hclaw": "esbuild src/hclaw/cli.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/hclaw.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
     "build:probe": "esbuild scripts/parity-probe.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/parity-probe.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
+    "pack:check": "node scripts/check-package.mjs",
+    "prepack": "npm run build",
     "check:secrets": "node scripts/check-secrets.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

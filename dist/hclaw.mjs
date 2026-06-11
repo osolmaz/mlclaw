@@ -74,122 +74,8 @@ import { execFile } from "node:child_process";
 import fs2 from "node:fs/promises";
 import os2 from "node:os";
 import path2 from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-var execFileAsync = promisify(execFile);
-var SOURCE_REPO = "https://github.com/osolmaz/huggingclaw.git";
-var SOURCE_REF = "main";
-var HUB_URL = "https://huggingface.co";
-async function pushTemplateToSpace(params) {
-  const tempRoot = await fs2.mkdtemp(path2.join(os2.tmpdir(), "hclaw-space-"));
-  try {
-    const sourceDir = params.sourceDir ?? process.env.HCLAW_SOURCE_DIR ?? path2.join(tempRoot, "source");
-    if (!params.sourceDir && !process.env.HCLAW_SOURCE_DIR) {
-      await run("git", [
-        "clone",
-        "--depth",
-        "1",
-        "--branch",
-        params.sourceRef ?? SOURCE_REF,
-        params.sourceRepo ?? SOURCE_REPO,
-        sourceDir
-      ]);
-    }
-    const { stdout } = await run("git", ["-C", sourceDir, "rev-parse", "HEAD"]);
-    const templateRev = stdout.trim();
-    const outDir = path2.join(tempRoot, "space");
-    await fs2.mkdir(outDir, { recursive: true });
-    await generateSpaceRepo(sourceDir, outDir);
-    await run("git", ["-C", outDir, "init", "-b", "main"]);
-    await run("git", ["-C", outDir, "config", "user.email", "hclaw@users.noreply.github.com"]);
-    await run("git", ["-C", outDir, "config", "user.name", "hclaw"]);
-    await run("git", ["-C", outDir, "add", "-A"]);
-    await run("git", ["-C", outDir, "commit", "-m", `Deploy Hugging Claw ${templateRev.slice(0, 12)}`]);
-    const askpass = path2.join(tempRoot, ".hclaw-git-askpass.sh");
-    await fs2.writeFile(
-      askpass,
-      `#!/usr/bin/env sh
-case "$1" in
-  *Username*) printf '%s\\n' 'hf_user' ;;
-  *Password*) printf '%s\\n' "$HCLAW_GIT_TOKEN" ;;
-  *) printf '%s\\n' ;;
-esac
-`,
-      { mode: 448 }
-    );
-    const gitEnv = {
-      ...process.env,
-      GIT_ASKPASS: askpass,
-      GIT_TERMINAL_PROMPT: "0",
-      HCLAW_GIT_TOKEN: params.token
-    };
-    await run("git", ["-C", outDir, "remote", "add", "origin", spaceUrl(params.targetRepo)]);
-    await run("git", ["-C", outDir, "push", "--force", "origin", "HEAD:main"], gitEnv);
-    return { templateRev };
-  } finally {
-    await fs2.rm(tempRoot, { recursive: true, force: true });
-  }
-}
-async function run(command, args, env) {
-  try {
-    return await execFileAsync(command, args, { env, maxBuffer: 20 * 1024 * 1024 });
-  } catch (err) {
-    if (err instanceof Error) {
-      const withIo = err;
-      throw new Error(`${command} ${args.map(redact).join(" ")} failed: ${withIo.stderr || withIo.message}`);
-    }
-    throw err;
-  }
-}
-function spaceUrl(repo) {
-  return `${HUB_URL}/spaces/${repo}`;
-}
-function redact(arg) {
-  return arg.includes("@huggingface.co") ? "<authenticated-url>" : arg;
-}
-async function generateSpaceRepo(sourceDir, outDir) {
-  const copies = [
-    [".gitattributes", ".gitattributes"],
-    ["Dockerfile", "Dockerfile"],
-    ["entrypoint.sh", "entrypoint.sh"],
-    ["openclaw.default.json", "openclaw.default.json"],
-    ["package.json", "package.json"],
-    ["package-lock.json", "package-lock.json"],
-    ["tsconfig.json", "tsconfig.json"],
-    ["assets/huggingclaw.svg", "assets/huggingclaw.svg"],
-    ["space/README.md", "README.md"],
-    ["scripts/configure-telegram.mjs", "scripts/configure-telegram.mjs"],
-    ["scripts/report-telegram-probe.mjs", "scripts/report-telegram-probe.mjs"],
-    ["src/hf-bucket-client", "src/hf-bucket-client"],
-    ["src/hf-state-sync", "src/hf-state-sync"],
-    ["src/vendor", "src/vendor"]
-  ];
-  for (const [from, to] of copies) {
-    await copyExisting(path2.join(sourceDir, from), path2.join(outDir, to));
-  }
-  await writeSpacePackageJson(path2.join(outDir, "package.json"));
-}
-async function copyExisting(from, to) {
-  const stat = await fs2.stat(from);
-  await fs2.mkdir(path2.dirname(to), { recursive: true });
-  if (stat.isDirectory()) {
-    await fs2.cp(from, to, { recursive: true });
-  } else {
-    await fs2.copyFile(from, to);
-    await fs2.chmod(to, stat.mode);
-  }
-}
-async function writeSpacePackageJson(file) {
-  const pkg = JSON.parse(await fs2.readFile(file, "utf8"));
-  pkg.name = "huggingclaw-generated-space";
-  pkg.scripts = {
-    ...pkg.scripts,
-    build: pkg.scripts?.["build:state-sync"] ?? "esbuild src/hf-state-sync/cli.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/hf-state-sync.js"
-  };
-  delete pkg.scripts["build:hclaw"];
-  delete pkg.scripts["build:probe"];
-  await fs2.writeFile(file, `${JSON.stringify(pkg, null, 2)}
-`);
-}
 
 // src/vendor/hfjs-xet/error.ts
 async function createApiError(response, opts) {
@@ -4771,7 +4657,7 @@ async function uploadShard(shard, params) {
 }
 
 // src/hf-bucket-client/client.ts
-var HUB_URL2 = "https://huggingface.co";
+var HUB_URL = "https://huggingface.co";
 var RETRY_STATUSES = /* @__PURE__ */ new Set([408, 429, 500, 502, 503, 504]);
 var REQUEST_TIMEOUT_MS = 3e4;
 function nextPageUrl(linkHeader) {
@@ -4801,7 +4687,7 @@ var BucketClient = class {
   fetchImpl;
   constructor(options) {
     this.bucket = options.bucket;
-    this.hubUrl = options.hubUrl ?? HUB_URL2;
+    this.hubUrl = options.hubUrl ?? HUB_URL;
     this.accessToken = options.accessToken;
     this.fetchImpl = options.fetch ?? fetch;
   }
@@ -4954,7 +4840,7 @@ var HubApi = class {
   fetchImpl;
   constructor(params) {
     this.token = params.token;
-    this.hubUrl = params.hubUrl ?? HUB_URL2;
+    this.hubUrl = params.hubUrl ?? HUB_URL;
     this.fetchImpl = params.fetch ?? fetch;
   }
   bucket(bucket) {
@@ -5087,6 +4973,38 @@ var HubApi = class {
     }, true);
     return sseDataToText(await response.text());
   }
+  async listSpaceFiles(repoId) {
+    const raw = await this.requestJson(`/api/spaces/${repoId}`);
+    return (raw.siblings ?? []).map((sibling) => sibling.rfilename).filter((name) => typeof name === "string" && name.length > 0).sort();
+  }
+  async commitSpaceFiles(repoId, params) {
+    const body = [
+      {
+        key: "header",
+        value: {
+          summary: params.title,
+          description: params.description
+        }
+      },
+      ...params.files.map((file) => ({
+        key: "file",
+        value: {
+          path: file.path,
+          content: Buffer.from(file.content).toString("base64"),
+          encoding: "base64"
+        }
+      })),
+      ...(params.deletePaths ?? []).map((path3) => ({
+        key: "deletedFile",
+        value: { path: path3 }
+      }))
+    ].map((entry) => JSON.stringify(entry)).join("\n");
+    await this.request(`/api/spaces/${repoId}/commit/${encodeURIComponent(params.branch ?? "main")}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-ndjson" },
+      body
+    });
+  }
   async assertBucketAccessible(bucketId) {
     try {
       await this.bucket(bucketId).assertBucketAccessible();
@@ -5147,6 +5065,166 @@ function sseDataToText(raw) {
     }
   }
   return lines.join("");
+}
+
+// src/hclaw/git.ts
+var execFileAsync = promisify(execFile);
+async function pushTemplateToSpace(params) {
+  const tempRoot = await fs2.mkdtemp(path2.join(os2.tmpdir(), "hclaw-space-"));
+  try {
+    const sourceDir = params.sourceDir ?? process.env.HCLAW_SOURCE_DIR ?? await findPackagedSourceRoot();
+    const templateRev = await currentTemplateRev(sourceDir);
+    const outDir = path2.join(tempRoot, "space");
+    await fs2.mkdir(outDir, { recursive: true });
+    await generateSpaceRepo(sourceDir, outDir);
+    const hub = new HubApi({ token: params.token });
+    const [files, existingFiles] = await Promise.all([
+      readFilesForCommit(outDir),
+      hub.listSpaceFiles(params.targetRepo).catch(() => [])
+    ]);
+    const nextPaths = new Set(files.map((file) => file.path));
+    const deletePaths = existingFiles.filter((file) => !nextPaths.has(file));
+    await hub.commitSpaceFiles(params.targetRepo, {
+      files,
+      deletePaths,
+      title: `Deploy Hugging Claw ${templateRev.slice(0, 12)}`
+    });
+    return { templateRev };
+  } finally {
+    await fs2.rm(tempRoot, { recursive: true, force: true });
+  }
+}
+async function currentTemplateRev(sourceDir) {
+  sourceDir ??= process.env.HCLAW_SOURCE_DIR ?? await findPackagedSourceRoot();
+  try {
+    const { stdout } = await execFileAsync("git", ["-C", sourceDir, "rev-parse", "HEAD"]);
+    const rev = stdout.trim();
+    if (rev) {
+      return rev;
+    }
+  } catch {
+  }
+  const pkg = JSON.parse(await fs2.readFile(path2.join(sourceDir, "package.json"), "utf8"));
+  return `npm:${pkg.name ?? "huggingclaw"}@${pkg.version ?? "unknown"}`;
+}
+async function generateSpaceRepo(sourceDir, outDir) {
+  const copies = [
+    [".gitattributes", ".gitattributes"],
+    ["Dockerfile", "Dockerfile"],
+    ["entrypoint.sh", "entrypoint.sh"],
+    ["openclaw.default.json", "openclaw.default.json"],
+    ["package.json", "package.json"],
+    [await firstExisting(sourceDir, ["package-lock.json", "space/package-lock.json"]), "package-lock.json"],
+    ["tsconfig.json", "tsconfig.json"],
+    ["assets/huggingclaw.svg", "assets/huggingclaw.svg"],
+    ["space/README.md", "README.md"],
+    ["scripts/configure-telegram.mjs", "scripts/configure-telegram.mjs"],
+    ["scripts/report-telegram-probe.mjs", "scripts/report-telegram-probe.mjs"],
+    ["src/hf-bucket-client", "src/hf-bucket-client"],
+    ["src/hf-state-sync", "src/hf-state-sync"],
+    ["src/vendor", "src/vendor"]
+  ];
+  for (const [from, to] of copies) {
+    await copyExisting(path2.join(sourceDir, from), path2.join(outDir, to));
+  }
+  await writeSpacePackageJson(path2.join(outDir, "package.json"));
+}
+async function findPackagedSourceRoot() {
+  const start = path2.dirname(fileURLToPath(import.meta.url));
+  let dir = start;
+  while (true) {
+    if (await hasPackagedSourceFiles(dir)) {
+      return dir;
+    }
+    const parent = path2.dirname(dir);
+    if (parent === dir) {
+      throw new Error("Could not find packaged Hugging Claw source files. Reinstall the huggingclaw npm package.");
+    }
+    dir = parent;
+  }
+}
+async function hasPackagedSourceFiles(dir) {
+  const required = [
+    "package.json",
+    "Dockerfile",
+    "entrypoint.sh",
+    "space/README.md",
+    "src/hf-state-sync/cli.ts",
+    "src/hf-bucket-client/client.ts"
+  ];
+  try {
+    await Promise.all(required.map((file) => fs2.access(path2.join(dir, file))));
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function copyExisting(from, to) {
+  const stat = await fs2.stat(from);
+  await fs2.mkdir(path2.dirname(to), { recursive: true });
+  if (stat.isDirectory()) {
+    await fs2.cp(from, to, { recursive: true });
+  } else {
+    await fs2.copyFile(from, to);
+    await fs2.chmod(to, stat.mode);
+  }
+}
+async function firstExisting(sourceDir, candidates) {
+  for (const candidate of candidates) {
+    try {
+      await fs2.access(path2.join(sourceDir, candidate));
+      return candidate;
+    } catch {
+    }
+  }
+  throw new Error(`None of these source files exist: ${candidates.join(", ")}`);
+}
+async function writeSpacePackageJson(file) {
+  const pkg = JSON.parse(await fs2.readFile(file, "utf8"));
+  pkg.name = "huggingclaw-generated-space";
+  pkg.private = true;
+  delete pkg.bin;
+  delete pkg.files;
+  pkg.scripts = {
+    ...pkg.scripts,
+    build: pkg.scripts?.["build:state-sync"] ?? "esbuild src/hf-state-sync/cli.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/hf-state-sync.js"
+  };
+  delete pkg.scripts["build:hclaw"];
+  delete pkg.scripts["build:probe"];
+  delete pkg.scripts["pack:check"];
+  delete pkg.scripts["prepack"];
+  await fs2.writeFile(file, `${JSON.stringify(pkg, null, 2)}
+`);
+}
+async function readFilesForCommit(root) {
+  const files = [];
+  for (const relativePath of await listFiles(root)) {
+    files.push({
+      path: relativePath,
+      content: await fs2.readFile(path2.join(root, relativePath))
+    });
+  }
+  return files;
+}
+async function listFiles(root, dir = "") {
+  const absoluteDir = path2.join(root, dir);
+  const entries = await fs2.readdir(absoluteDir, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const relativePath = path2.posix.join(dir.split(path2.sep).join(path2.posix.sep), entry.name);
+    const absolutePath = path2.join(root, relativePath);
+    if (entry.isDirectory()) {
+      files.push(...await listFiles(root, relativePath));
+    } else if (entry.isFile()) {
+      files.push(relativePath);
+    } else {
+      const stat = await fs2.stat(absolutePath);
+      if (stat.isFile()) {
+        files.push(relativePath);
+      }
+    }
+  }
+  return files.sort();
 }
 
 // src/hclaw/naming.ts
