@@ -96,10 +96,18 @@ run_with_node() {
   die "npm was not found for Node runtime $node_bin"
 }
 
+node_has_npm() {
+  local node_bin="$1"
+  local node_path npm_cli
+  node_path="$(dirname "$node_bin")"
+  npm_cli="$(dirname "$node_bin")/../lib/node_modules/npm/bin/npm-cli.js"
+  [ -f "$npm_cli" ] || PATH="$node_path:$PATH" command -v npm >/dev/null 2>&1
+}
+
 main() {
   local node_bin node_dir
   node_bin="$(system_node || true)"
-  if [ -n "$node_bin" ]; then
+  if [ -n "$node_bin" ] && node_has_npm "$node_bin"; then
     run_with_node "$node_bin" "$@"
   fi
   node_dir="$(install_node)"

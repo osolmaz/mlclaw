@@ -70,6 +70,7 @@ function Install-CachedNode {
 
 function Invoke-HuggingClaw($NodeBin, [string[]]$CliArgs) {
   $nodeDir = Split-Path $NodeBin -Parent
+  $env:PATH = "$nodeDir;$env:PATH"
   $npmCli = Join-Path $nodeDir "node_modules\npm\bin\npm-cli.js"
   if (-not (Test-Path $npmCli)) {
     $npmCommand = Get-Command npm -ErrorAction SilentlyContinue
@@ -83,8 +84,23 @@ function Invoke-HuggingClaw($NodeBin, [string[]]$CliArgs) {
   exit $LASTEXITCODE
 }
 
+function Test-NodeHasNpm($NodeBin) {
+  $nodeDir = Split-Path $NodeBin -Parent
+  $npmCli = Join-Path $nodeDir "node_modules\npm\bin\npm-cli.js"
+  if (Test-Path $npmCli) {
+    return $true
+  }
+  $oldPath = $env:PATH
+  try {
+    $env:PATH = "$nodeDir;$env:PATH"
+    return [bool](Get-Command npm -ErrorAction SilentlyContinue)
+  } finally {
+    $env:PATH = $oldPath
+  }
+}
+
 $node = Get-SystemNode
-if ($node) {
+if ($node -and (Test-NodeHasNpm $node)) {
   Invoke-HuggingClaw $node $args
 }
 
