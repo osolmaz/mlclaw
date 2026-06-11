@@ -5031,6 +5031,43 @@ var HubApi = class {
     return await this.requestJson(`/api/spaces/${repoId}/runtime`);
   }
   async fetchSpaceLogs(repoId, kind = "run") {
+    const url = `${this.hubUrl}/api/spaces/${repoId}/logs/${kind}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5e3);
+    const response = await this.fetchImpl(url, {
+      headers: { Authorization: `Bearer ${this.token}`, Accept: "text/event-stream" },
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      clearTimeout(timeout);
+      throw new HubApiError2(response.status, url, await response.text());
+    }
+    const reader = response.body?.getReader();
+    if (!reader) {
+      clearTimeout(timeout);
+      return "";
+    }
+    const decoder = new TextDecoder();
+    let raw = "";
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        raw += decoder.decode(value, { stream: true });
+      }
+      raw += decoder.decode();
+    } catch (err) {
+      if (!(err instanceof Error) || err.name !== "AbortError" && err.name !== "TimeoutError") {
+        throw err;
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+    return sseDataToText(raw);
+  }
+  async fetchSpaceLogsTextFallback(repoId, kind = "run") {
     const response = await this.request(`/api/spaces/${repoId}/logs/${kind}`, {
       headers: { Accept: "text/event-stream" },
       signal: AbortSignal.timeout(5e3)
@@ -5232,10 +5269,11 @@ async function doctor(args, hub) {
   }
   for (const key of STALE_PATH_VARS) {
     if (variables.has(key)) {
-      issues.push(`${key} is set; runtime now derives it from OPENCLAW_LIVE_DIR`);
       if (fix) {
         await hub.deleteSpaceVariable(repoId, key);
         fixed.push(`deleted ${key}`);
+      } else {
+        issues.push(`${key} is set; runtime now derives it from OPENCLAW_LIVE_DIR`);
       }
     }
   }
@@ -5267,7 +5305,7 @@ async function doctor(args, hub) {
   }
   console.log(`Space: ${repoId}`);
   console.log(`Stage: ${runtime.stage ?? "unknown"}`);
-  console.log(`Hardware: ${runtime.requested_hardware ?? runtime.hardware ?? "unknown"}`);
+  console.log(`Hardware: ${formatRuntimeValue(runtime.requested_hardware ?? runtime.hardware)}`);
   if (fixed.length > 0) {
     console.log(`Fixed: ${fixed.join(", ")}`);
   }
@@ -5279,6 +5317,21 @@ async function doctor(args, hub) {
       console.log(`- ${issue}`);
     }
   }
+}
+function formatRuntimeValue(value) {
+  if (!value) {
+    return "unknown";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "object" && "current" in value && typeof value.current === "string") {
+    return value.current;
+  }
+  if (typeof value === "object" && "requested" in value && typeof value.requested === "string") {
+    return value.requested;
+  }
+  return JSON.stringify(value);
 }
 async function setDeploymentVariables(hub, repoId, variables) {
   for (const [key, value] of Object.entries(variables)) {

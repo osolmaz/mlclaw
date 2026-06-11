@@ -124,10 +124,11 @@ async function doctor(args: ParsedArgs, hub: HubApi): Promise<void> {
   }
   for (const key of STALE_PATH_VARS) {
     if (variables.has(key)) {
-      issues.push(`${key} is set; runtime now derives it from OPENCLAW_LIVE_DIR`);
       if (fix) {
         await hub.deleteSpaceVariable(repoId, key);
         fixed.push(`deleted ${key}`);
+      } else {
+        issues.push(`${key} is set; runtime now derives it from OPENCLAW_LIVE_DIR`);
       }
     }
   }
@@ -161,7 +162,7 @@ async function doctor(args: ParsedArgs, hub: HubApi): Promise<void> {
 
   console.log(`Space: ${repoId}`);
   console.log(`Stage: ${runtime.stage ?? "unknown"}`);
-  console.log(`Hardware: ${runtime.requested_hardware ?? runtime.hardware ?? "unknown"}`);
+  console.log(`Hardware: ${formatRuntimeValue(runtime.requested_hardware ?? runtime.hardware)}`);
   if (fixed.length > 0) {
     console.log(`Fixed: ${fixed.join(", ")}`);
   }
@@ -173,6 +174,22 @@ async function doctor(args: ParsedArgs, hub: HubApi): Promise<void> {
       console.log(`- ${issue}`);
     }
   }
+}
+
+function formatRuntimeValue(value: unknown): string {
+  if (!value) {
+    return "unknown";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "object" && "current" in value && typeof value.current === "string") {
+    return value.current;
+  }
+  if (typeof value === "object" && "requested" in value && typeof value.requested === "string") {
+    return value.requested;
+  }
+  return JSON.stringify(value);
 }
 
 async function setDeploymentVariables(

@@ -13,7 +13,7 @@ export class HubApiError extends Error {
 
 type SpaceSecret = { key: string; updatedAt?: string };
 type SpaceVariable = { key: string; value?: string; updatedAt?: string };
-type SpaceRuntime = { stage?: string; hardware?: string; requested_hardware?: string };
+export type SpaceRuntime = { stage?: string; hardware?: unknown; requested_hardware?: unknown };
 
 export class HubApi {
   private readonly hubUrl: string;
@@ -124,6 +124,44 @@ export class HubApi {
   }
 
   async fetchSpaceLogs(repoId: string, kind: "run" | "build" = "run"): Promise<string> {
+    const url = `${this.hubUrl}/api/spaces/${repoId}/logs/${kind}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const response = await this.fetchImpl(url, {
+      headers: { Authorization: `Bearer ${this.token}`, Accept: "text/event-stream" },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      clearTimeout(timeout);
+      throw new HubApiError(response.status, url, await response.text());
+    }
+    const reader = response.body?.getReader();
+    if (!reader) {
+      clearTimeout(timeout);
+      return "";
+    }
+    const decoder = new TextDecoder();
+    let raw = "";
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        raw += decoder.decode(value, { stream: true });
+      }
+      raw += decoder.decode();
+    } catch (err) {
+      if (!(err instanceof Error) || (err.name !== "AbortError" && err.name !== "TimeoutError")) {
+        throw err;
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+    return sseDataToText(raw);
+  }
+
+  async fetchSpaceLogsTextFallback(repoId: string, kind: "run" | "build" = "run"): Promise<string> {
     const response = await this.request(`/api/spaces/${repoId}/logs/${kind}`, {
       headers: { Accept: "text/event-stream" },
       signal: AbortSignal.timeout(5000),
@@ -197,4 +235,3 @@ function sseDataToText(raw: string): string {
   }
   return lines.join("");
 }
-
