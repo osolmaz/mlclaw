@@ -219,8 +219,16 @@ Default command.
    `_bot`, `-bot`, or `bot`.
 5. Create a private bucket named `<agent>-data`.
 6. Create a private Docker Space named `<agent>`.
-7. Request Space hardware from `--hardware`, defaulting to `cpu-basic`.
-8. Set Space sleep time from `--sleep-time` when provided.
+7. Choose Space hardware.
+   - Default to `cpu-basic` only when no bot-platform integration is configured.
+   - If Telegram or Discord is configured, require upgraded hardware such as
+     `cpu-upgrade`.
+   - Before requesting paid hardware, print a clear cost warning and require
+     explicit user confirmation.
+   - In non-interactive mode, fail unless the user has supplied both the paid
+     hardware choice and an explicit confirmation flag.
+8. Set Space sleep time from `--sleep-time` when provided. For bot-platform
+   deployments, recommend `--sleep-time -1`.
 9. Generate the Space files from this GitHub source tree.
 10. Upload/commit the generated files into the user's Space repo.
 11. Set variables/secrets.
@@ -243,7 +251,8 @@ hclaw bootstrap \
   --telegram-token-file ~/secrets/research_bot.env \
   --telegram-user-id 1234567890 \
   --hardware cpu-upgrade \
-  --sleep-time -1
+  --sleep-time -1 \
+  --yes
 ```
 
 ### `hclaw update <owner/space>`
@@ -286,8 +295,11 @@ hclaw settings your-hf-username/research-agent --hardware cpu-upgrade --sleep-ti
 - `--hardware <flavor>` requests a Hugging Face Space hardware flavor.
 - `--sleep-time <seconds>` configures upgraded hardware sleep behavior.
 - `--sleep-time -1` keeps upgraded hardware always on.
-- Telegram or Discord deployments should use `cpu-upgrade` or larger paid
-  hardware. Free `cpu-basic` can block outbound bot-platform traffic.
+- Telegram or Discord deployments require `cpu-upgrade` or larger paid
+  hardware today. Free `cpu-basic` is only for non-bot testing.
+- Any command that requests paid hardware must warn that Hugging Face will bill
+  the user's account and require explicit confirmation. Automation can pass
+  `--yes`; interactive use should ask the user to confirm.
 
 ## Security Defaults
 
@@ -344,10 +356,15 @@ Live:
 
 ## Telegram Caveat
 
-The generated Space configures Telegram long polling for private Spaces. Free
-Hugging Face Spaces can block outbound bot-platform traffic such as Telegram or
-Discord to prevent abuse. If Telegram logs `UND_ERR_CONNECT_TIMEOUT` on a free
-Space, upgrade the Space to paid hardware for production use.
+The generated Space configures Telegram long polling for private Spaces.
+Telegram and Discord deployments currently require upgraded paid Space
+hardware. Free `cpu-basic` Spaces are fine for non-bot testing, but they are
+not expected to keep bot-platform connections working.
+
+Before HuggingClaw requests upgraded hardware, it must warn the user that this
+will bill their Hugging Face account and ask for explicit consent. If Hugging
+Face changes free Space egress behavior in the future, this requirement can be
+relaxed without changing the rest of the deployment model.
 
 Keep the Space private. `TELEGRAM_PROXY` and `TELEGRAM_API_ROOT` are operator
 escape hatches for deployments that intentionally route Telegram traffic
@@ -410,6 +427,9 @@ Content-Type: application/json
 HuggingClaw should expose these settings without renaming them:
 
 ```bash
-hclaw bootstrap --hardware cpu-upgrade --sleep-time -1
-hclaw settings your-hf-username/research-agent --hardware cpu-upgrade --sleep-time -1
+hclaw bootstrap --hardware cpu-upgrade --sleep-time -1 --yes
+hclaw settings your-hf-username/research-agent --hardware cpu-upgrade --sleep-time -1 --yes
 ```
+
+Without `--yes`, interactive commands should print a cost warning and prompt
+for confirmation before making either API call.

@@ -89,9 +89,10 @@ bootstrapping again with the same bucket brings the same agent back.
 
 Honest numbers, since "deploy your own agent" tends to hide them:
 
-- **Space hardware:** free CPU Spaces sleep and may block bot-platform egress
-  (Telegram, Discord). For an always-on agent, use paid hardware — the
-  cheapest tier works.
+- **Space hardware:** Telegram and Discord deployments currently require
+  upgraded paid Space hardware. Free `cpu-basic` Spaces are still useful for
+  non-bot testing, but they are not expected to keep bot-platform connections
+  working. The cheapest paid CPU tier is enough for the gateway.
 - **Inference:** requests use your Hugging Face Inference Providers credits
   ($0.10/month on free accounts, $2.00 with PRO), then pay-as-you-go at
   provider rates. Small models like Qwen3-8B keep this at a few dollars a
@@ -101,15 +102,14 @@ Honest numbers, since "deploy your own agent" tends to hide them:
 
 - Private Spaces use long polling, not webhooks — Telegram cannot reach a
   private Space URL, and that is fine.
-- If Telegram logs connection timeouts on a free Space, that is the egress
-  block above: upgrade the hardware.
+- Telegram deployments currently require upgraded paid Space hardware.
 - Keep the Space private.
 
 ## Space hardware
 
 For Telegram or Discord, use upgraded Space hardware. Free `cpu-basic` Spaces
-can block outbound bot-platform traffic. The cheapest paid CPU tier is enough
-for the gateway:
+are not expected to keep bot-platform connections working. The cheapest paid
+CPU tier is enough for the gateway:
 
 ```bash
 hf spaces settings your-hf-username/research-agent --hardware cpu-upgrade --sleep-time -1
