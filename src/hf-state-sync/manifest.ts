@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 const snapshotEntrySchema = z.object({
-  id: z.string().min(1),
+  id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/),
   path: z.string().min(1),
   createdAt: z.string().datetime(),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),

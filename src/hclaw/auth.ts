@@ -9,6 +9,7 @@ export async function readToken(env: NodeJS.ProcessEnv = process.env): Promise<s
   }
   const candidates = [
     env.HF_TOKEN_PATH,
+    env.HF_HOME && path.join(env.HF_HOME, "token"),
     path.join(os.homedir(), ".cache", "huggingface", "token"),
     path.join(os.homedir(), ".huggingface", "token"),
   ].filter((value): value is string => Boolean(value));
@@ -24,4 +25,3 @@ export async function readToken(env: NodeJS.ProcessEnv = process.env): Promise<s
   }
   throw new Error("HF token not found. Set HF_TOKEN or run `hf auth login` once.");
 }
-

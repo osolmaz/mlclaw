@@ -9034,7 +9034,7 @@ var NEVER = INVALID;
 
 // src/hf-state-sync/manifest.ts
 var snapshotEntrySchema = external_exports.object({
-  id: external_exports.string().min(1),
+  id: external_exports.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/),
   path: external_exports.string().min(1),
   createdAt: external_exports.string().datetime(),
   sha256: external_exports.string().regex(/^[0-9a-f]{64}$/),

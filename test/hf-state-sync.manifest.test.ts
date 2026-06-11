@@ -32,6 +32,11 @@ describe("manifest", () => {
     expect(parseManifest('{"version":1,"current":{"id":""},"previous":[]}').kind).toBe("invalid");
   });
 
+  it("rejects snapshot ids that cannot be used as local filenames", () => {
+    const manifest: Manifest = { version: 1, current: entry("../../escape"), previous: [] };
+    expect(parseManifest(serializeManifest(manifest)).kind).toBe("invalid");
+  });
+
   it("promotes a snapshot and reports expired entries beyond keep", () => {
     const existing: Manifest = {
       version: 1,

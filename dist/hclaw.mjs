@@ -53,6 +53,7 @@ async function readToken(env = process.env) {
   }
   const candidates = [
     env.HF_TOKEN_PATH,
+    env.HF_HOME && path.join(env.HF_HOME, "token"),
     path.join(os.homedir(), ".cache", "huggingface", "token"),
     path.join(os.homedir(), ".huggingface", "token")
   ].filter((value) => Boolean(value));
