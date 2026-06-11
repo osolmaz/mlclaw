@@ -12,14 +12,36 @@ The local CLI is `hclaw`. It runs on the user's machine, uses the user's local
 Hugging Face token, generates the Space repository contents, uploads those
 files to the user's Space repo, sets variables/secrets, and restarts the Space.
 
-The supported one-command entrypoint is:
+The canonical distribution is the npm package:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/osolmaz/huggingclaw/main/hclaw.sh)
+npx huggingclaw bootstrap
+```
+
+The npm package name is `huggingclaw`. It exposes both CLI binary names:
+
+```text
+hclaw
+huggingclaw
+```
+
+Users with Node installed can use npm directly:
+
+```bash
+npx huggingclaw bootstrap
+npm install -g huggingclaw
+hclaw bootstrap
+```
+
+Users without Node use the platform launcher. The launcher supplies a pinned
+Node runtime when needed, then runs the same npm-distributed CLI:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/osolmaz/huggingclaw/main/hclaw.sh) bootstrap
 ```
 
 There is no supported Hugging Face bootstrap compatibility URL. The cutover is
-to the GitHub `hclaw.sh` entrypoint only.
+to npm plus the GitHub-hosted launcher only.
 
 ## Maintained Resources
 
@@ -28,6 +50,9 @@ Maintained by us:
 ```text
 1 GitHub source repo:
   https://github.com/osolmaz/huggingclaw
+
+1 npm package:
+  huggingclaw
 
 No maintained Hugging Face bootstrap repo.
 ```
@@ -54,6 +79,8 @@ assets/
   huggingclaw.svg             # shared GitHub and generated Space branding
 docs/
   openclaw-huggingface-implementation-plan.md
+hclaw.sh                     # Unix launcher; installs/uses pinned Node if needed
+hclaw.ps1                    # Windows launcher; installs/uses pinned Node if needed
 src/
   hclaw/                      # CLI: bootstrap | update | doctor
   hf-bucket-client/           # typed Storage Bucket client
@@ -66,7 +93,59 @@ scripts/
   parity-probe.ts
 test/
 dist/
-  hclaw.mjs                   # committed one-file CLI bundle
+  hclaw.mjs                   # npm-shipped one-file CLI bundle
+```
+
+## Distribution Contract
+
+The npm package is the single canonical runnable artifact.
+
+```json
+{
+  "name": "huggingclaw",
+  "bin": {
+    "hclaw": "dist/hclaw.mjs",
+    "huggingclaw": "dist/hclaw.mjs"
+  }
+}
+```
+
+Publishing rules:
+
+1. TypeScript source remains the maintained implementation.
+2. `dist/hclaw.mjs` is built before publish and included in the npm package.
+3. Users are never asked to clone or build this repo.
+4. CI verifies build, typecheck, tests, secret scan, and package contents before
+   publish.
+5. The package should support the current pinned runtime target used by the
+   launchers.
+
+Launcher rules:
+
+1. `hclaw.sh` and `hclaw.ps1` are convenience launchers, not separate
+   implementations.
+2. If a compatible Node runtime is already installed, the launcher uses it.
+3. If Node is missing or too old, the launcher downloads a pinned official Node
+   runtime into the user's cache, for example `~/.cache/huggingclaw/node/...`.
+4. The launcher then runs the npm package `huggingclaw` with the user's
+   arguments.
+5. The launcher must not require Python, `git`, a source checkout, or a local
+   build step.
+6. The launcher may require network access to npm and the official Node
+   distribution host.
+
+User-facing commands:
+
+```bash
+npx huggingclaw bootstrap
+hclaw bootstrap
+bash <(curl -fsSL https://raw.githubusercontent.com/osolmaz/huggingclaw/main/hclaw.sh) bootstrap
+```
+
+Windows:
+
+```powershell
+irm https://raw.githubusercontent.com/osolmaz/huggingclaw/main/hclaw.ps1 | iex
 ```
 
 ## Runtime Contract
@@ -203,14 +282,22 @@ Local:
 2. `npm run typecheck`
 3. `npm test`
 4. `npm run check:secrets`
-5. Bucket parity probe against a real test bucket:
+5. Verify `npm pack --dry-run` includes the runnable bundle, launchers, README,
+   license, generated Space sources, and excludes test/dev-only files.
+6. Verify the npm package exposes both `hclaw` and `huggingclaw` binaries.
+7. Verify `hclaw.sh` works on a machine with Node already installed.
+8. Verify `hclaw.sh` works on a clean machine without Node by installing the
+   pinned cached runtime.
+9. Verify `hclaw.ps1` works on Windows with and without Node.
+10. Bucket parity probe against a real test bucket:
    upload, list, download, missing object, delete.
 
 Live:
 
 1. Wipe old `osolmaz/onurclawtest` Space and `osolmaz/onurclawtest-data`
    bucket when explicitly authorized.
-2. Run `hclaw bootstrap` using the saved Telegram token file and allowed user.
+2. Run `npx huggingclaw bootstrap` using the saved Telegram token file and
+   allowed user.
 3. Confirm the Space repo was generated from `huggingclaw`, not from a template
    Space.
 4. Confirm Space builds.
@@ -225,8 +312,8 @@ Live:
 - A maintained Hugging Face template Space as source of truth.
 - Mounted buckets for live state.
 - Hosted launcher Spaces that collect user credentials.
-- npm publishing. The committed bundle plus shell shim is the first
-  distribution target.
+- A native compiled binary distribution. The npm package plus Node-supplying
+  launchers are the distribution target.
 
 ## Telegram Caveat
 
