@@ -58,7 +58,7 @@ export class HubApi {
       organization: owner === me.name ? null : owner,
       type: "space",
       sdk: "docker",
-      visibility: options?.private === false ? "public" : "private",
+      private: options?.private !== false,
     };
     if (options?.hardware) {
       payload.hardware = options.hardware;
