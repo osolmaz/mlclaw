@@ -103,8 +103,7 @@ Honest numbers, since "deploy your own agent" tends to hide them:
   private Space URL, and that is fine.
 - If Telegram logs connection timeouts on a free Space, that is the egress
   block above: upgrade the hardware.
-- Keep the Space private. `TELEGRAM_PROXY` / `TELEGRAM_API_ROOT` exist only
-  for intentionally routing Telegram traffic through your own proxy.
+- Keep the Space private.
 
 ## Development
 
