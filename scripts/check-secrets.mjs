@@ -15,6 +15,9 @@ const allowlisted = new Set(["hf_test_token"]);
 const findings = [];
 
 for (const file of files) {
+  if (!fs.existsSync(file)) {
+    continue;
+  }
   const bytes = fs.readFileSync(file);
   if (bytes.includes(0)) {
     continue;

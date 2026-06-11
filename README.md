@@ -22,16 +22,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/osolmaz/huggingclaw/main/hcl
   --telegram-user-id 1234567890
 ```
 
-The compatibility Hugging Face bootstrap URL is also supported:
-
-```bash
-bash <(curl -fsSL https://huggingface.co/osolmaz/openclaw-bootstrap/resolve/main/bootstrap.sh) \
-  bootstrap \
-  --telegram-token-file ~/secrets/bob_bot.env \
-  --telegram-user-id 1234567890
-```
-
-Both commands run locally. They read your Hugging Face token from `HF_TOKEN`,
+This command runs locally. It reads your Hugging Face token from `HF_TOKEN`,
 `HF_TOKEN_PATH`, `$HF_HOME/token`, or the normal `hf auth login` cache.
 
 ## Development

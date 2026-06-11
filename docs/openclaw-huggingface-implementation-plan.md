@@ -18,8 +18,8 @@ The supported one-command entrypoint is:
 bash <(curl -fsSL https://raw.githubusercontent.com/osolmaz/huggingclaw/main/hclaw.sh)
 ```
 
-The Hugging Face bootstrap URL delegates to that GitHub entrypoint for
-backward compatibility.
+There is no supported Hugging Face bootstrap compatibility URL. The cutover is
+to the GitHub `hclaw.sh` entrypoint only.
 
 ## Maintained Resources
 
@@ -29,8 +29,7 @@ Maintained by us:
 1 GitHub source repo:
   https://github.com/osolmaz/huggingclaw
 
-1 compatibility Hugging Face bootstrap repo:
-  https://huggingface.co/osolmaz/openclaw-bootstrap
+No maintained Hugging Face bootstrap repo.
 ```
 
 Optional/non-authoritative:
@@ -51,7 +50,6 @@ Created per user:
 
 ```text
 README.md
-bootstrap.sh                  # compatibility entrypoint delegating to hclaw
 assets/
   huggingclaw.svg             # shared GitHub and generated Space branding
 docs/
@@ -184,13 +182,6 @@ Checks:
 `doctor --fix` may delete stale path variables or set a missing bucket variable
 when `--bucket` is provided. It never reads secret values and never modifies
 bucket objects.
-
-## Compatibility Bootstrap
-
-The `bootstrap.sh` in this GitHub repo is a compatibility shim that downloads
-and runs the committed `dist/hclaw.mjs` from GitHub. The old Hugging Face
-bootstrap repo remains published separately so existing URLs can keep working
-until we intentionally repoint them.
 
 ## Security Defaults
 
