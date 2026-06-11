@@ -60,5 +60,15 @@ describe("generated Space repository", () => {
     expect(files).not.toContain("scripts/parity-probe.ts");
     expect(files.some((file) => file.startsWith("dist/"))).toBe(false);
     await expect(fs.readFile(path.join(outDir, "README.md"), "utf8")).resolves.toContain("assets/huggingclaw.svg");
+    const pkg = JSON.parse(await fs.readFile(path.join(outDir, "package.json"), "utf8")) as {
+      name?: string;
+      private?: boolean;
+      bin?: unknown;
+      files?: unknown;
+    };
+    expect(pkg.name).toBe("huggingclaw-generated-space");
+    expect(pkg.private).toBe(true);
+    expect(pkg.bin).toBeUndefined();
+    expect(pkg.files).toBeUndefined();
   });
 });

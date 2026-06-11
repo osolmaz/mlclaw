@@ -230,7 +230,7 @@ Example:
 
 ```bash
 hclaw bootstrap \
-  --telegram-token-file ~/secrets/bob_bot.env \
+  --telegram-token-file ~/secrets/research_bot.env \
   --telegram-user-id 1234567890
 ```
 
