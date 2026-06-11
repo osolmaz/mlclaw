@@ -1,42 +1,67 @@
----
-tags:
-  - openclaw
-  - bootstrap
-  - agent
-  - huggingface-spaces
-library_name: openclaw
----
+# Hugging Claw
 
-# OpenClaw Bootstrap
+<p align="center">
+  <img src="assets/huggingclaw.svg" alt="Hugging Claw" width="160">
+</p>
 
-Get your own private [OpenClaw](https://openclaw.ai) agent, fully hosted on Hugging Face, with one command:
+Hugging Claw deploys a private [OpenClaw](https://openclaw.ai) agent to
+Hugging Face from a local CLI. This GitHub repo is the single source of truth:
+`hclaw` creates each user's private Space and bucket, then uploads generated
+Space files directly to that user's Space repo.
+
+There is no maintained Hugging Face template Space in the deployment path.
+
+## One-Command Use
+
+After `hf auth login`, run:
 
 ```bash
-bash <(curl -fsSL https://huggingface.co/osolmaz/openclaw-bootstrap/resolve/main/bootstrap.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/osolmaz/huggingclaw/main/hclaw.sh) \
+  bootstrap \
+  --telegram-token-file ~/secrets/bob_bot.env \
+  --telegram-user-id 1234567890
 ```
 
-Paste a Telegram bot token when prompted and start talking to your agent minutes later. Everything runs under your own Hugging Face account: the Space hosts the agent, and a private bucket keeps its state, so nothing depends on anyone else's infrastructure.
+The compatibility Hugging Face bootstrap URL is also supported:
 
-The bootstrap creates:
+```bash
+bash <(curl -fsSL https://huggingface.co/osolmaz/openclaw-bootstrap/resolve/main/bootstrap.sh) \
+  bootstrap \
+  --telegram-token-file ~/secrets/bob_bot.env \
+  --telegram-user-id 1234567890
+```
 
-- a private Hugging Face Docker Space from `osolmaz/openclaw-huggingface`
+Both commands run locally. They read your Hugging Face token from `HF_TOKEN`,
+`HF_TOKEN_PATH`, `$HF_HOME/token`, or the normal `hf auth login` cache.
+
+## Development
+
+```bash
+npm install
+npm run build
+npm run typecheck
+npm test
+npm run check:secrets
+```
+
+`hclaw bootstrap` creates:
+
 - a private Hugging Face Storage Bucket
-- Space secrets for the gateway token, Hugging Face token, and optional Telegram bot
+- a private Hugging Face Docker Space
+- generated Space files from this repo
+- required Space variables and secrets
 
-The resulting OpenClaw runtime is hosted on Hugging Face. The agent runs on local disk inside the Space; every 60 seconds (and on shutdown) a verified state snapshot is written to the private bucket through the bucket API, and the newest verified snapshot is restored on boot — the Space is disposable, the bucket is the agent's durable memory. The bucket is never mounted: live SQLite on a bucket mount corrupts. Secrets stay in Hugging Face Space Secrets and are never included in snapshots.
+`hclaw update <owner/space>` regenerates and force-pushes the Space files from
+the current source. It never touches the state bucket.
 
-## Prerequisites
+`hclaw doctor <owner/space>` checks Space configuration, bucket access, and
+runtime logs. `doctor --fix` only applies safe Space config repairs.
 
-- Hugging Face CLI installed as `hf`
-- `hf auth login` completed
-- Optional Telegram bot token from BotFather
-- Optional `TELEGRAM_PROXY` or `OPENCLAW_TELEGRAM_PROXY` if your Hugging Face Space cannot reach `api.telegram.org` directly
-- Optional `TELEGRAM_API_ROOT` or `OPENCLAW_TELEGRAM_API_ROOT` for an operator-controlled Telegram Bot API proxy root
+Important directories:
 
-## Notes
-
-- The generated Space is private by default.
-- Telegram is allowlisted by default; do not make a personal agent open to everyone.
-- The script reads the HF token with `hf auth token`, not Python package imports.
-- Private Spaces should use Telegram long polling, not webhooks. Telegram cannot call a private Space webhook because Hugging Face requires Space access through Hugging Face auth.
-- If the deployed Space logs `[telegram-probe] curl getMe failed` or Telegram `UND_ERR_CONNECT_TIMEOUT`, Hugging Face egress to Telegram is unavailable from that runtime. Rerun the bootstrap with `TELEGRAM_PROXY` set to a reachable HTTP/SOCKS proxy or `TELEGRAM_API_ROOT` set to a reachable Bot API proxy root.
+- `src/hclaw/`: CLI implementation.
+- `src/hf-bucket-client/`: typed Hugging Face Storage Bucket client.
+- `src/hf-state-sync/`: runtime snapshot/restore supervisor.
+- `src/vendor/hfjs-xet/`: vendored Xet upload path from `huggingface.js`.
+- `space/`: files used only in generated Hugging Face Spaces.
+- `docs/`: implementation plans and architecture notes.

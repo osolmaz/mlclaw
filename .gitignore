@@ -1,0 +1,4 @@
+node_modules/
+dist/*
+!dist/hf-state-sync.js
+!dist/hclaw.mjs

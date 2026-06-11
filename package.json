@@ -1,0 +1,26 @@
+{
+  "name": "huggingclaw",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "npm run build:state-sync && npm run build:hclaw",
+    "build:state-sync": "esbuild src/hf-state-sync/cli.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/hf-state-sync.js --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
+    "build:hclaw": "esbuild src/hclaw/cli.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/hclaw.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
+    "build:probe": "esbuild scripts/parity-probe.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/parity-probe.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
+    "check:secrets": "node scripts/check-secrets.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@huggingface/splitmix64-wasm": "^0.0.1",
+    "@huggingface/xetchunk-wasm": "^0.0.6",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
