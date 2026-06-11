@@ -2,6 +2,14 @@
   "name": "huggingclaw",
   "version": "0.1.1",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/osolmaz/huggingclaw"
+  },
+  "homepage": "https://github.com/osolmaz/huggingclaw#readme",
+  "bugs": {
+    "url": "https://github.com/osolmaz/huggingclaw/issues"
+  },
   "type": "module",
   "bin": {
     "hclaw": "dist/hclaw.mjs",
