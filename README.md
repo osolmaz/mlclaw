@@ -17,7 +17,7 @@ Telegram a few minutes after installing.
 With Node.js:
 
 ```bash
-npx huggingclaw
+npx huggingclaw bootstrap
 ```
 
 Without Node.js — the launcher fetches a pinned Node runtime into your user
@@ -40,13 +40,20 @@ You need:
 
 - A Hugging Face account, with a token from `HF_TOKEN`, `HF_TOKEN_PATH`,
   `$HF_HOME/token`, or `hf auth login`.
-- Optional: a Telegram bot token from [BotFather](https://t.me/botfather). Pass
-  it and Hugging Claw names the agent after your bot:
+- Optional: a Telegram bot token from [BotFather](https://t.me/botfather).
+  Paste it when prompted; Hugging Claw calls Telegram `getMe`, removes a
+  trailing `_bot` from the username, and names the Space and bucket after the
+  bot.
+
+For automation, pass the same answers as flags:
 
 ```bash
 npx huggingclaw bootstrap \
   --telegram-token-file ~/secrets/research_bot.env \
-  --telegram-user-id 1234567890
+  --telegram-user-id 1234567890 \
+  --hardware cpu-upgrade \
+  --sleep-time -1 \
+  --yes
 ```
 
 The install creates a private Docker Space, a private Storage Bucket, and the
@@ -89,10 +96,10 @@ bootstrapping again with the same bucket brings the same agent back.
 
 Honest numbers, since "deploy your own agent" tends to hide them:
 
-- **Space hardware:** Telegram and Discord deployments currently require
-  upgraded paid Space hardware. Free `cpu-basic` Spaces are still useful for
-  non-bot testing, but they are not expected to keep bot-platform connections
-  working. The cheapest paid CPU tier is enough for the gateway.
+- **Space hardware:** Telegram deployments currently require upgraded paid
+  Space hardware. Free `cpu-basic` Spaces are still useful for non-bot testing,
+  but they are not expected to keep Telegram connections working. The cheapest
+  paid CPU tier is enough for the gateway.
 - **Inference:** requests use your Hugging Face Inference Providers credits
   ($0.10/month on free accounts, $2.00 with PRO), then pay-as-you-go at
   provider rates. Small models like Qwen3-8B keep this at a few dollars a
@@ -107,13 +114,16 @@ Honest numbers, since "deploy your own agent" tends to hide them:
 
 ## Space hardware
 
-For Telegram or Discord, use upgraded Space hardware. Free `cpu-basic` Spaces
-are not expected to keep bot-platform connections working. The cheapest paid
-CPU tier is enough for the gateway:
+For Telegram, use upgraded Space hardware. Free `cpu-basic` Spaces are not
+expected to keep Telegram connections working. The cheapest paid CPU tier is
+enough for the gateway:
 
 ```bash
-hf spaces settings your-hf-username/research-agent --hardware cpu-upgrade --sleep-time -1
+hclaw settings your-hf-username/research-agent --hardware cpu-upgrade --sleep-time -1
 ```
+
+Hugging Claw warns before requesting paid hardware. In automation, pass `--yes`
+to confirm the cost prompt.
 
 Hugging Face uses `--sleep-time -1` to keep upgraded hardware always on. The
 equivalent API call is `POST /api/spaces/{owner}/{space}/hardware` with:

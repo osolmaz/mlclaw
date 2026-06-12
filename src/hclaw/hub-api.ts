@@ -13,7 +13,7 @@ export class HubApiError extends Error {
 
 type SpaceSecret = { key: string; updatedAt?: string };
 type SpaceVariable = { key: string; value?: string; updatedAt?: string };
-export type SpaceRuntime = { stage?: string; hardware?: unknown; requested_hardware?: unknown };
+export type SpaceRuntime = { stage?: string; hardware?: unknown; requested_hardware?: unknown; sleep_time?: number };
 export type HubCommitFile = { path: string; content: Uint8Array | Buffer };
 
 export class HubApi {
@@ -51,7 +51,10 @@ export class HubApi {
     }
   }
 
-  async createDockerSpace(repoId: string, options?: { private?: boolean; hardware?: string }): Promise<void> {
+  async createDockerSpace(
+    repoId: string,
+    options?: { private?: boolean; hardware?: string; sleepTimeSeconds?: number },
+  ): Promise<void> {
     const [owner, name] = splitRepoId(repoId);
     const me = await this.whoami();
     const payload: Record<string, unknown> = {
@@ -63,6 +66,9 @@ export class HubApi {
     };
     if (options?.hardware) {
       payload.hardware = options.hardware;
+    }
+    if (typeof options?.sleepTimeSeconds === "number") {
+      payload.sleepTimeSeconds = options.sleepTimeSeconds;
     }
     try {
       await this.requestJson("/api/repos/create", {
@@ -116,6 +122,26 @@ export class HubApi {
     await this.requestJson(`/api/spaces/${repoId}/restart`, {
       method: "POST",
       body: JSON.stringify({ factoryReboot }),
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  async requestSpaceHardware(repoId: string, hardware: string, sleepTimeSeconds?: number): Promise<SpaceRuntime> {
+    const payload: Record<string, unknown> = { flavor: hardware };
+    if (typeof sleepTimeSeconds === "number") {
+      payload.sleepTimeSeconds = sleepTimeSeconds;
+    }
+    return await this.requestJson<SpaceRuntime>(`/api/spaces/${repoId}/hardware`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  async setSpaceSleepTime(repoId: string, seconds: number): Promise<SpaceRuntime> {
+    return await this.requestJson<SpaceRuntime>(`/api/spaces/${repoId}/sleeptime`, {
+      method: "POST",
+      body: JSON.stringify({ seconds }),
       headers: { "Content-Type": "application/json" },
     });
   }

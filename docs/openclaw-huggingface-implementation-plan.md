@@ -221,12 +221,12 @@ Default command.
 6. Create a private Docker Space named `<agent>`.
 7. Choose Space hardware.
    - Default to `cpu-basic` only when no bot-platform integration is configured.
-   - If Telegram or Discord is configured, require upgraded hardware such as
-     `cpu-upgrade`.
+   - If Telegram is configured, require upgraded hardware such as `cpu-upgrade`.
    - Before requesting paid hardware, print a clear cost warning and require
      explicit user confirmation.
-   - In non-interactive mode, fail unless the user has supplied both the paid
-     hardware choice and an explicit confirmation flag.
+   - In non-interactive mode, fail unless the user has supplied an explicit
+     confirmation flag. If Telegram is configured and no hardware is supplied,
+     default to `cpu-upgrade`.
 8. Set Space sleep time from `--sleep-time` when provided. For bot-platform
    deployments, recommend `--sleep-time -1`.
 9. Generate the Space files from this GitHub source tree.
@@ -295,8 +295,8 @@ hclaw settings your-hf-username/research-agent --hardware cpu-upgrade --sleep-ti
 - `--hardware <flavor>` requests a Hugging Face Space hardware flavor.
 - `--sleep-time <seconds>` configures upgraded hardware sleep behavior.
 - `--sleep-time -1` keeps upgraded hardware always on.
-- Telegram or Discord deployments require `cpu-upgrade` or larger paid
-  hardware today. Free `cpu-basic` is only for non-bot testing.
+- Telegram deployments require `cpu-upgrade` or larger paid hardware today.
+  Free `cpu-basic` is only for non-bot testing.
 - Any command that requests paid hardware must warn that Hugging Face will bill
   the user's account and require explicit confirmation. Automation can pass
   `--yes`; interactive use should ask the user to confirm.
@@ -357,9 +357,9 @@ Live:
 ## Telegram Caveat
 
 The generated Space configures Telegram long polling for private Spaces.
-Telegram and Discord deployments currently require upgraded paid Space
-hardware. Free `cpu-basic` Spaces are fine for non-bot testing, but they are
-not expected to keep bot-platform connections working.
+Telegram deployments currently require upgraded paid Space hardware. Free
+`cpu-basic` Spaces are fine for non-bot testing, but they are not expected to
+keep Telegram connections working.
 
 Before HuggingClaw requests upgraded hardware, it must warn the user that this
 will bill their Hugging Face account and ask for explicit consent. If Hugging

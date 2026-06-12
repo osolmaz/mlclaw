@@ -1,68 +1,227 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
-import readline from "node:readline/promises";
+import { realpathSync } from "node:fs";
+import process from "node:process";
 import { randomBytes } from "node:crypto";
-import { stdin as input, stdout as output } from "node:process";
-import { parseArgs, stringFlag, boolFlag, type ParsedArgs } from "./args.js";
+import { pathToFileURL } from "node:url";
+import { Command, CommanderError, InvalidArgumentError } from "commander";
+import { cancel, confirm, intro, isCancel, note, outro, password, text } from "@clack/prompts";
 import { readToken } from "./auth.js";
 import { pushTemplateToSpace } from "./git.js";
 import { HubApi } from "./hub-api.js";
 import { namesFor, slugifyAgentName } from "./naming.js";
-import { getTelegramBot } from "./telegram.js";
+import { getTelegramBot, type TelegramBot } from "./telegram.js";
 
-const DEFAULT_MODEL = "huggingface/Qwen/Qwen3-8B";
-const DEFAULT_HARDWARE = "cpu-basic";
+export const DEFAULT_MODEL = "huggingface/Qwen/Qwen3-8B";
+export const DEFAULT_HARDWARE = "cpu-basic";
+export const TELEGRAM_HARDWARE = "cpu-upgrade";
+export const TELEGRAM_SLEEP_TIME = -1;
+
 const STALE_PATH_VARS = ["OPENCLAW_STATE_DIR", "OPENCLAW_WORKSPACE_DIR", "OPENCLAW_CONFIG_PATH"];
+const PAID_HARDWARE_COST_NOTE =
+  "Telegram requires upgraded Hugging Face Space hardware today. The cheapest option is cpu-upgrade at $0.03/hour, about $22/month if kept always on.";
 
-async function main(argv: string[]): Promise<number> {
-  const args = parseArgs(argv);
-  if (boolFlag(args, "help")) {
-    printUsage();
-    return 0;
-  }
-  const token = await readToken();
-  const hub = new HubApi({ token });
-  switch (args.command) {
-    case "bootstrap":
-      await bootstrap(args, hub, token);
-      return 0;
-    case "update":
-      await update(args, hub, token);
-      return 0;
-    case "doctor":
-      await doctor(args, hub);
-      return 0;
-    default:
-      printUsage();
-      return 2;
+type BootstrapOptions = {
+  owner?: string;
+  name?: string;
+  telegramToken?: string;
+  telegramTokenFile?: string;
+  telegramUserId?: string;
+  telegramApiRoot?: string;
+  telegramProxy?: string;
+  hardware?: string;
+  sleepTime?: number;
+  model?: string;
+  gatewayToken?: string;
+  yes?: boolean;
+};
+
+type UpdateOptions = {
+  force?: boolean;
+};
+
+type DoctorOptions = {
+  fix?: boolean;
+  bucket?: string;
+};
+
+type SettingsOptions = {
+  hardware?: string;
+  sleepTime?: number;
+  yes?: boolean;
+};
+
+type CliRuntime = {
+  env?: NodeJS.ProcessEnv;
+  stdout?: Pick<typeof console, "log">;
+  stderr?: Pick<typeof console, "error">;
+  readToken?: typeof readToken;
+  hubFactory?: (token: string) => HubApi;
+  pushTemplateToSpace?: typeof pushTemplateToSpace;
+  getTelegramBot?: (token: string, apiRoot?: string) => Promise<TelegramBot>;
+  prompt?: PromptRuntime;
+};
+
+type PromptRuntime = {
+  isInteractive: () => boolean;
+  intro: (message: string) => void;
+  outro: (message: string) => void;
+  note: (message: string, title?: string) => void;
+  text: (params: { message: string; placeholder?: string; initialValue?: string }) => Promise<string | symbol>;
+  password: (params: { message: string; placeholder?: string }) => Promise<string | symbol>;
+  confirm: (params: { message: string; initialValue?: boolean }) => Promise<boolean | symbol>;
+  cancel: (message: string) => void;
+};
+
+const defaultPrompt: PromptRuntime = {
+  isInteractive: () => Boolean(process.stdin.isTTY && process.stdout.isTTY),
+  intro,
+  outro,
+  note,
+  text,
+  password,
+  confirm,
+  cancel,
+};
+
+function createRuntime(overrides: CliRuntime = {}): Required<CliRuntime> {
+  return {
+    env: overrides.env ?? process.env,
+    stdout: overrides.stdout ?? console,
+    stderr: overrides.stderr ?? console,
+    readToken: overrides.readToken ?? readToken,
+    hubFactory: overrides.hubFactory ?? ((token) => new HubApi({ token })),
+    pushTemplateToSpace: overrides.pushTemplateToSpace ?? pushTemplateToSpace,
+    getTelegramBot: overrides.getTelegramBot ?? getTelegramBot,
+    prompt: overrides.prompt ?? defaultPrompt,
+  };
+}
+
+export function createProgram(runtimeOverrides: CliRuntime = {}): Command {
+  const runtime = createRuntime(runtimeOverrides);
+  const program = new Command();
+  program
+    .name("hclaw")
+    .description("Deploy OpenClaw to a private Hugging Face Space and bucket")
+    .showHelpAfterError()
+    .exitOverride((err) => {
+      throw err;
+    });
+
+  program
+    .command("bootstrap", { isDefault: true })
+    .description("Create or update a private Hugging Face OpenClaw deployment")
+    .option("--owner <owner>", "Hugging Face user or organization")
+    .option("--name <name>", "Agent, Space, and bucket base name")
+    .option("--telegram-token <token>", "Telegram bot token")
+    .option("--telegram-token-file <path>", "File containing TELEGRAM_BOT_TOKEN=... or a raw token")
+    .option("--telegram-user-id <id>", "Allowed Telegram user ID")
+    .option("--telegram-api-root <url>", "Telegram API root override")
+    .option("--telegram-proxy <url>", "Telegram proxy URL override")
+    .option("--hardware <flavor>", "Hugging Face Space hardware flavor")
+    .option("--sleep-time <seconds>", "Space sleep timeout in seconds; -1 means never sleep", parseInteger)
+    .option("--model <model>", "OpenClaw model identifier", DEFAULT_MODEL)
+    .option("--gateway-token <token>", "OpenClaw gateway token")
+    .option("--yes", "Confirm paid hardware prompts for automation", false)
+    .action(async (opts: BootstrapOptions) => {
+      await bootstrap(opts, runtime);
+    });
+
+  program
+    .command("update")
+    .description("Regenerate and upload current HuggingClaw Space files")
+    .argument("<owner/space>", "Hugging Face Space repo ID")
+    .option("--force", "Update even if the Space does not look like HuggingClaw", false)
+    .action(async (repoId: string, opts: UpdateOptions) => {
+      const token = await runtime.readToken(runtime.env);
+      const hub = runtime.hubFactory(token);
+      await update(repoId, opts, hub, token, runtime);
+    });
+
+  program
+    .command("doctor")
+    .description("Check a HuggingClaw Space deployment")
+    .argument("<owner/space>", "Hugging Face Space repo ID")
+    .option("--fix", "Apply safe config repairs", false)
+    .option("--bucket <owner/bucket>", "State bucket to set when missing")
+    .action(async (repoId: string, opts: DoctorOptions) => {
+      const token = await runtime.readToken(runtime.env);
+      const hub = runtime.hubFactory(token);
+      await doctor(repoId, opts, hub, runtime);
+    });
+
+  program
+    .command("settings")
+    .description("Update Hugging Face Space hardware and sleep settings")
+    .argument("<owner/space>", "Hugging Face Space repo ID")
+    .option("--hardware <flavor>", "Hugging Face Space hardware flavor")
+    .option("--sleep-time <seconds>", "Space sleep timeout in seconds; -1 means never sleep", parseInteger)
+    .option("--yes", "Confirm paid hardware prompts for automation", false)
+    .action(async (repoId: string, opts: SettingsOptions) => {
+      const token = await runtime.readToken(runtime.env);
+      const hub = runtime.hubFactory(token);
+      await settings(repoId, opts, hub, runtime);
+    });
+
+  return program;
+}
+
+export async function main(argv = process.argv.slice(2), runtimeOverrides: CliRuntime = {}): Promise<number> {
+  const program = createProgram(runtimeOverrides);
+  try {
+    await program.parseAsync(argv, { from: "user" });
+    return typeof process.exitCode === "number" && process.exitCode !== 0 ? process.exitCode : 0;
+  } catch (err) {
+    if (err instanceof CommanderError) {
+      return err.exitCode;
+    }
+    const runtime = createRuntime(runtimeOverrides);
+    runtime.stderr.error(err instanceof Error ? err.message : String(err));
+    return 1;
   }
 }
 
-async function bootstrap(args: ParsedArgs, hub: HubApi, hfToken: string): Promise<void> {
+async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>): Promise<void> {
+  runtime.prompt.intro("HuggingClaw bootstrap");
+  const hfToken = await runtime.readToken(runtime.env);
+  const hub = runtime.hubFactory(hfToken);
   const me = await hub.whoami();
-  const owner = stringFlag(args, "owner") ?? me.name;
-  const telegramToken = await readTelegramToken(args);
-  const bot = telegramToken ? await getTelegramBot(telegramToken, stringFlag(args, "telegram-api-root")) : null;
-  const agentName = slugifyAgentName(
-    stringFlag(args, "name") ?? bot?.username ?? await promptRequired("Agent name"),
-  );
-  const telegramUserId = stringFlag(args, "telegram-user-id") ?? process.env.TELEGRAM_ALLOWED_USERS;
+  const owner = opts.owner ?? me.name;
+  const telegramToken = await readTelegramToken(opts, runtime);
+  const bot = telegramToken ? await runtime.getTelegramBot(telegramToken, opts.telegramApiRoot) : null;
+  const agentName = slugifyAgentName(opts.name ?? bot?.username ?? await promptRequired("Agent name", runtime));
+  const telegramUserId = opts.telegramUserId ?? runtime.env.TELEGRAM_ALLOWED_USERS
+    ?? (telegramToken ? await promptRequired("Telegram allowed user ID", runtime) : undefined);
+
   if (telegramToken && !telegramUserId) {
     throw new Error("Telegram bot token was provided, but --telegram-user-id is missing");
   }
 
+  const paidHardware = await resolveHardware({
+    ...(opts.hardware ? { requestedHardware: opts.hardware } : {}),
+    ...(typeof opts.sleepTime === "number" ? { requestedSleepTime: opts.sleepTime } : {}),
+    needsTelegram: Boolean(telegramToken),
+    yes: Boolean(opts.yes),
+    runtime,
+  });
   const names = namesFor(owner, agentName);
-  const hardware = stringFlag(args, "hardware") ?? DEFAULT_HARDWARE;
-  const model = stringFlag(args, "model") ?? DEFAULT_MODEL;
-  const providedGatewayToken = stringFlag(args, "gateway-token");
+  const model = opts.model ?? DEFAULT_MODEL;
+  const providedGatewayToken = opts.gatewayToken;
   const gatewayToken = providedGatewayToken ?? randomBytes(32).toString("base64url");
 
-  console.log(`Creating private bucket ${names.bucket}`);
+  runtime.stdout.log(`Creating private bucket ${names.bucket}`);
   await hub.createBucket(names.bucket, true);
-  console.log(`Creating private Space ${names.space}`);
-  await hub.createDockerSpace(names.space, { private: true, hardware });
-  console.log("Generating Space files from huggingclaw source");
-  const { templateRev } = await pushTemplateToSpace({ targetRepo: names.space, token: hfToken });
+  runtime.stdout.log(`Creating private Space ${names.space}`);
+  await hub.createDockerSpace(names.space, {
+    private: true,
+    hardware: paidHardware.hardware,
+    ...(typeof paidHardware.sleepTime === "number" ? { sleepTimeSeconds: paidHardware.sleepTime } : {}),
+  });
+  if (telegramToken || opts.hardware || typeof opts.sleepTime === "number") {
+    await hub.requestSpaceHardware(names.space, paidHardware.hardware, paidHardware.sleepTime);
+  }
+  runtime.stdout.log("Generating Space files from huggingclaw source");
+  const { templateRev } = await runtime.pushTemplateToSpace({ targetRepo: names.space, token: hfToken });
 
   await setDeploymentVariables(hub, names.space, {
     OPENCLAW_HF_STATE_BUCKET: names.bucket,
@@ -75,55 +234,52 @@ async function bootstrap(args: ParsedArgs, hub: HubApi, hfToken: string): Promis
     HF_TOKEN: hfToken,
     ...(telegramToken ? { TELEGRAM_BOT_TOKEN: telegramToken } : {}),
     ...(telegramUserId ? { TELEGRAM_ALLOWED_USERS: telegramUserId } : {}),
-    ...(stringFlag(args, "telegram-proxy") ? { TELEGRAM_PROXY: stringFlag(args, "telegram-proxy") as string } : {}),
-    ...(stringFlag(args, "telegram-api-root")
-      ? { TELEGRAM_API_ROOT: stringFlag(args, "telegram-api-root") as string }
-      : {}),
+    ...(opts.telegramProxy ? { TELEGRAM_PROXY: opts.telegramProxy } : {}),
+    ...(opts.telegramApiRoot ? { TELEGRAM_API_ROOT: opts.telegramApiRoot } : {}),
   });
   await hub.restartSpace(names.space, true);
 
-  console.log("");
-  console.log(`Space:  https://huggingface.co/spaces/${names.space}`);
-  console.log(`Bucket: https://huggingface.co/buckets/${names.bucket}`);
-  console.log(`Agent:  ${agentName}${bot ? ` (@${bot.username})` : ""}`);
+  runtime.stdout.log("");
+  runtime.stdout.log(`Space:  https://huggingface.co/spaces/${names.space}`);
+  runtime.stdout.log(`Bucket: https://huggingface.co/buckets/${names.bucket}`);
+  runtime.stdout.log(`Agent:  ${agentName}${bot ? ` (@${bot.username})` : ""}`);
+  runtime.stdout.log(`Hardware: ${paidHardware.hardware}${typeof paidHardware.sleepTime === "number" ? ` (sleep-time ${paidHardware.sleepTime})` : ""}`);
   if (!providedGatewayToken) {
-    console.log("");
-    console.log("Generated OpenClaw gateway token:");
-    console.log(`  ${gatewayToken}`);
-    console.log("");
-    console.log("Save this token now. Hugging Face stores it as a write-only Space Secret.");
+    runtime.stdout.log("");
+    runtime.stdout.log("Generated OpenClaw gateway token:");
+    runtime.stdout.log(`  ${gatewayToken}`);
+    runtime.stdout.log("");
+    runtime.stdout.log("Save this token now. Hugging Face stores it as a write-only Space Secret.");
   }
-  console.log("Restart requested. Build logs may take a few minutes to appear.");
+  runtime.prompt.outro("Restart requested. Build logs may take a few minutes to appear.");
 }
 
-async function update(args: ParsedArgs, hub: HubApi, hfToken: string): Promise<void> {
-  const repoId = args.positionals[0];
-  if (!repoId) {
-    throw new Error("usage: hclaw update <owner/space>");
-  }
+async function update(
+  repoId: string,
+  opts: UpdateOptions,
+  hub: HubApi,
+  hfToken: string,
+  runtime: Required<CliRuntime>,
+): Promise<void> {
   const variables = await hub.getSpaceVariables(repoId);
-  if (!variables.has("OPENCLAW_HF_TEMPLATE_REV") && !boolFlag(args, "force")) {
-    throw new Error(`${repoId} does not look like a Hugging Claw deployment; pass --force to update anyway`);
+  if (!variables.has("OPENCLAW_HF_TEMPLATE_REV") && !opts.force) {
+    throw new Error(`${repoId} does not look like a HuggingClaw deployment; pass --force to update anyway`);
   }
-  console.log(`Generating current Space files into ${repoId}`);
-  const { templateRev } = await pushTemplateToSpace({ targetRepo: repoId, token: hfToken });
+  runtime.stdout.log(`Generating current Space files into ${repoId}`);
+  const { templateRev } = await runtime.pushTemplateToSpace({ targetRepo: repoId, token: hfToken });
   await hub.addSpaceVariable(repoId, "OPENCLAW_HF_TEMPLATE_REV", templateRev);
   await hub.restartSpace(repoId, true);
-  await doctor({ ...args, flags: new Map([...args.flags, ["fix", true]]), positionals: [repoId] }, hub);
+  await doctor(repoId, { fix: true }, hub, runtime);
 }
 
-async function doctor(args: ParsedArgs, hub: HubApi): Promise<void> {
-  const repoId = args.positionals[0];
-  if (!repoId) {
-    throw new Error("usage: hclaw doctor <owner/space> [--fix]");
-  }
-  const fix = boolFlag(args, "fix");
+async function doctor(repoId: string, opts: DoctorOptions, hub: HubApi, runtime: Required<CliRuntime>): Promise<void> {
+  const fix = Boolean(opts.fix);
   const variables = await hub.getSpaceVariables(repoId);
   const secrets = await hub.getSpaceSecrets(repoId);
   const issues: string[] = [];
   const fixed: string[] = [];
 
-  const bucket = variables.get("OPENCLAW_HF_STATE_BUCKET")?.value ?? stringFlag(args, "bucket");
+  const bucket = variables.get("OPENCLAW_HF_STATE_BUCKET")?.value ?? opts.bucket;
   if (!bucket) {
     issues.push("OPENCLAW_HF_STATE_BUCKET is missing");
   } else if (!variables.has("OPENCLAW_HF_STATE_BUCKET") && fix) {
@@ -152,7 +308,7 @@ async function doctor(args: ParsedArgs, hub: HubApi): Promise<void> {
     await hub.assertBucketAccessible(bucket);
   }
 
-  const runtime = await hub.getSpaceRuntime(repoId);
+  const runtimeInfo = await hub.getSpaceRuntime(repoId);
   let logs = "";
   try {
     logs = await hub.fetchSpaceLogs(repoId, "run");
@@ -168,19 +324,45 @@ async function doctor(args: ParsedArgs, hub: HubApi): Promise<void> {
     issues.push("run logs do not show a recent uploaded snapshot yet");
   }
 
-  console.log(`Space: ${repoId}`);
-  console.log(`Stage: ${runtime.stage ?? "unknown"}`);
-  console.log(`Hardware: ${formatRuntimeValue(runtime.requested_hardware ?? runtime.hardware)}`);
+  runtime.stdout.log(`Space: ${repoId}`);
+  runtime.stdout.log(`Stage: ${runtimeInfo.stage ?? "unknown"}`);
+  runtime.stdout.log(`Hardware: ${formatRuntimeValue(runtimeInfo.requested_hardware ?? runtimeInfo.hardware)}`);
+  if (typeof runtimeInfo.sleep_time === "number") {
+    runtime.stdout.log(`Sleep time: ${runtimeInfo.sleep_time}`);
+  }
   if (fixed.length > 0) {
-    console.log(`Fixed: ${fixed.join(", ")}`);
+    runtime.stdout.log(`Fixed: ${fixed.join(", ")}`);
   }
   if (issues.length === 0) {
-    console.log("Doctor: clean");
+    runtime.stdout.log("Doctor: clean");
   } else {
-    console.log("Doctor findings:");
+    runtime.stdout.log("Doctor findings:");
     for (const issue of issues) {
-      console.log(`- ${issue}`);
+      runtime.stdout.log(`- ${issue}`);
     }
+  }
+}
+
+async function settings(repoId: string, opts: SettingsOptions, hub: HubApi, runtime: Required<CliRuntime>): Promise<void> {
+  if (!opts.hardware && typeof opts.sleepTime !== "number") {
+    throw new Error("usage: hclaw settings <owner/space> [--hardware flavor] [--sleep-time seconds]");
+  }
+  if (opts.hardware && isPaidHardware(opts.hardware)) {
+    await confirmPaidHardware({
+      hardware: opts.hardware,
+      ...(typeof opts.sleepTime === "number" ? { sleepTime: opts.sleepTime } : {}),
+      yes: Boolean(opts.yes),
+      runtime,
+    });
+  }
+  const result = opts.hardware
+    ? await hub.requestSpaceHardware(repoId, opts.hardware, opts.sleepTime)
+    : await hub.setSpaceSleepTime(repoId, opts.sleepTime as number);
+  runtime.stdout.log("Space settings updated");
+  runtime.stdout.log(`Space: ${repoId}`);
+  runtime.stdout.log(`Hardware: ${formatRuntimeValue(result.requested_hardware ?? result.hardware)}`);
+  if (typeof opts.sleepTime === "number") {
+    runtime.stdout.log(`Sleep time: ${opts.sleepTime}`);
   }
 }
 
@@ -220,48 +402,130 @@ async function setDeploymentSecrets(
   }
 }
 
-async function readTelegramToken(args: ParsedArgs): Promise<string | null> {
-  const direct = stringFlag(args, "telegram-token") ?? process.env.TELEGRAM_BOT_TOKEN;
+async function readTelegramToken(opts: BootstrapOptions, runtime: Required<CliRuntime>): Promise<string | null> {
+  const direct = opts.telegramToken ?? runtime.env.TELEGRAM_BOT_TOKEN;
   if (direct) {
     return direct;
   }
-  const file = stringFlag(args, "telegram-token-file");
-  if (!file) {
+  if (opts.telegramTokenFile) {
+    const raw = await fs.readFile(opts.telegramTokenFile, "utf8");
+    const match = raw.match(/(?:^|\n)\s*TELEGRAM_BOT_TOKEN\s*=\s*['"]?([^'"\n]+)['"]?/);
+    return (match?.[1] ?? raw.trim()).trim();
+  }
+  if (!runtime.prompt.isInteractive()) {
     return null;
   }
-  const raw = await fs.readFile(file, "utf8");
-  const match = raw.match(/(?:^|\n)\s*TELEGRAM_BOT_TOKEN\s*=\s*['"]?([^'"\n]+)['"]?/);
-  return (match?.[1] ?? raw.trim()).trim();
+  const wantsTelegram = await promptConfirm("Connect a Telegram bot now?", false, runtime);
+  if (!wantsTelegram) {
+    return null;
+  }
+  const value = await runtime.prompt.password({
+    message: "Telegram bot token",
+    placeholder: "123456:ABC...",
+  });
+  return readPromptValue(value, "Telegram bot token");
 }
 
-async function promptRequired(label: string): Promise<string> {
-  const rl = readline.createInterface({ input, output });
-  try {
-    const value = (await rl.question(`${label}: `)).trim();
-    if (!value) {
-      throw new Error(`${label} is required`);
+async function resolveHardware(params: {
+  requestedHardware?: string;
+  requestedSleepTime?: number;
+  needsTelegram: boolean;
+  yes: boolean;
+  runtime: Required<CliRuntime>;
+}): Promise<{ hardware: string; sleepTime?: number }> {
+  if (!params.needsTelegram) {
+    if (params.requestedHardware && isPaidHardware(params.requestedHardware)) {
+      await confirmPaidHardware({
+        hardware: params.requestedHardware,
+        ...(typeof params.requestedSleepTime === "number" ? { sleepTime: params.requestedSleepTime } : {}),
+        yes: params.yes,
+        runtime: params.runtime,
+      });
     }
-    return value;
-  } finally {
-    rl.close();
+    return {
+      hardware: params.requestedHardware ?? DEFAULT_HARDWARE,
+      ...(typeof params.requestedSleepTime === "number" ? { sleepTime: params.requestedSleepTime } : {}),
+    };
+  }
+  const hardware = params.requestedHardware ?? TELEGRAM_HARDWARE;
+  if (!isPaidHardware(hardware)) {
+    throw new Error(`Telegram requires upgraded paid Space hardware today; use --hardware ${TELEGRAM_HARDWARE}`);
+  }
+  const sleepTime = params.requestedSleepTime ?? TELEGRAM_SLEEP_TIME;
+  await confirmPaidHardware({
+    hardware,
+    sleepTime,
+    yes: params.yes,
+    runtime: params.runtime,
+  });
+  return { hardware, sleepTime };
+}
+
+async function confirmPaidHardware(params: {
+  hardware: string;
+  sleepTime?: number;
+  yes: boolean;
+  runtime: Required<CliRuntime>;
+}): Promise<void> {
+  if (params.yes) {
+    return;
+  }
+  if (!params.runtime.prompt.isInteractive()) {
+    throw new Error("paid Hugging Face Space hardware requires explicit consent; pass --yes to confirm");
+  }
+  params.runtime.prompt.note(
+    `${PAID_HARDWARE_COST_NOTE}\n\nRequested hardware: ${params.hardware}${
+      typeof params.sleepTime === "number" ? `\nRequested sleep-time: ${params.sleepTime}` : ""
+    }`,
+    "Cost warning",
+  );
+  const ok = await promptConfirm("Request paid Hugging Face Space hardware?", false, params.runtime);
+  if (!ok) {
+    throw new Error("paid hardware was not confirmed");
   }
 }
 
-function printUsage(): void {
-  console.log(`usage:
-  hclaw [bootstrap] [--owner OWNER] [--name NAME] [--telegram-token TOKEN|--telegram-token-file PATH] [--telegram-user-id ID]
-  hclaw update <owner/space> [--force]
-  hclaw doctor <owner/space> [--fix] [--bucket owner/bucket]
-
-defaults:
-  model:    ${DEFAULT_MODEL}
-  hardware: ${DEFAULT_HARDWARE}`);
+async function promptRequired(label: string, runtime: Required<CliRuntime>): Promise<string> {
+  if (!runtime.prompt.isInteractive()) {
+    throw new Error(`${label} is required`);
+  }
+  const value = await runtime.prompt.text({ message: label });
+  return readPromptValue(value, label);
 }
 
-main(process.argv.slice(2)).then(
-  (code) => process.exit(code),
-  (err) => {
-    console.error(err instanceof Error ? err.message : String(err));
-    process.exit(1);
-  },
-);
+async function promptConfirm(label: string, initialValue: boolean, runtime: Required<CliRuntime>): Promise<boolean> {
+  const value = await runtime.prompt.confirm({ message: label, initialValue });
+  if (isCancel(value)) {
+    runtime.prompt.cancel("Cancelled");
+    throw new Error("cancelled");
+  }
+  return Boolean(value);
+}
+
+function readPromptValue(value: string | symbol, label: string): string {
+  if (isCancel(value)) {
+    cancel("Cancelled");
+    throw new Error("cancelled");
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error(`${label} is required`);
+  }
+  return trimmed;
+}
+
+function parseInteger(value: string): number {
+  if (!/^-?\d+$/.test(value)) {
+    throw new InvalidArgumentError("expected an integer");
+  }
+  return Number.parseInt(value, 10);
+}
+
+function isPaidHardware(hardware: string): boolean {
+  return hardware !== DEFAULT_HARDWARE;
+}
+
+const invokedPath = process.argv[1] ? pathToFileURL(realpathSync(process.argv[1])).href : "";
+if (import.meta.url === invokedPath) {
+  main().then((code) => process.exit(code));
+}

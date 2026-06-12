@@ -54,4 +54,59 @@ describe("HubApi Space commits", () => {
       },
     ]);
   });
+
+  it("requests Space hardware with Hugging Face's flavor payload", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const hub = new HubApi({
+      token: "hf_test_token",
+      fetch: async (url, init) => {
+        requests.push({ url: String(url), init: init ?? {} });
+        return new Response(JSON.stringify({ hardware: { current: "cpu-upgrade", requested: "cpu-upgrade" } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      },
+    });
+
+    await hub.requestSpaceHardware("alice/research", "cpu-upgrade", -1);
+
+    expect(requests).toHaveLength(1);
+    const request = requests[0]!;
+    expect(request.url).toBe("https://huggingface.co/api/spaces/alice/research/hardware");
+    expect(request.init.method).toBe("POST");
+    expect(request.init.headers).toMatchObject({
+      Authorization: "Bearer hf_test_token",
+      "Content-Type": "application/json",
+    });
+    expect(JSON.parse(String(request.init.body))).toEqual({
+      flavor: "cpu-upgrade",
+      sleepTimeSeconds: -1,
+    });
+  });
+
+  it("sets Space sleep time with Hugging Face's seconds payload", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const hub = new HubApi({
+      token: "hf_test_token",
+      fetch: async (url, init) => {
+        requests.push({ url: String(url), init: init ?? {} });
+        return new Response(JSON.stringify({ sleep_time: -1 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      },
+    });
+
+    await hub.setSpaceSleepTime("alice/research", -1);
+
+    expect(requests).toHaveLength(1);
+    const request = requests[0]!;
+    expect(request.url).toBe("https://huggingface.co/api/spaces/alice/research/sleeptime");
+    expect(request.init.method).toBe("POST");
+    expect(request.init.headers).toMatchObject({
+      Authorization: "Bearer hf_test_token",
+      "Content-Type": "application/json",
+    });
+    expect(JSON.parse(String(request.init.body))).toEqual({ seconds: -1 });
+  });
 });
