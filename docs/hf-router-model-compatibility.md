@@ -85,6 +85,17 @@ The shared router exposes its current chat model catalog at:
 GET https://router.huggingface.co/v1/models
 ```
 
+The human-readable Hugging Face catalog is:
+
+```text
+https://huggingface.co/inference/models?asc_sort=pricingInput
+```
+
+That page is useful for browsing supported Inference Providers models sorted by
+input-token price. For OpenClaw compatibility decisions, still treat the
+`/v1/models` router catalog and direct `/v1/chat/completions` probes as the
+source of truth.
+
 On 2026-06-12, that endpoint returned 118 router models. Filtering for
 Gemma/Qwen-like IDs returned 42 entries. The router catalog is the best
 availability signal: if a repo is not present there, direct `/v1/chat/completions`
