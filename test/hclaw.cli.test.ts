@@ -129,6 +129,10 @@ describe("hclaw CLI", () => {
       ],
     });
     expect(hub.calls).toContainEqual({
+      name: "requestSpaceHardware",
+      args: ["alice/research", "cpu-upgrade", -1],
+    });
+    expect(hub.calls).toContainEqual({
       name: "addSpaceSecret",
       args: ["alice/research", "TELEGRAM_BOT_TOKEN", "telegram-token"],
     });

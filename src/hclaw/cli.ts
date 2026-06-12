@@ -217,6 +217,9 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
     hardware: paidHardware.hardware,
     ...(typeof paidHardware.sleepTime === "number" ? { sleepTimeSeconds: paidHardware.sleepTime } : {}),
   });
+  if (telegramToken || opts.hardware || typeof opts.sleepTime === "number") {
+    await hub.requestSpaceHardware(names.space, paidHardware.hardware, paidHardware.sleepTime);
+  }
   runtime.stdout.log("Generating Space files from huggingclaw source");
   const { templateRev } = await runtime.pushTemplateToSpace({ targetRepo: names.space, token: hfToken });
 
