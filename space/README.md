@@ -5,7 +5,7 @@ colorFrom: yellow
 colorTo: red
 sdk: docker
 app_port: 7860
-suggested_hardware: cpu-basic
+suggested_hardware: cpu-upgrade
 secrets:
   - OPENCLAW_GATEWAY_TOKEN
   - HF_TOKEN
@@ -21,8 +21,9 @@ secrets:
   <img src="assets/huggingclaw.svg" alt="Hugging Claw" width="160">
 </p>
 
-This private Space runs your personal OpenClaw agent. Durable state is stored
-in a private Hugging Face Storage Bucket configured by `OPENCLAW_HF_STATE_BUCKET`.
+This private Space runs your personal OpenClaw agent and connects it to
+Telegram by long polling. Durable state is stored in a private Hugging Face
+Storage Bucket configured by `OPENCLAW_HF_STATE_BUCKET`.
 
 OpenClaw runs on local Space disk. The bucket is never mounted as a live
 filesystem; `hf-state-sync` restores verified snapshots on boot and uploads new

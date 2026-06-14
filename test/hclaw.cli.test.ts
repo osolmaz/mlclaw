@@ -105,7 +105,7 @@ function createRuntime(hub: HubApi, prompt: ReturnType<typeof createPrompt>["pro
 describe("hclaw CLI", () => {
   it("runs bootstrap as the default command and prompts for Telegram setup", async () => {
     const hub = createFakeHub();
-    const { prompt, notes } = createPrompt([true, "telegram-token", "7216393410", true]);
+    const { prompt, notes } = createPrompt(["telegram-token", "7216393410", true]);
 
     const code = await main(["--gateway-token", "gateway-token"], createRuntime(hub, prompt));
 
@@ -162,23 +162,21 @@ describe("hclaw CLI", () => {
     expect(hub.calls.some((call) => call.name === "createDockerSpace")).toBe(false);
   });
 
-  it("fails non-interactive paid bootstrap hardware without consent even without Telegram", async () => {
+  it("fails non-interactive bootstrap without Telegram token", async () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt([], false);
     const stderr: string[] = [];
 
     const code = await main([
       "bootstrap",
-      "--name",
-      "research",
-      "--hardware",
-      "cpu-upgrade",
+      "--telegram-user-id",
+      "7216393410",
       "--gateway-token",
       "gateway-token",
     ], createRuntime(hub, prompt, stderr));
 
     expect(code).toBe(1);
-    expect(stderr.join("\n")).toContain("paid Hugging Face Space hardware requires explicit consent");
+    expect(stderr.join("\n")).toContain("Telegram bot token is required");
     expect(hub.calls.some((call) => call.name === "createDockerSpace")).toBe(false);
   });
 

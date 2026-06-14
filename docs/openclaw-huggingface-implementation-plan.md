@@ -212,23 +212,22 @@ huggingface/Qwen/Qwen3-8B
 Default command.
 
 1. Read HF auth from `HF_TOKEN` or the standard Hugging Face token cache.
-2. Optionally read Telegram token from `--telegram-token`,
-   `--telegram-token-file`, or `TELEGRAM_BOT_TOKEN`.
-3. If Telegram is present, call Telegram `getMe`.
+2. Read the required Telegram token from `--telegram-token`,
+   `--telegram-token-file`, `TELEGRAM_BOT_TOKEN`, or the interactive prompt.
+3. Call Telegram `getMe` to validate the token and discover the bot username.
 4. Derive the default agent name from the bot username by removing a trailing
    `_bot`, `-bot`, or `bot`.
 5. Create a private bucket named `<agent>-data`.
 6. Create a private Docker Space named `<agent>`.
 7. Choose Space hardware.
-   - Default to `cpu-basic` only when no bot-platform integration is configured.
-   - If Telegram is configured, require upgraded hardware such as `cpu-upgrade`.
+   - Require upgraded hardware such as `cpu-upgrade` because Telegram is the
+     main interaction surface for the deployment.
    - Before requesting paid hardware, print a clear cost warning and require
      explicit user confirmation.
    - In non-interactive mode, fail unless the user has supplied an explicit
-     confirmation flag. If Telegram is configured and no hardware is supplied,
-     default to `cpu-upgrade`.
-8. Set Space sleep time from `--sleep-time` when provided. For bot-platform
-   deployments, recommend `--sleep-time -1`.
+     confirmation flag. If no hardware is supplied, default to `cpu-upgrade`.
+8. Set Space sleep time from `--sleep-time` when provided. Default Telegram
+   deployments to `--sleep-time -1`.
 9. Generate the Space files from this GitHub source tree.
 10. Upload/commit the generated files into the user's Space repo.
 11. Set variables/secrets.
@@ -244,7 +243,7 @@ hclaw bootstrap \
   --telegram-user-id 1234567890
 ```
 
-Production bot-platform example:
+Automation example:
 
 ```bash
 hclaw bootstrap \
@@ -296,7 +295,7 @@ hclaw settings your-hf-username/research-agent --hardware cpu-upgrade --sleep-ti
 - `--sleep-time <seconds>` configures upgraded hardware sleep behavior.
 - `--sleep-time -1` keeps upgraded hardware always on.
 - Telegram deployments require `cpu-upgrade` or larger paid hardware today.
-  Free `cpu-basic` is only for non-bot testing.
+  Free `cpu-basic` is not expected to keep Telegram connections working.
 - Any command that requests paid hardware must warn that Hugging Face will bill
   the user's account and require explicit confirmation. Automation can pass
   `--yes`; interactive use should ask the user to confirm.
@@ -358,8 +357,7 @@ Live:
 
 The generated Space configures Telegram long polling for private Spaces.
 Telegram deployments currently require upgraded paid Space hardware. Free
-`cpu-basic` Spaces are fine for non-bot testing, but they are not expected to
-keep Telegram connections working.
+`cpu-basic` Spaces are not expected to keep Telegram connections working.
 
 Before HuggingClaw requests upgraded hardware, it must warn the user that this
 will bill their Hugging Face account and ask for explicit consent. If Hugging

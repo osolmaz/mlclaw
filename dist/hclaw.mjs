@@ -9586,16 +9586,15 @@ async function bootstrap(opts, runtime) {
   const me2 = await hub.whoami();
   const owner = opts.owner ?? me2.name;
   const telegramToken = await readTelegramToken(opts, runtime);
-  const bot = telegramToken ? await runtime.getTelegramBot(telegramToken, opts.telegramApiRoot) : null;
-  const agentName = slugifyAgentName(opts.name ?? bot?.username ?? await promptRequired("Agent name", runtime));
-  const telegramUserId = opts.telegramUserId ?? runtime.env.TELEGRAM_ALLOWED_USERS ?? (telegramToken ? await promptRequired("Telegram allowed user ID", runtime) : void 0);
-  if (telegramToken && !telegramUserId) {
-    throw new Error("Telegram bot token was provided, but --telegram-user-id is missing");
+  const bot = await runtime.getTelegramBot(telegramToken, opts.telegramApiRoot);
+  const agentName = slugifyAgentName(opts.name ?? bot.username);
+  const telegramUserId = opts.telegramUserId ?? runtime.env.TELEGRAM_ALLOWED_USERS ?? await promptRequired("Telegram allowed user ID", runtime);
+  if (!telegramUserId) {
+    throw new Error("Telegram allowed user ID is required");
   }
   const paidHardware = await resolveHardware({
     ...opts.hardware ? { requestedHardware: opts.hardware } : {},
     ...typeof opts.sleepTime === "number" ? { requestedSleepTime: opts.sleepTime } : {},
-    needsTelegram: Boolean(telegramToken),
     yes: Boolean(opts.yes),
     runtime
   });
@@ -9611,9 +9610,7 @@ async function bootstrap(opts, runtime) {
     hardware: paidHardware.hardware,
     ...typeof paidHardware.sleepTime === "number" ? { sleepTimeSeconds: paidHardware.sleepTime } : {}
   });
-  if (telegramToken || opts.hardware || typeof opts.sleepTime === "number") {
-    await hub.requestSpaceHardware(names.space, paidHardware.hardware, paidHardware.sleepTime);
-  }
+  await hub.requestSpaceHardware(names.space, paidHardware.hardware, paidHardware.sleepTime);
   runtime.stdout.log("Generating Space files from huggingclaw source");
   const { templateRev } = await runtime.pushTemplateToSpace({ targetRepo: names.space, token: hfToken });
   await setDeploymentVariables(hub, names.space, {
@@ -9625,8 +9622,8 @@ async function bootstrap(opts, runtime) {
   await setDeploymentSecrets(hub, names.space, {
     OPENCLAW_GATEWAY_TOKEN: gatewayToken,
     HF_TOKEN: hfToken,
-    ...telegramToken ? { TELEGRAM_BOT_TOKEN: telegramToken } : {},
-    ...telegramUserId ? { TELEGRAM_ALLOWED_USERS: telegramUserId } : {},
+    TELEGRAM_BOT_TOKEN: telegramToken,
+    TELEGRAM_ALLOWED_USERS: telegramUserId,
     ...opts.telegramProxy ? { TELEGRAM_PROXY: opts.telegramProxy } : {},
     ...opts.telegramApiRoot ? { TELEGRAM_API_ROOT: opts.telegramApiRoot } : {}
   });
@@ -9779,11 +9776,7 @@ async function readTelegramToken(opts, runtime) {
     return (match?.[1] ?? raw.trim()).trim();
   }
   if (!runtime.prompt.isInteractive()) {
-    return null;
-  }
-  const wantsTelegram = await promptConfirm("Connect a Telegram bot now?", false, runtime);
-  if (!wantsTelegram) {
-    return null;
+    throw new Error("Telegram bot token is required; pass --telegram-token or --telegram-token-file");
   }
   const value = await runtime.prompt.password({
     message: "Telegram bot token",
@@ -9792,20 +9785,6 @@ async function readTelegramToken(opts, runtime) {
   return readPromptValue(value, "Telegram bot token");
 }
 async function resolveHardware(params) {
-  if (!params.needsTelegram) {
-    if (params.requestedHardware && isPaidHardware(params.requestedHardware)) {
-      await confirmPaidHardware({
-        hardware: params.requestedHardware,
-        ...typeof params.requestedSleepTime === "number" ? { sleepTime: params.requestedSleepTime } : {},
-        yes: params.yes,
-        runtime: params.runtime
-      });
-    }
-    return {
-      hardware: params.requestedHardware ?? DEFAULT_HARDWARE,
-      ...typeof params.requestedSleepTime === "number" ? { sleepTime: params.requestedSleepTime } : {}
-    };
-  }
   const hardware = params.requestedHardware ?? TELEGRAM_HARDWARE;
   if (!isPaidHardware(hardware)) {
     throw new Error(`Telegram requires upgraded paid Space hardware today; use --hardware ${TELEGRAM_HARDWARE}`);
