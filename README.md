@@ -40,10 +40,9 @@ You need:
 
 - A Hugging Face account, with a token from `HF_TOKEN`, `HF_TOKEN_PATH`,
   `$HF_HOME/token`, or `hf auth login`.
-- Optional: a Telegram bot token from [BotFather](https://t.me/botfather).
-  Paste it when prompted; Hugging Claw calls Telegram `getMe`, removes a
-  trailing `_bot` from the username, and names the Space and bucket after the
-  bot.
+- A Telegram bot token from [BotFather](https://t.me/botfather). Paste it when
+  prompted; Hugging Claw calls Telegram `getMe`, removes a trailing `_bot` from
+  the username, and names the Space and bucket after the bot.
 
 For automation, pass the same answers as flags:
 
@@ -97,9 +96,8 @@ bootstrapping again with the same bucket brings the same agent back.
 Honest numbers, since "deploy your own agent" tends to hide them:
 
 - **Space hardware:** Telegram deployments currently require upgraded paid
-  Space hardware. Free `cpu-basic` Spaces are still useful for non-bot testing,
-  but they are not expected to keep Telegram connections working. The cheapest
-  paid CPU tier is enough for the gateway.
+  Space hardware. Free `cpu-basic` Spaces are not expected to keep Telegram
+  connections working. The cheapest paid CPU tier is enough for the gateway.
 - **Inference:** requests use your Hugging Face Inference Providers credits
   ($0.10/month on free accounts, $2.00 with PRO), then pay-as-you-go at
   provider rates. Small models like Qwen3-8B keep this at a few dollars a
@@ -114,9 +112,9 @@ Honest numbers, since "deploy your own agent" tends to hide them:
 
 ## Space hardware
 
-For Telegram, use upgraded Space hardware. Free `cpu-basic` Spaces are not
-expected to keep Telegram connections working. The cheapest paid CPU tier is
-enough for the gateway:
+Hugging Claw uses Telegram as the main interaction surface, so use upgraded
+Space hardware. Free `cpu-basic` Spaces are not expected to keep Telegram
+connections working. The cheapest paid CPU tier is enough for the gateway:
 
 ```bash
 hclaw settings your-hf-username/research-agent --hardware cpu-upgrade --sleep-time -1
