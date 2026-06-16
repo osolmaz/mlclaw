@@ -133,12 +133,15 @@ async function docker(args: string[]): Promise<{ stdout: string; stderr: string 
   }
 }
 
-function isMissingContainerError(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return message.includes("No such object") || message.includes("No such container");
+export function isMissingContainerError(err: unknown): boolean {
+  const message = dockerErrorMessage(err);
+  return message.includes("no such object") || message.includes("no such container");
 }
 
-function isMissingVolumeError(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return message.includes("No such volume");
+export function isMissingVolumeError(err: unknown): boolean {
+  return dockerErrorMessage(err).includes("no such volume");
+}
+
+function dockerErrorMessage(err: unknown): string {
+  return (err instanceof Error ? err.message : String(err)).toLowerCase();
 }

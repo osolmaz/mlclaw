@@ -4398,12 +4398,14 @@ ${err.stderr}`;
   }
 }
 function isMissingContainerError(err) {
-  const message = err instanceof Error ? err.message : String(err);
-  return message.includes("No such object") || message.includes("No such container");
+  const message = dockerErrorMessage(err);
+  return message.includes("no such object") || message.includes("no such container");
 }
 function isMissingVolumeError(err) {
-  const message = err instanceof Error ? err.message : String(err);
-  return message.includes("No such volume");
+  return dockerErrorMessage(err).includes("no such volume");
+}
+function dockerErrorMessage(err) {
+  return (err instanceof Error ? err.message : String(err)).toLowerCase();
 }
 
 // src/hclaw/gateway-location.ts
