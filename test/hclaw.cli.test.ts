@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { main } from "../src/hclaw/cli.js";
+import { readManifest, readSecretEnv } from "../src/hclaw/local-config.js";
 import type { HubApi, SpaceRuntime } from "../src/hclaw/hub-api.js";
 import type { DockerRunner, DockerInspect, DockerRunParams } from "../src/hclaw/docker.js";
 import type { BucketEntry } from "../src/hf-bucket-client/client.js";
@@ -92,8 +93,9 @@ function createFakeHub() {
       calls.push({ name: "addSpaceVariable", args: [repoId, key, value] });
       variables.set(key, { value });
     },
-    async deleteSpaceVariable(...args: unknown[]) {
-      calls.push({ name: "deleteSpaceVariable", args });
+    async deleteSpaceVariable(repoId: string, key: string) {
+      calls.push({ name: "deleteSpaceVariable", args: [repoId, key] });
+      variables.delete(key);
     },
     async getSpaceVariables() {
       calls.push({ name: "getSpaceVariables", args: [] });
@@ -226,6 +228,11 @@ describe("hclaw CLI", () => {
           image: "ghcr.io/osolmaz/huggingclaw-runtime:latest",
         }),
       ],
+    });
+    const manifest = await readManifest(runtime.configRoot, "research");
+    expect(manifest.localRuntimeId).toMatch(/^local-research-[a-f0-9]{16}$/);
+    await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
+      HUGGINGCLAW_RUNTIME_ID: manifest.localRuntimeId,
     });
   });
 
@@ -366,6 +373,18 @@ describe("hclaw CLI", () => {
 
     expect(code).toBe(0);
     expect(pushed).toEqual([{ runtimeImage: "registry.example/huggingclaw:test" }]);
+    expect(hub.calls).toContainEqual({
+      name: "addSpaceVariable",
+      args: ["alice/research", "HUGGINGCLAW_RUNTIME_IMAGE", "registry.example/huggingclaw:test"],
+    });
+    expect(hub.calls).toContainEqual({
+      name: "addSpaceVariable",
+      args: ["alice/research", "HUGGINGCLAW_GATEWAY_LOCATION", "space"],
+    });
+    expect(hub.calls).toContainEqual({
+      name: "addSpaceVariable",
+      args: ["alice/research", "HUGGINGCLAW_RUNTIME_ID", "space-research"],
+    });
   });
 
   it("migrates local to Space and back without starting both gateways", async () => {
@@ -414,10 +433,13 @@ describe("hclaw CLI", () => {
       call.args[0].includes("openclaw-state/runtime/handoff-request.json")
     );
     const pauseIndex = hub.calls.findIndex((call) => call.name === "pauseSpace");
-    const startIndex = runtime.dockerRunner.calls.findIndex((call) => call.name === "start" || call.name === "run");
+    const removeIndex = runtime.dockerRunner.calls.findIndex((call) => call.name === "rm");
+    const startIndex = runtime.dockerRunner.calls.findIndex((call) => call.name === "run");
     expect(disableIndex).toBeGreaterThanOrEqual(0);
     expect(handoffIndex).toBeGreaterThan(disableIndex);
     expect(pauseIndex).toBeGreaterThan(handoffIndex);
-    expect(startIndex).toBeGreaterThanOrEqual(0);
+    expect(removeIndex).toBeGreaterThanOrEqual(0);
+    expect(startIndex).toBeGreaterThan(removeIndex);
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "start")).toBe(false);
   });
 });

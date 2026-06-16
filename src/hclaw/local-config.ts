@@ -9,6 +9,7 @@ export type DeploymentManifest = {
   owner: string;
   bucket: string;
   space: string;
+  localRuntimeId: string;
   gatewayLocation: GatewayLocation;
   model: string;
   runtimeImage: string;

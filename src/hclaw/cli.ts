@@ -11,7 +11,7 @@ import { readToken } from "./auth.js";
 import { CliDockerRunner, containerNameFor, type DockerRunner, volumeNameFor } from "./docker.js";
 import { parseGatewayLocation, type GatewayLocation } from "./gateway-location.js";
 import { pushTemplateToSpace } from "./git.js";
-import { HubApi } from "./hub-api.js";
+import { HubApi, HubApiError } from "./hub-api.js";
 import {
   assertNoLiveForeignLease,
   clearRuntimeHandoffRequest,
@@ -327,6 +327,7 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
     owner,
     bucket: names.bucket,
     space: names.space,
+    localRuntimeId: newLocalRuntimeId(agentName),
     gatewayLocation,
     model,
     runtimeImage,
@@ -343,6 +344,7 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
     agentName,
     runtimeImage,
     gatewayLocation,
+    runtimeId: gatewayLocation === "local" ? manifest.localRuntimeId : spaceRuntimeId(agentName),
     ...(opts.telegramProxy ? { telegramProxy: opts.telegramProxy } : {}),
     ...(opts.telegramApiRoot ? { telegramApiRoot: opts.telegramApiRoot } : {}),
   });
@@ -368,7 +370,7 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
     await assertNoLiveForeignLease({
       hub,
       bucket: names.bucket,
-      runtimeId: localRuntimeId(agentName),
+      runtimeId: manifest.localRuntimeId,
       takeover: Boolean(opts.takeover),
     });
     await startLocalGateway({
@@ -410,6 +412,7 @@ function deploymentSecrets(params: {
   agentName: string;
   runtimeImage: string;
   gatewayLocation: GatewayLocation;
+  runtimeId: string;
   telegramProxy?: string;
   telegramApiRoot?: string;
 }): Record<string, string> {
@@ -423,9 +426,7 @@ function deploymentSecrets(params: {
     OPENCLAW_AGENT_NAME: params.agentName,
     HUGGINGCLAW_GATEWAY_LOCATION: params.gatewayLocation,
     HUGGINGCLAW_RUNTIME_IMAGE: params.runtimeImage,
-    HUGGINGCLAW_RUNTIME_ID: params.gatewayLocation === "local"
-      ? localRuntimeId(params.agentName)
-      : spaceRuntimeId(params.agentName),
+    HUGGINGCLAW_RUNTIME_ID: params.runtimeId,
     OPENCLAW_GATEWAY_PORT: String(DEFAULT_LOCAL_PORT),
     ...(params.telegramProxy ? { TELEGRAM_PROXY: params.telegramProxy } : {}),
     ...(params.telegramApiRoot ? { TELEGRAM_API_ROOT: params.telegramApiRoot } : {}),
@@ -474,7 +475,7 @@ async function deploySpaceGateway(params: {
     HUGGINGCLAW_RUNTIME_IMAGE: manifest.runtimeImage,
     HUGGINGCLAW_RUNTIME_ID: spaceRuntimeId(manifest.agent),
   });
-  await hub.deleteSpaceVariable(manifest.space, "HUGGINGCLAW_GATEWAY_DISABLED").catch(() => undefined);
+  await clearSpaceGatewayDisabled(hub, manifest.space);
   await setDeploymentSecrets(hub, manifest.space, {
     OPENCLAW_GATEWAY_TOKEN: requiredSecret(secrets, "OPENCLAW_GATEWAY_TOKEN"),
     HF_TOKEN: requiredSecret(secrets, "HF_TOKEN"),
@@ -499,9 +500,8 @@ async function startLocalGateway(params: {
     return;
   }
   if (existing) {
-    await runtime.dockerRunner.start(containerName);
-    runtime.stdout.log(`Local gateway started: ${containerName}`);
-    return;
+    await runtime.dockerRunner.rm(containerName);
+    runtime.stdout.log(`Local gateway removed for config refresh: ${containerName}`);
   }
   if (params.pull) {
     await runtime.dockerRunner.pull(manifest.runtimeImage);
@@ -532,7 +532,7 @@ async function stopLocalGateway(manifest: DeploymentManifest, runtime: Required<
 }
 
 async function gatewayStart(agent: string, opts: GatewayCommandOptions, runtime: Required<CliRuntime>): Promise<void> {
-  const manifest = await readManifest(runtime.configRoot, agent);
+  const manifest = await readDeploymentManifest(runtime, agent);
   const token = await runtime.readToken(runtime.env);
   const hub = runtime.hubFactory(token);
   await assertNoLiveForeignLease({
@@ -544,14 +544,14 @@ async function gatewayStart(agent: string, opts: GatewayCommandOptions, runtime:
   if (manifest.gatewayLocation === "local") {
     await startLocalGateway({ manifest, runtime, pull: shouldPull(opts) });
   } else {
-    await hub.deleteSpaceVariable(manifest.space, "HUGGINGCLAW_GATEWAY_DISABLED").catch(() => undefined);
+    await clearSpaceGatewayDisabled(hub, manifest.space);
     await hub.restartSpace(manifest.space, true);
     runtime.stdout.log(`Space gateway restart requested: ${manifest.space}`);
   }
 }
 
 async function gatewayStop(agent: string, runtime: Required<CliRuntime>): Promise<void> {
-  const manifest = await readManifest(runtime.configRoot, agent);
+  const manifest = await readDeploymentManifest(runtime, agent);
   if (manifest.gatewayLocation === "local") {
     await stopLocalGateway(manifest, runtime);
     return;
@@ -562,7 +562,7 @@ async function gatewayStop(agent: string, runtime: Required<CliRuntime>): Promis
 }
 
 async function gatewayStatus(agent: string, runtime: Required<CliRuntime>): Promise<void> {
-  const manifest = await readManifest(runtime.configRoot, agent);
+  const manifest = await readDeploymentManifest(runtime, agent);
   runtime.stdout.log(`Agent: ${manifest.agent}`);
   runtime.stdout.log(`Gateway: ${manifest.gatewayLocation}`);
   runtime.stdout.log(`Bucket: ${manifest.bucket}`);
@@ -593,7 +593,7 @@ async function gatewayStatus(agent: string, runtime: Required<CliRuntime>): Prom
 }
 
 async function gatewayLogs(agent: string, opts: GatewayCommandOptions, runtime: Required<CliRuntime>): Promise<void> {
-  const manifest = await readManifest(runtime.configRoot, agent);
+  const manifest = await readDeploymentManifest(runtime, agent);
   if (manifest.gatewayLocation === "local") {
     runtime.stdout.log(await runtime.dockerRunner.logs(containerNameFor(manifest.agent), opts.tail));
     return;
@@ -605,7 +605,7 @@ async function gatewayLogs(agent: string, opts: GatewayCommandOptions, runtime: 
 
 async function gatewayMigrate(agent: string, opts: GatewayCommandOptions, runtime: Required<CliRuntime>): Promise<void> {
   const target = parseGatewayLocation(requiredOption(opts.to, "--to"));
-  const current = await readManifest(runtime.configRoot, agent);
+  const current = await readDeploymentManifest(runtime, agent);
   if (current.gatewayLocation === target) {
     runtime.stdout.log(`Gateway already uses ${target}`);
     return;
@@ -651,14 +651,14 @@ async function gatewayMigrate(agent: string, opts: GatewayCommandOptions, runtim
     await assertNoLiveForeignLease({
       hub,
       bucket: current.bucket,
-      runtimeId: localRuntimeId(current.agent),
+      runtimeId: updated.localRuntimeId,
       takeover: true,
     });
     await writeSecretEnv(runtime.configRoot, agent, {
       ...secrets,
       HUGGINGCLAW_GATEWAY_LOCATION: "local",
       HUGGINGCLAW_RUNTIME_IMAGE: updated.runtimeImage,
-      HUGGINGCLAW_RUNTIME_ID: localRuntimeId(agent),
+      HUGGINGCLAW_RUNTIME_ID: updated.localRuntimeId,
     });
     await startLocalGateway({ manifest: updated, runtime, pull: shouldPull(opts) });
   }
@@ -666,12 +666,26 @@ async function gatewayMigrate(agent: string, opts: GatewayCommandOptions, runtim
   runtime.stdout.log(`Gateway migrated to ${target}`);
 }
 
-function localRuntimeId(agent: string): string {
-  return `local-${agent}`;
+async function readDeploymentManifest(runtime: Required<CliRuntime>, agent: string): Promise<DeploymentManifest> {
+  const manifest = await readManifest(runtime.configRoot, agent);
+  if (manifest.localRuntimeId) {
+    return manifest;
+  }
+  const updated = {
+    ...manifest,
+    localRuntimeId: newLocalRuntimeId(manifest.agent),
+    updatedAt: runtime.now().toISOString(),
+  };
+  await writeManifest(runtime.configRoot, updated);
+  return updated;
+}
+
+function newLocalRuntimeId(agent: string): string {
+  return `local-${agent}-${randomBytes(8).toString("hex")}`;
 }
 
 function runtimeIdFor(manifest: DeploymentManifest): string {
-  return manifest.gatewayLocation === "local" ? localRuntimeId(manifest.agent) : spaceRuntimeId(manifest.agent);
+  return manifest.gatewayLocation === "local" ? manifest.localRuntimeId : spaceRuntimeId(manifest.agent);
 }
 
 function spaceRuntimeId(agent: string): string {
@@ -692,7 +706,7 @@ async function disableAndPauseSpaceGateway(params: {
     agent: params.manifest.agent,
     runtimeId: spaceRuntimeId(params.manifest.agent),
     requestedAt: handoffStartedAt.toISOString(),
-    targetRuntimeId: localRuntimeId(params.manifest.agent),
+    targetRuntimeId: params.manifest.localRuntimeId,
   });
   params.runtime.stdout.log("Waiting for Space gateway to upload a final snapshot");
   await waitForRuntimeHandoffAck({
@@ -775,13 +789,18 @@ async function update(
   if (!variables.has("OPENCLAW_HF_TEMPLATE_REV") && !opts.force) {
     throw new Error(`${repoId} does not look like a HuggingClaw deployment; pass --force to update anyway`);
   }
+  const runtimeImage = resolveRuntimeImage(opts.runtimeImage ?? variables.get("HUGGINGCLAW_RUNTIME_IMAGE")?.value, runtime.env);
+  const agentName = variables.get("OPENCLAW_AGENT_NAME")?.value?.trim() || repoId.split("/")[1] || "openclaw";
   runtime.stdout.log(`Generating current Space files into ${repoId}`);
   const { templateRev } = await runtime.pushTemplateToSpace({
     targetRepo: repoId,
     token: hfToken,
-    runtimeImage: resolveRuntimeImage(opts.runtimeImage ?? variables.get("HUGGINGCLAW_RUNTIME_IMAGE")?.value, runtime.env),
+    runtimeImage,
   });
   await hub.addSpaceVariable(repoId, "OPENCLAW_HF_TEMPLATE_REV", templateRev);
+  await hub.addSpaceVariable(repoId, "HUGGINGCLAW_RUNTIME_IMAGE", runtimeImage);
+  await hub.addSpaceVariable(repoId, "HUGGINGCLAW_GATEWAY_LOCATION", "space");
+  await hub.addSpaceVariable(repoId, "HUGGINGCLAW_RUNTIME_ID", spaceRuntimeId(agentName));
   await hub.restartSpace(repoId, true);
   await doctor(repoId, { fix: true }, hub, runtime);
 }
@@ -873,7 +892,7 @@ async function settings(repoId: string, opts: SettingsOptions, hub: HubApi, runt
   }
   if (opts.gateway && !repoId.includes("/") && await manifestExists(runtime.configRoot, repoId)) {
     const gatewayLocation = parseGatewayLocation(opts.gateway);
-    const manifest = await readManifest(runtime.configRoot, repoId);
+    const manifest = await readDeploymentManifest(runtime, repoId);
     await writeManifest(runtime.configRoot, {
       ...manifest,
       gatewayLocation,
@@ -937,6 +956,17 @@ async function setDeploymentSecrets(
 ): Promise<void> {
   for (const [key, value] of Object.entries(secrets)) {
     await hub.addSpaceSecret(repoId, key, value);
+  }
+}
+
+async function clearSpaceGatewayDisabled(hub: HubApi, repoId: string): Promise<void> {
+  try {
+    await hub.deleteSpaceVariable(repoId, "HUGGINGCLAW_GATEWAY_DISABLED");
+  } catch (err) {
+    if (err instanceof HubApiError && err.status === 404) {
+      return;
+    }
+    throw err;
   }
 }
 

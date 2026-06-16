@@ -21,6 +21,7 @@ describe("local Hugging Claw config", () => {
       owner: "alice",
       bucket: "alice/research-data",
       space: "alice/research",
+      localRuntimeId: "local-research-test",
       gatewayLocation: "local",
       model: "huggingface/Qwen/Qwen3-8B",
       runtimeImage: "example/runtime:test",
