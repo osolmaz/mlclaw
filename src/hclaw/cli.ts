@@ -549,10 +549,7 @@ async function gatewayStop(agent: string, runtime: Required<CliRuntime>): Promis
   }
   const token = await runtime.readToken(runtime.env);
   const hub = runtime.hubFactory(token);
-  await hub.addSpaceVariable(manifest.space, "HUGGINGCLAW_GATEWAY_DISABLED", "1");
-  await hub.restartSpace(manifest.space, true);
-  await hub.pauseSpace(manifest.space);
-  runtime.stdout.log(`Space gateway disabled and pause requested: ${manifest.space}`);
+  await disableAndPauseSpaceGateway({ manifest, hub, runtime });
 }
 
 async function gatewayStatus(agent: string, runtime: Required<CliRuntime>): Promise<void> {
@@ -641,24 +638,7 @@ async function gatewayMigrate(agent: string, opts: GatewayCommandOptions, runtim
       HUGGINGCLAW_RUNTIME_ID: spaceRuntimeId(agent),
     });
   } else {
-    const handoffStartedAt = runtime.now();
-    await hub.addSpaceVariable(current.space, "HUGGINGCLAW_GATEWAY_DISABLED", "1");
-    await hub.restartSpace(current.space, true);
-    runtime.stdout.log("Waiting for Space gateway to upload a final snapshot");
-    try {
-      await waitForRuntimeLease({
-        hub,
-        bucket: current.bucket,
-        runtimeId: spaceRuntimeId(current.agent),
-        since: handoffStartedAt,
-        timeoutMs: SPACE_HANDOFF_TIMEOUT_MS,
-        pollMs: SPACE_HANDOFF_POLL_MS,
-      });
-      runtime.stdout.log("Space final snapshot observed");
-    } finally {
-      await hub.pauseSpace(current.space);
-      runtime.stdout.log(`Space pause requested: ${current.space}`);
-    }
+    await disableAndPauseSpaceGateway({ manifest: current, hub, runtime });
     await assertNoLiveForeignLease({
       hub,
       bucket: current.bucket,
@@ -689,6 +669,31 @@ function spaceRuntimeId(agent: string): string {
   return `space-${agent}`;
 }
 
+async function disableAndPauseSpaceGateway(params: {
+  manifest: DeploymentManifest;
+  hub: HubApi;
+  runtime: Required<CliRuntime>;
+}): Promise<void> {
+  const handoffStartedAt = params.runtime.now();
+  await params.hub.addSpaceVariable(params.manifest.space, "HUGGINGCLAW_GATEWAY_DISABLED", "1");
+  await params.hub.restartSpace(params.manifest.space, true);
+  params.runtime.stdout.log("Waiting for Space gateway to upload a final snapshot");
+  try {
+    await waitForRuntimeLease({
+      hub: params.hub,
+      bucket: params.manifest.bucket,
+      runtimeId: spaceRuntimeId(params.manifest.agent),
+      since: handoffStartedAt,
+      timeoutMs: SPACE_HANDOFF_TIMEOUT_MS,
+      pollMs: SPACE_HANDOFF_POLL_MS,
+    });
+    params.runtime.stdout.log("Space final snapshot observed");
+  } finally {
+    await params.hub.pauseSpace(params.manifest.space);
+    params.runtime.stdout.log(`Space pause requested: ${params.manifest.space}`);
+  }
+}
+
 async function waitForRuntimeLease(params: {
   hub: HubApi;
   bucket: string;
@@ -698,16 +703,25 @@ async function waitForRuntimeLease(params: {
   pollMs: number;
 }): Promise<RuntimeLease> {
   const started = Date.now();
+  let lastError: string | undefined;
   while (true) {
-    const lease = await readRuntimeLease(params.hub, params.bucket);
-    if (
-      lease?.runtimeId === params.runtimeId &&
-      Date.parse(lease.lastHeartbeatAt) >= params.since.getTime()
-    ) {
-      return lease;
+    try {
+      const lease = await readRuntimeLease(params.hub, params.bucket);
+      const heartbeatAt = lease ? Date.parse(lease.lastHeartbeatAt) : Number.NaN;
+      if (
+        lease?.runtimeId === params.runtimeId &&
+        Number.isFinite(heartbeatAt) &&
+        heartbeatAt >= params.since.getTime()
+      ) {
+        return lease;
+      }
+      lastError = undefined;
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
     }
     if (Date.now() - started >= params.timeoutMs) {
-      throw new Error(`timed out waiting for ${params.runtimeId} to upload a final snapshot`);
+      const detail = lastError ? `; last lease read failed: ${lastError}` : "";
+      throw new Error(`timed out waiting for ${params.runtimeId} to upload a final snapshot${detail}`);
     }
     await delay(params.pollMs);
   }
