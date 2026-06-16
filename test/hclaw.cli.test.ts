@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { LOCAL_LIVE_DIR, LOCAL_VOLUME_MOUNT_PATH, main } from "../src/hclaw/cli.js";
 import { DEFAULT_RUNTIME_IMAGE } from "../src/hclaw/runtime-image.js";
-import { readManifest, readSecretEnv, writeManifest, type DeploymentManifest } from "../src/hclaw/local-config.js";
+import { readManifest, readSecretEnv, writeManifest, writeSecretEnv, type DeploymentManifest } from "../src/hclaw/local-config.js";
 import type { HubApi, SpaceRuntime } from "../src/hclaw/hub-api.js";
 import type { DockerRunner, DockerInspect, DockerRunParams } from "../src/hclaw/docker.js";
 import type { BucketEntry } from "../src/hf-bucket-client/client.js";
@@ -30,7 +30,11 @@ function createPrompt(answers: PromptAnswer[], interactive = true) {
   };
 }
 
-function createFakeHub(opts: { acknowledgeHandoff?: boolean; spaceRuntime?: SpaceRuntime } = {}) {
+function createFakeHub(opts: {
+  acknowledgeHandoff?: boolean;
+  ackCompletedAt?: string;
+  spaceRuntime?: SpaceRuntime;
+} = {}) {
   const calls: Array<{ name: string; args: unknown[] }> = [];
   const variables = new Map<string, { value?: string }>();
   const secrets = new Map<string, { key: string }>();
@@ -41,16 +45,17 @@ function createFakeHub(opts: { acknowledgeHandoff?: boolean; spaceRuntime?: Spac
       for (const file of files) {
         const text = await file.content.text();
         bucketObjects.set(file.path, text);
-        if (file.path === "openclaw-state/runtime/handoff-request.json" && opts.acknowledgeHandoff !== false) {
+        if (file.path.endsWith("/runtime/handoff-request.json") && opts.acknowledgeHandoff !== false) {
+          const prefix = file.path.slice(0, -"/runtime/handoff-request.json".length);
           const request = JSON.parse(text) as { requestId: string; agent: string; runtimeId: string };
-          bucketObjects.set("openclaw-state/runtime/handoff-ack.json", JSON.stringify({
+          bucketObjects.set(`${prefix}/runtime/handoff-ack.json`, JSON.stringify({
             schemaVersion: 1,
             requestId: request.requestId,
             agent: request.agent,
             runtimeId: request.runtimeId,
             gatewayLocation: request.runtimeId.startsWith("local-") ? "local" : "space",
-            completedAt: "2026-06-16T00:00:01.000Z",
-            lastSnapshotId: "openclaw-state/snapshots/state-test.tar.zst",
+            completedAt: opts.ackCompletedAt ?? "2026-06-16T00:00:01.000Z",
+            lastSnapshotId: `${prefix}/snapshots/state-test.tar.zst`,
           }));
         }
       }
@@ -114,7 +119,8 @@ function createFakeHub(opts: { acknowledgeHandoff?: boolean; spaceRuntime?: Spac
       calls.push({ name: "restartSpace", args });
       const agent = variables.get("OPENCLAW_AGENT_NAME")?.value ?? "research";
       const bucket = variables.get("OPENCLAW_HF_STATE_BUCKET")?.value ?? "alice/research-data";
-      bucketObjects.set("openclaw-state/runtime/status.json", JSON.stringify({
+      const prefix = variables.get("OPENCLAW_HF_STATE_PREFIX")?.value ?? "openclaw-state";
+      bucketObjects.set(`${prefix}/runtime/status.json`, JSON.stringify({
         schemaVersion: 1,
         agent,
         runtimeId: variables.get("HUGGINGCLAW_RUNTIME_ID")?.value ?? `space-${agent}`,
@@ -606,6 +612,88 @@ describe("hclaw CLI", () => {
     expect(removeVolumeIndex).toBeGreaterThan(removeIndex);
     expect(startIndex).toBeGreaterThan(removeVolumeIndex);
     expect(runtime.dockerRunner.calls.some((call) => call.name === "start")).toBe(false);
+  });
+
+  it("reads runtime leases from the configured bucket prefix", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([]);
+    const stdout: string[] = [];
+    const runtime = {
+      ...await createRuntime(hub, prompt),
+      stdout: { log: (message: unknown) => stdout.push(String(message)) },
+    };
+    await writeManifest(runtime.configRoot, {
+      version: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-existing",
+      gatewayLocation: "local",
+      model: "test-model",
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      createdAt: "2026-06-16T00:00:00.000Z",
+      updatedAt: "2026-06-16T00:00:00.000Z",
+    });
+    await writeSecretEnv(runtime.configRoot, "research", {
+      OPENCLAW_HF_STATE_PREFIX: "custom/prefix",
+    });
+    hub.bucketObjects.set("custom/prefix/runtime/status.json", JSON.stringify({
+      schemaVersion: 1,
+      agent: "research",
+      runtimeId: "local-research-existing",
+      gatewayLocation: "local",
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      startedAt: "2026-06-16T00:00:00.000Z",
+      lastHeartbeatAt: "2026-06-16T00:00:01.000Z",
+    }) + "\n");
+
+    await expect(main(["gateway", "status", "research"], runtime)).resolves.toBe(0);
+
+    expect(stdout.join("\n")).toContain("Lease: local local-research-existing heartbeat 2026-06-16T00:00:01.000Z");
+    expect(hub.calls).toContainEqual({
+      name: "bucket.downloadFile",
+      args: ["custom/prefix/runtime/status.json"],
+    });
+  });
+
+  it("migrates with a custom bucket prefix and clock-skewed handoff ack", async () => {
+    const hub = createFakeHub({ ackCompletedAt: "2026-06-15T23:59:59.000Z" });
+    const { prompt } = createPrompt(["telegram-token", "7216393410"]);
+    const runtime = await createRuntime(hub, prompt);
+
+    await expect(main(["bootstrap", "--gateway-token", "gateway-token", "--no-pull"], runtime)).resolves.toBe(0);
+    await writeSecretEnv(runtime.configRoot, "research", {
+      ...await readSecretEnv(runtime.configRoot, "research"),
+      OPENCLAW_HF_STATE_PREFIX: "custom/prefix",
+    });
+    hub.calls.length = 0;
+    runtime.dockerRunner.calls.length = 0;
+
+    await expect(main([
+      "gateway",
+      "migrate",
+      "research",
+      "--to",
+      "space",
+      "--yes",
+    ], runtime)).resolves.toBe(0);
+
+    expect(hub.calls.some((call) =>
+      call.name === "bucket.uploadFiles" &&
+      Array.isArray(call.args[0]) &&
+      call.args[0].includes("custom/prefix/runtime/handoff-request.json")
+    )).toBe(true);
+    expect(hub.calls.some((call) =>
+      call.name === "bucket.downloadFile" &&
+      call.args[0] === "openclaw-state/runtime/handoff-ack.json"
+    )).toBe(false);
+    expect(hub.calls).toContainEqual({
+      name: "addSpaceVariable",
+      args: ["alice/research", "OPENCLAW_HF_STATE_PREFIX", "custom/prefix"],
+    });
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "stop")).toBe(true);
+    expect(hub.calls.some((call) => call.name === "createDockerSpace")).toBe(true);
   });
 
   it("blocks local to Space migration when another live runtime owns the lease", async () => {

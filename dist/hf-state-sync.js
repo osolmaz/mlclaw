@@ -4817,7 +4817,7 @@ function createHfBucketHub(params) {
 // src/hf-state-sync/paths.ts
 import { randomUUID } from "node:crypto";
 var DEFAULT_LIVE_DIR = "/tmp/openclaw-live";
-var DEFAULT_PREFIX = "openclaw-state";
+var DEFAULT_BUCKET_PREFIX = "openclaw-state";
 var DEFAULT_INTERVAL_SECONDS = 60;
 var DEFAULT_HANDOFF_POLL_SECONDS = 5;
 var DEFAULT_KEEP = 5;
@@ -4830,7 +4830,7 @@ function resolveSyncConfig(env = process.env) {
   return {
     liveDir: env.OPENCLAW_LIVE_DIR?.trim() || DEFAULT_LIVE_DIR,
     bucket: env.OPENCLAW_HF_STATE_BUCKET?.trim() || null,
-    bucketPrefix: (env.OPENCLAW_HF_STATE_PREFIX?.trim() || DEFAULT_PREFIX).replace(/\/+$/, ""),
+    bucketPrefix: normalizeBucketPrefix(env.OPENCLAW_HF_STATE_PREFIX),
     intervalSeconds: positiveIntFromEnv(env.HF_STATE_SYNC_INTERVAL_SECONDS, DEFAULT_INTERVAL_SECONDS),
     handoffPollSeconds: positiveIntFromEnv(env.HF_STATE_SYNC_HANDOFF_POLL_SECONDS, DEFAULT_HANDOFF_POLL_SECONDS),
     keepSnapshots: positiveIntFromEnv(env.HF_STATE_SYNC_KEEP, DEFAULT_KEEP),
@@ -4842,7 +4842,11 @@ function resolveSyncConfig(env = process.env) {
   };
 }
 function remotePath(config, name) {
-  return `${config.bucketPrefix}/${name}`;
+  return `${normalizeBucketPrefix(config.bucketPrefix)}/${name.replace(/^\/+/, "")}`;
+}
+function normalizeBucketPrefix(prefix) {
+  const normalized = (prefix?.trim() || DEFAULT_BUCKET_PREFIX).replace(/^\/+|\/+$/g, "");
+  return normalized || DEFAULT_BUCKET_PREFIX;
 }
 function log(message) {
   console.log(`[hf-state-sync] ${message}`);

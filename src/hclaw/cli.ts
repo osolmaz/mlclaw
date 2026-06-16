@@ -322,6 +322,8 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
   const gatewayToken = providedGatewayToken ?? randomBytes(32).toString("base64url");
   const now = runtime.now().toISOString();
   const existingManifest = await readManifest(runtime.configRoot, agentName).catch(() => null);
+  const existingSecrets = await readSecretEnv(runtime.configRoot, agentName).catch(() => ({}));
+  const bucketPrefix = stateBucketPrefix(existingSecrets, runtime);
   const localRuntimeId = existingManifest?.localRuntimeId ?? newLocalRuntimeId(agentName);
 
   runtime.stdout.log(`Creating private bucket ${names.bucket}`);
@@ -350,6 +352,7 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
     runtimeImage,
     gatewayLocation,
     runtimeId: gatewayLocation === "local" ? manifest.localRuntimeId : spaceRuntimeId(agentName),
+    ...(bucketPrefix ? { bucketPrefix } : {}),
     ...(opts.telegramProxy ? { telegramProxy: opts.telegramProxy } : {}),
     ...(opts.telegramApiRoot ? { telegramApiRoot: opts.telegramApiRoot } : {}),
   });
@@ -357,6 +360,7 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
     await assertNoLiveForeignLease({
       hub,
       bucket: names.bucket,
+      bucketPrefix,
       runtimeId: spaceRuntimeId(agentName),
       takeover: Boolean(opts.takeover),
     });
@@ -380,6 +384,7 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
     await assertNoLiveForeignLease({
       hub,
       bucket: names.bucket,
+      bucketPrefix,
       runtimeId: manifest.localRuntimeId,
       takeover: Boolean(opts.takeover),
     });
@@ -425,6 +430,7 @@ function deploymentSecrets(params: {
   runtimeImage: string;
   gatewayLocation: GatewayLocation;
   runtimeId: string;
+  bucketPrefix?: string;
   telegramProxy?: string;
   telegramApiRoot?: string;
 }): Record<string, string> {
@@ -440,6 +446,7 @@ function deploymentSecrets(params: {
     HUGGINGCLAW_RUNTIME_IMAGE: params.runtimeImage,
     HUGGINGCLAW_RUNTIME_ID: params.runtimeId,
     OPENCLAW_GATEWAY_PORT: String(DEFAULT_LOCAL_PORT),
+    ...(params.bucketPrefix ? { OPENCLAW_HF_STATE_PREFIX: params.bucketPrefix } : {}),
     ...(params.telegramProxy ? { TELEGRAM_PROXY: params.telegramProxy } : {}),
     ...(params.telegramApiRoot ? { TELEGRAM_API_ROOT: params.telegramApiRoot } : {}),
   };
@@ -480,6 +487,7 @@ async function deploySpaceGateway(params: {
 
   await setDeploymentVariables(hub, manifest.space, {
     OPENCLAW_HF_STATE_BUCKET: manifest.bucket,
+    ...(secrets.OPENCLAW_HF_STATE_PREFIX ? { OPENCLAW_HF_STATE_PREFIX: secrets.OPENCLAW_HF_STATE_PREFIX } : {}),
     OPENCLAW_HF_TEMPLATE_REV: templateRev,
     OPENCLAW_MODEL: manifest.model,
     OPENCLAW_AGENT_NAME: manifest.agent,
@@ -561,11 +569,13 @@ async function stopLocalGateway(manifest: DeploymentManifest, runtime: Required<
 
 async function gatewayStart(agent: string, opts: GatewayCommandOptions, runtime: Required<CliRuntime>): Promise<void> {
   const manifest = await readDeploymentManifest(runtime, agent);
+  const bucketPrefix = await readDeploymentBucketPrefix(runtime, agent);
   const token = await runtime.readToken(runtime.env);
   const hub = runtime.hubFactory(token);
   await assertNoLiveForeignLease({
     hub,
     bucket: manifest.bucket,
+    bucketPrefix,
     runtimeId: runtimeIdFor(manifest),
     takeover: Boolean(opts.takeover),
   });
@@ -580,17 +590,19 @@ async function gatewayStart(agent: string, opts: GatewayCommandOptions, runtime:
 
 async function gatewayStop(agent: string, runtime: Required<CliRuntime>): Promise<void> {
   const manifest = await readDeploymentManifest(runtime, agent);
+  const bucketPrefix = await readDeploymentBucketPrefix(runtime, agent);
   if (manifest.gatewayLocation === "local") {
     await stopLocalGateway(manifest, runtime);
     return;
   }
   const token = await runtime.readToken(runtime.env);
   const hub = runtime.hubFactory(token);
-  await disableAndPauseSpaceGateway({ manifest, hub, runtime });
+  await disableAndPauseSpaceGateway({ manifest, hub, runtime, bucketPrefix });
 }
 
 async function gatewayStatus(agent: string, runtime: Required<CliRuntime>): Promise<void> {
   const manifest = await readDeploymentManifest(runtime, agent);
+  const bucketPrefix = await readDeploymentBucketPrefix(runtime, agent);
   runtime.stdout.log(`Agent: ${manifest.agent}`);
   runtime.stdout.log(`Gateway: ${manifest.gatewayLocation}`);
   runtime.stdout.log(`Bucket: ${manifest.bucket}`);
@@ -609,7 +621,7 @@ async function gatewayStatus(agent: string, runtime: Required<CliRuntime>): Prom
   try {
     const token = await runtime.readToken(runtime.env);
     const hub = runtime.hubFactory(token);
-    const lease = await readRuntimeLease(hub, manifest.bucket);
+    const lease = await readRuntimeLease(hub, manifest.bucket, bucketPrefix);
     if (lease) {
       runtime.stdout.log(`Lease: ${lease.gatewayLocation} ${lease.runtimeId} heartbeat ${lease.lastHeartbeatAt}`);
     } else {
@@ -641,6 +653,7 @@ async function gatewayMigrate(agent: string, opts: GatewayCommandOptions, runtim
   const token = await runtime.readToken(runtime.env);
   const hub = runtime.hubFactory(token);
   const secrets = await readSecretEnv(runtime.configRoot, agent);
+  const bucketPrefix = stateBucketPrefix(secrets, runtime);
   const updated: DeploymentManifest = {
     ...current,
     gatewayLocation: target,
@@ -657,10 +670,11 @@ async function gatewayMigrate(agent: string, opts: GatewayCommandOptions, runtim
     await assertNoLiveForeignLease({
       hub,
       bucket: current.bucket,
+      bucketPrefix,
       runtimeId: current.localRuntimeId,
       takeover: Boolean(opts.takeover),
     });
-    await handoffAndStopLocalGateway({ manifest: current, hub, runtime });
+    await handoffAndStopLocalGateway({ manifest: current, hub, runtime, bucketPrefix });
     await deploySpaceGateway({
       hub,
       runtime,
@@ -684,14 +698,16 @@ async function gatewayMigrate(agent: string, opts: GatewayCommandOptions, runtim
     await assertNoLiveForeignLease({
       hub,
       bucket: current.bucket,
+      bucketPrefix,
       runtimeId: updated.localRuntimeId,
       allowedRuntimeIds: [spaceRuntimeId(current.agent)],
       takeover: Boolean(opts.takeover),
     });
-    await disableAndPauseSpaceGateway({ manifest: current, hub, runtime });
+    await disableAndPauseSpaceGateway({ manifest: current, hub, runtime, bucketPrefix });
     await assertNoLiveForeignLease({
       hub,
       bucket: current.bucket,
+      bucketPrefix,
       runtimeId: updated.localRuntimeId,
       allowedRuntimeIds: [spaceRuntimeId(current.agent)],
       takeover: Boolean(opts.takeover),
@@ -722,6 +738,15 @@ async function readDeploymentManifest(runtime: Required<CliRuntime>, agent: stri
   return updated;
 }
 
+async function readDeploymentBucketPrefix(runtime: Required<CliRuntime>, agent: string): Promise<string | undefined> {
+  const secrets = await readSecretEnv(runtime.configRoot, agent).catch(() => ({}));
+  return stateBucketPrefix(secrets, runtime);
+}
+
+function stateBucketPrefix(secrets: Record<string, string>, runtime: Required<CliRuntime>): string | undefined {
+  return secrets.OPENCLAW_HF_STATE_PREFIX?.trim() || runtime.env.OPENCLAW_HF_STATE_PREFIX?.trim() || undefined;
+}
+
 function newLocalRuntimeId(agent: string): string {
   return `local-${agent}-${randomBytes(8).toString("hex")}`;
 }
@@ -738,6 +763,7 @@ async function handoffAndStopLocalGateway(params: {
   manifest: DeploymentManifest;
   hub: HubApi;
   runtime: Required<CliRuntime>;
+  bucketPrefix?: string | undefined;
 }): Promise<void> {
   const containerName = containerNameFor(params.manifest.agent);
   const existing = await params.runtime.dockerRunner.inspect(containerName);
@@ -760,18 +786,18 @@ async function handoffAndStopLocalGateway(params: {
     runtimeId: params.manifest.localRuntimeId,
     requestedAt: handoffStartedAt.toISOString(),
     targetRuntimeId: spaceRuntimeId(params.manifest.agent),
-  });
+  }, params.bucketPrefix);
   params.runtime.stdout.log("Waiting for local gateway to upload a final snapshot");
   await waitForRuntimeHandoffAck({
     hub: params.hub,
     bucket: params.manifest.bucket,
+    bucketPrefix: params.bucketPrefix,
     requestId,
     runtimeId: params.manifest.localRuntimeId,
-    since: handoffStartedAt,
     timeoutMs: SPACE_HANDOFF_TIMEOUT_MS,
     pollMs: SPACE_HANDOFF_POLL_MS,
   });
-  await clearRuntimeHandoffRequest(params.hub, params.manifest.bucket).catch(() => undefined);
+  await clearRuntimeHandoffRequest(params.hub, params.manifest.bucket, params.bucketPrefix).catch(() => undefined);
   params.runtime.stdout.log("Local final snapshot observed");
   await stopLocalGateway(params.manifest, params.runtime);
 }
@@ -780,13 +806,14 @@ async function disableAndPauseSpaceGateway(params: {
   manifest: DeploymentManifest;
   hub: HubApi;
   runtime: Required<CliRuntime>;
+  bucketPrefix?: string | undefined;
 }): Promise<void> {
   const handoffStartedAt = params.runtime.now();
   const requestId = randomBytes(16).toString("hex");
   await params.hub.addSpaceVariable(params.manifest.space, "HUGGINGCLAW_GATEWAY_DISABLED", "1");
   const shouldWaitForHandoff = await spaceGatewayCanAcknowledgeHandoff(params);
   if (!shouldWaitForHandoff) {
-    await clearRuntimeHandoffRequest(params.hub, params.manifest.bucket).catch(() => undefined);
+    await clearRuntimeHandoffRequest(params.hub, params.manifest.bucket, params.bucketPrefix).catch(() => undefined);
     await params.hub.pauseSpace(params.manifest.space);
     params.runtime.stdout.log(`Space pause requested: ${params.manifest.space}`);
     return;
@@ -798,18 +825,18 @@ async function disableAndPauseSpaceGateway(params: {
     runtimeId: spaceRuntimeId(params.manifest.agent),
     requestedAt: handoffStartedAt.toISOString(),
     targetRuntimeId: params.manifest.localRuntimeId,
-  });
+  }, params.bucketPrefix);
   params.runtime.stdout.log("Waiting for Space gateway to upload a final snapshot");
   await waitForRuntimeHandoffAck({
     hub: params.hub,
     bucket: params.manifest.bucket,
+    bucketPrefix: params.bucketPrefix,
     requestId,
     runtimeId: spaceRuntimeId(params.manifest.agent),
-    since: handoffStartedAt,
     timeoutMs: SPACE_HANDOFF_TIMEOUT_MS,
     pollMs: SPACE_HANDOFF_POLL_MS,
   });
-  await clearRuntimeHandoffRequest(params.hub, params.manifest.bucket).catch(() => undefined);
+  await clearRuntimeHandoffRequest(params.hub, params.manifest.bucket, params.bucketPrefix).catch(() => undefined);
   params.runtime.stdout.log("Space final snapshot observed");
   await params.hub.pauseSpace(params.manifest.space);
   params.runtime.stdout.log(`Space pause requested: ${params.manifest.space}`);
@@ -819,11 +846,12 @@ async function spaceGatewayCanAcknowledgeHandoff(params: {
   manifest: DeploymentManifest;
   hub: HubApi;
   runtime: Required<CliRuntime>;
+  bucketPrefix?: string | undefined;
 }): Promise<boolean> {
   const expectedRuntimeId = spaceRuntimeId(params.manifest.agent);
   const [runtimeInfo, lease] = await Promise.all([
     params.hub.getSpaceRuntime(params.manifest.space).catch(() => null),
-    readRuntimeLease(params.hub, params.manifest.bucket).catch(() => null),
+    readRuntimeLease(params.hub, params.manifest.bucket, params.bucketPrefix).catch(() => null),
   ]);
   const stage = typeof runtimeInfo?.stage === "string" ? runtimeInfo.stage.toUpperCase() : "";
   const stageCanRunGateway = !stage || stage === "RUNNING";
@@ -847,9 +875,9 @@ async function spaceGatewayCanAcknowledgeHandoff(params: {
 async function waitForRuntimeHandoffAck(params: {
   hub: HubApi;
   bucket: string;
+  bucketPrefix?: string | undefined;
   requestId: string;
   runtimeId: string;
-  since: Date;
   timeoutMs: number;
   pollMs: number;
 }): Promise<RuntimeHandoffAck> {
@@ -857,13 +885,10 @@ async function waitForRuntimeHandoffAck(params: {
   let lastError: string | undefined;
   while (true) {
     try {
-      const ack = await readRuntimeHandoffAck(params.hub, params.bucket);
-      const completedAt = ack ? Date.parse(ack.completedAt) : Number.NaN;
+      const ack = await readRuntimeHandoffAck(params.hub, params.bucket, params.bucketPrefix);
       if (
         ack?.requestId === params.requestId &&
-        ack.runtimeId === params.runtimeId &&
-        Number.isFinite(completedAt) &&
-        completedAt >= params.since.getTime()
+        ack.runtimeId === params.runtimeId
       ) {
         return ack;
       }

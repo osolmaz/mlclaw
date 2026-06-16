@@ -9600,42 +9600,55 @@ async function listFiles(root, dir = "") {
   return files.sort();
 }
 
+// src/hf-state-sync/paths.ts
+var DEFAULT_BUCKET_PREFIX = "openclaw-state";
+function remotePath(config, name) {
+  return `${normalizeBucketPrefix(config.bucketPrefix)}/${name.replace(/^\/+/, "")}`;
+}
+function normalizeBucketPrefix(prefix) {
+  const normalized = (prefix?.trim() || DEFAULT_BUCKET_PREFIX).replace(/^\/+|\/+$/g, "");
+  return normalized || DEFAULT_BUCKET_PREFIX;
+}
+
 // src/hclaw/lease.ts
-var RUNTIME_STATUS_PATH = "openclaw-state/runtime/status.json";
-var RUNTIME_HANDOFF_REQUEST_PATH = "openclaw-state/runtime/handoff-request.json";
-var RUNTIME_HANDOFF_ACK_PATH = "openclaw-state/runtime/handoff-ack.json";
+var RUNTIME_STATUS_NAME = "runtime/status.json";
+var RUNTIME_HANDOFF_REQUEST_NAME = "runtime/handoff-request.json";
+var RUNTIME_HANDOFF_ACK_NAME = "runtime/handoff-ack.json";
 var DEFAULT_LEASE_TTL_MS = 3 * 60 * 1e3;
-async function readRuntimeLease(hub, bucket) {
-  const blob = await hub.bucket(bucket).downloadFile(RUNTIME_STATUS_PATH);
+function runtimeObjectPath(name, bucketPrefix) {
+  return remotePath({ bucketPrefix: normalizeBucketPrefix(bucketPrefix) }, name);
+}
+async function readRuntimeLease(hub, bucket, bucketPrefix) {
+  const blob = await hub.bucket(bucket).downloadFile(runtimeObjectPath(RUNTIME_STATUS_NAME, bucketPrefix));
   if (!blob) {
     return null;
   }
   return JSON.parse(await blob.text());
 }
-async function writeRuntimeHandoffRequest(hub, bucket, request) {
+async function writeRuntimeHandoffRequest(hub, bucket, request, bucketPrefix) {
   await hub.bucket(bucket).uploadFiles([
     {
-      path: RUNTIME_HANDOFF_REQUEST_PATH,
+      path: runtimeObjectPath(RUNTIME_HANDOFF_REQUEST_NAME, bucketPrefix),
       content: new Blob([JSON.stringify(request, null, 2) + "\n"], { type: "application/json" })
     }
   ]);
 }
-async function readRuntimeHandoffAck(hub, bucket) {
-  const blob = await hub.bucket(bucket).downloadFile(RUNTIME_HANDOFF_ACK_PATH);
+async function readRuntimeHandoffAck(hub, bucket, bucketPrefix) {
+  const blob = await hub.bucket(bucket).downloadFile(runtimeObjectPath(RUNTIME_HANDOFF_ACK_NAME, bucketPrefix));
   if (!blob) {
     return null;
   }
   return JSON.parse(await blob.text());
 }
-async function clearRuntimeHandoffRequest(hub, bucket) {
-  await hub.bucket(bucket).deleteFiles([RUNTIME_HANDOFF_REQUEST_PATH]);
+async function clearRuntimeHandoffRequest(hub, bucket, bucketPrefix) {
+  await hub.bucket(bucket).deleteFiles([runtimeObjectPath(RUNTIME_HANDOFF_REQUEST_NAME, bucketPrefix)]);
 }
 function runtimeLeaseIsLive(lease, now = /* @__PURE__ */ new Date(), ttlMs = DEFAULT_LEASE_TTL_MS) {
   const last = Date.parse(lease.lastHeartbeatAt);
   return Number.isFinite(last) && now.getTime() - last < ttlMs;
 }
 async function assertNoLiveForeignLease(params) {
-  const lease = await readRuntimeLease(params.hub, params.bucket);
+  const lease = await readRuntimeLease(params.hub, params.bucket, params.bucketPrefix);
   if (!lease || lease.runtimeId === params.runtimeId || params.allowedRuntimeIds?.includes(lease.runtimeId) || !runtimeLeaseIsLive(lease) || params.takeover) {
     return;
   }
@@ -9880,6 +9893,8 @@ async function bootstrap(opts, runtime) {
   const gatewayToken = providedGatewayToken ?? randomBytes(32).toString("base64url");
   const now = runtime.now().toISOString();
   const existingManifest = await readManifest(runtime.configRoot, agentName).catch(() => null);
+  const existingSecrets = await readSecretEnv(runtime.configRoot, agentName).catch(() => ({}));
+  const bucketPrefix = stateBucketPrefix(existingSecrets, runtime);
   const localRuntimeId = existingManifest?.localRuntimeId ?? newLocalRuntimeId(agentName);
   runtime.stdout.log(`Creating private bucket ${names.bucket}`);
   await hub.createBucket(names.bucket, true);
@@ -9907,6 +9922,7 @@ async function bootstrap(opts, runtime) {
     runtimeImage,
     gatewayLocation,
     runtimeId: gatewayLocation === "local" ? manifest.localRuntimeId : spaceRuntimeId(agentName),
+    ...bucketPrefix ? { bucketPrefix } : {},
     ...opts.telegramProxy ? { telegramProxy: opts.telegramProxy } : {},
     ...opts.telegramApiRoot ? { telegramApiRoot: opts.telegramApiRoot } : {}
   });
@@ -9914,6 +9930,7 @@ async function bootstrap(opts, runtime) {
     await assertNoLiveForeignLease({
       hub,
       bucket: names.bucket,
+      bucketPrefix,
       runtimeId: spaceRuntimeId(agentName),
       takeover: Boolean(opts.takeover)
     });
@@ -9937,6 +9954,7 @@ async function bootstrap(opts, runtime) {
     await assertNoLiveForeignLease({
       hub,
       bucket: names.bucket,
+      bucketPrefix,
       runtimeId: manifest.localRuntimeId,
       takeover: Boolean(opts.takeover)
     });
@@ -9980,6 +9998,7 @@ function deploymentSecrets(params) {
     HUGGINGCLAW_RUNTIME_IMAGE: params.runtimeImage,
     HUGGINGCLAW_RUNTIME_ID: params.runtimeId,
     OPENCLAW_GATEWAY_PORT: String(DEFAULT_LOCAL_PORT),
+    ...params.bucketPrefix ? { OPENCLAW_HF_STATE_PREFIX: params.bucketPrefix } : {},
     ...params.telegramProxy ? { TELEGRAM_PROXY: params.telegramProxy } : {},
     ...params.telegramApiRoot ? { TELEGRAM_API_ROOT: params.telegramApiRoot } : {}
   };
@@ -10005,6 +10024,7 @@ async function deploySpaceGateway(params) {
   });
   await setDeploymentVariables(hub, manifest.space, {
     OPENCLAW_HF_STATE_BUCKET: manifest.bucket,
+    ...secrets.OPENCLAW_HF_STATE_PREFIX ? { OPENCLAW_HF_STATE_PREFIX: secrets.OPENCLAW_HF_STATE_PREFIX } : {},
     OPENCLAW_HF_TEMPLATE_REV: templateRev,
     OPENCLAW_MODEL: manifest.model,
     OPENCLAW_AGENT_NAME: manifest.agent,
@@ -10077,11 +10097,13 @@ async function stopLocalGateway(manifest, runtime) {
 }
 async function gatewayStart(agent, opts, runtime) {
   const manifest = await readDeploymentManifest(runtime, agent);
+  const bucketPrefix = await readDeploymentBucketPrefix(runtime, agent);
   const token = await runtime.readToken(runtime.env);
   const hub = runtime.hubFactory(token);
   await assertNoLiveForeignLease({
     hub,
     bucket: manifest.bucket,
+    bucketPrefix,
     runtimeId: runtimeIdFor(manifest),
     takeover: Boolean(opts.takeover)
   });
@@ -10095,16 +10117,18 @@ async function gatewayStart(agent, opts, runtime) {
 }
 async function gatewayStop(agent, runtime) {
   const manifest = await readDeploymentManifest(runtime, agent);
+  const bucketPrefix = await readDeploymentBucketPrefix(runtime, agent);
   if (manifest.gatewayLocation === "local") {
     await stopLocalGateway(manifest, runtime);
     return;
   }
   const token = await runtime.readToken(runtime.env);
   const hub = runtime.hubFactory(token);
-  await disableAndPauseSpaceGateway({ manifest, hub, runtime });
+  await disableAndPauseSpaceGateway({ manifest, hub, runtime, bucketPrefix });
 }
 async function gatewayStatus(agent, runtime) {
   const manifest = await readDeploymentManifest(runtime, agent);
+  const bucketPrefix = await readDeploymentBucketPrefix(runtime, agent);
   runtime.stdout.log(`Agent: ${manifest.agent}`);
   runtime.stdout.log(`Gateway: ${manifest.gatewayLocation}`);
   runtime.stdout.log(`Bucket: ${manifest.bucket}`);
@@ -10123,7 +10147,7 @@ async function gatewayStatus(agent, runtime) {
   try {
     const token = await runtime.readToken(runtime.env);
     const hub = runtime.hubFactory(token);
-    const lease = await readRuntimeLease(hub, manifest.bucket);
+    const lease = await readRuntimeLease(hub, manifest.bucket, bucketPrefix);
     if (lease) {
       runtime.stdout.log(`Lease: ${lease.gatewayLocation} ${lease.runtimeId} heartbeat ${lease.lastHeartbeatAt}`);
     } else {
@@ -10153,6 +10177,7 @@ async function gatewayMigrate(agent, opts, runtime) {
   const token = await runtime.readToken(runtime.env);
   const hub = runtime.hubFactory(token);
   const secrets = await readSecretEnv(runtime.configRoot, agent);
+  const bucketPrefix = stateBucketPrefix(secrets, runtime);
   const updated = {
     ...current,
     gatewayLocation: target,
@@ -10169,10 +10194,11 @@ async function gatewayMigrate(agent, opts, runtime) {
     await assertNoLiveForeignLease({
       hub,
       bucket: current.bucket,
+      bucketPrefix,
       runtimeId: current.localRuntimeId,
       takeover: Boolean(opts.takeover)
     });
-    await handoffAndStopLocalGateway({ manifest: current, hub, runtime });
+    await handoffAndStopLocalGateway({ manifest: current, hub, runtime, bucketPrefix });
     await deploySpaceGateway({
       hub,
       runtime,
@@ -10196,14 +10222,16 @@ async function gatewayMigrate(agent, opts, runtime) {
     await assertNoLiveForeignLease({
       hub,
       bucket: current.bucket,
+      bucketPrefix,
       runtimeId: updated.localRuntimeId,
       allowedRuntimeIds: [spaceRuntimeId(current.agent)],
       takeover: Boolean(opts.takeover)
     });
-    await disableAndPauseSpaceGateway({ manifest: current, hub, runtime });
+    await disableAndPauseSpaceGateway({ manifest: current, hub, runtime, bucketPrefix });
     await assertNoLiveForeignLease({
       hub,
       bucket: current.bucket,
+      bucketPrefix,
       runtimeId: updated.localRuntimeId,
       allowedRuntimeIds: [spaceRuntimeId(current.agent)],
       takeover: Boolean(opts.takeover)
@@ -10231,6 +10259,13 @@ async function readDeploymentManifest(runtime, agent) {
   };
   await writeManifest(runtime.configRoot, updated);
   return updated;
+}
+async function readDeploymentBucketPrefix(runtime, agent) {
+  const secrets = await readSecretEnv(runtime.configRoot, agent).catch(() => ({}));
+  return stateBucketPrefix(secrets, runtime);
+}
+function stateBucketPrefix(secrets, runtime) {
+  return secrets.OPENCLAW_HF_STATE_PREFIX?.trim() || runtime.env.OPENCLAW_HF_STATE_PREFIX?.trim() || void 0;
 }
 function newLocalRuntimeId(agent) {
   return `local-${agent}-${randomBytes(8).toString("hex")}`;
@@ -10262,18 +10297,18 @@ async function handoffAndStopLocalGateway(params) {
     runtimeId: params.manifest.localRuntimeId,
     requestedAt: handoffStartedAt.toISOString(),
     targetRuntimeId: spaceRuntimeId(params.manifest.agent)
-  });
+  }, params.bucketPrefix);
   params.runtime.stdout.log("Waiting for local gateway to upload a final snapshot");
   await waitForRuntimeHandoffAck({
     hub: params.hub,
     bucket: params.manifest.bucket,
+    bucketPrefix: params.bucketPrefix,
     requestId,
     runtimeId: params.manifest.localRuntimeId,
-    since: handoffStartedAt,
     timeoutMs: SPACE_HANDOFF_TIMEOUT_MS,
     pollMs: SPACE_HANDOFF_POLL_MS
   });
-  await clearRuntimeHandoffRequest(params.hub, params.manifest.bucket).catch(() => void 0);
+  await clearRuntimeHandoffRequest(params.hub, params.manifest.bucket, params.bucketPrefix).catch(() => void 0);
   params.runtime.stdout.log("Local final snapshot observed");
   await stopLocalGateway(params.manifest, params.runtime);
 }
@@ -10283,7 +10318,7 @@ async function disableAndPauseSpaceGateway(params) {
   await params.hub.addSpaceVariable(params.manifest.space, "HUGGINGCLAW_GATEWAY_DISABLED", "1");
   const shouldWaitForHandoff = await spaceGatewayCanAcknowledgeHandoff(params);
   if (!shouldWaitForHandoff) {
-    await clearRuntimeHandoffRequest(params.hub, params.manifest.bucket).catch(() => void 0);
+    await clearRuntimeHandoffRequest(params.hub, params.manifest.bucket, params.bucketPrefix).catch(() => void 0);
     await params.hub.pauseSpace(params.manifest.space);
     params.runtime.stdout.log(`Space pause requested: ${params.manifest.space}`);
     return;
@@ -10295,18 +10330,18 @@ async function disableAndPauseSpaceGateway(params) {
     runtimeId: spaceRuntimeId(params.manifest.agent),
     requestedAt: handoffStartedAt.toISOString(),
     targetRuntimeId: params.manifest.localRuntimeId
-  });
+  }, params.bucketPrefix);
   params.runtime.stdout.log("Waiting for Space gateway to upload a final snapshot");
   await waitForRuntimeHandoffAck({
     hub: params.hub,
     bucket: params.manifest.bucket,
+    bucketPrefix: params.bucketPrefix,
     requestId,
     runtimeId: spaceRuntimeId(params.manifest.agent),
-    since: handoffStartedAt,
     timeoutMs: SPACE_HANDOFF_TIMEOUT_MS,
     pollMs: SPACE_HANDOFF_POLL_MS
   });
-  await clearRuntimeHandoffRequest(params.hub, params.manifest.bucket).catch(() => void 0);
+  await clearRuntimeHandoffRequest(params.hub, params.manifest.bucket, params.bucketPrefix).catch(() => void 0);
   params.runtime.stdout.log("Space final snapshot observed");
   await params.hub.pauseSpace(params.manifest.space);
   params.runtime.stdout.log(`Space pause requested: ${params.manifest.space}`);
@@ -10315,7 +10350,7 @@ async function spaceGatewayCanAcknowledgeHandoff(params) {
   const expectedRuntimeId = spaceRuntimeId(params.manifest.agent);
   const [runtimeInfo, lease] = await Promise.all([
     params.hub.getSpaceRuntime(params.manifest.space).catch(() => null),
-    readRuntimeLease(params.hub, params.manifest.bucket).catch(() => null)
+    readRuntimeLease(params.hub, params.manifest.bucket, params.bucketPrefix).catch(() => null)
   ]);
   const stage = typeof runtimeInfo?.stage === "string" ? runtimeInfo.stage.toUpperCase() : "";
   const stageCanRunGateway = !stage || stage === "RUNNING";
@@ -10333,9 +10368,8 @@ async function waitForRuntimeHandoffAck(params) {
   let lastError;
   while (true) {
     try {
-      const ack = await readRuntimeHandoffAck(params.hub, params.bucket);
-      const completedAt = ack ? Date.parse(ack.completedAt) : Number.NaN;
-      if (ack?.requestId === params.requestId && ack.runtimeId === params.runtimeId && Number.isFinite(completedAt) && completedAt >= params.since.getTime()) {
+      const ack = await readRuntimeHandoffAck(params.hub, params.bucket, params.bucketPrefix);
+      if (ack?.requestId === params.requestId && ack.runtimeId === params.runtimeId) {
         return ack;
       }
       lastError = void 0;
