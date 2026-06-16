@@ -321,6 +321,8 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
   const providedGatewayToken = opts.gatewayToken;
   const gatewayToken = providedGatewayToken ?? randomBytes(32).toString("base64url");
   const now = runtime.now().toISOString();
+  const existingManifest = await readManifest(runtime.configRoot, agentName).catch(() => null);
+  const localRuntimeId = existingManifest?.localRuntimeId ?? newLocalRuntimeId(agentName);
 
   runtime.stdout.log(`Creating private bucket ${names.bucket}`);
   await hub.createBucket(names.bucket, true);
@@ -330,11 +332,11 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
     owner,
     bucket: names.bucket,
     space: names.space,
-    localRuntimeId: newLocalRuntimeId(agentName),
+    localRuntimeId,
     gatewayLocation,
     model,
     runtimeImage,
-    createdAt: now,
+    createdAt: existingManifest?.createdAt ?? now,
     updatedAt: now,
   };
   const secrets = deploymentSecrets({
@@ -386,6 +388,7 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
       manifest,
       runtime,
       pull: shouldPull(opts),
+      refresh: true,
     });
   }
 
@@ -500,15 +503,21 @@ async function startLocalGateway(params: {
   manifest: DeploymentManifest;
   runtime: Required<CliRuntime>;
   pull: boolean;
+  refresh?: boolean;
   resetVolume?: boolean;
 }): Promise<void> {
   const { manifest, runtime } = params;
   const containerName = containerNameFor(manifest.agent);
   const volumeName = volumeNameFor(manifest.agent);
   const existing = await runtime.dockerRunner.inspect(containerName);
+  const shouldRefresh = Boolean(params.refresh || params.resetVolume);
   if (existing?.running) {
-    runtime.stdout.log(`Local gateway already running: ${containerName}`);
-    return;
+    if (!shouldRefresh) {
+      runtime.stdout.log(`Local gateway already running: ${containerName}`);
+      return;
+    }
+    await runtime.dockerRunner.stop(containerName);
+    runtime.stdout.log(`Local gateway stopped for config refresh: ${containerName}`);
   }
   if (existing) {
     await runtime.dockerRunner.rm(containerName);
@@ -664,12 +673,20 @@ async function gatewayMigrate(agent: string, opts: GatewayCommandOptions, runtim
       HUGGINGCLAW_RUNTIME_ID: spaceRuntimeId(agent),
     });
   } else {
+    await assertNoLiveForeignLease({
+      hub,
+      bucket: current.bucket,
+      runtimeId: updated.localRuntimeId,
+      allowedRuntimeIds: [spaceRuntimeId(current.agent)],
+      takeover: Boolean(opts.takeover),
+    });
     await disableAndPauseSpaceGateway({ manifest: current, hub, runtime });
     await assertNoLiveForeignLease({
       hub,
       bucket: current.bucket,
       runtimeId: updated.localRuntimeId,
-      takeover: true,
+      allowedRuntimeIds: [spaceRuntimeId(current.agent)],
+      takeover: Boolean(opts.takeover),
     });
     await writeSecretEnv(runtime.configRoot, agent, {
       ...secrets,

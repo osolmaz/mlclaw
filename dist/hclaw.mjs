@@ -9636,7 +9636,7 @@ function runtimeLeaseIsLive(lease, now = /* @__PURE__ */ new Date(), ttlMs = DEF
 }
 async function assertNoLiveForeignLease(params) {
   const lease = await readRuntimeLease(params.hub, params.bucket);
-  if (!lease || lease.runtimeId === params.runtimeId || !runtimeLeaseIsLive(lease) || params.takeover) {
+  if (!lease || lease.runtimeId === params.runtimeId || params.allowedRuntimeIds?.includes(lease.runtimeId) || !runtimeLeaseIsLive(lease) || params.takeover) {
     return;
   }
   throw new Error(
@@ -9879,6 +9879,8 @@ async function bootstrap(opts, runtime) {
   const providedGatewayToken = opts.gatewayToken;
   const gatewayToken = providedGatewayToken ?? randomBytes(32).toString("base64url");
   const now = runtime.now().toISOString();
+  const existingManifest = await readManifest(runtime.configRoot, agentName).catch(() => null);
+  const localRuntimeId = existingManifest?.localRuntimeId ?? newLocalRuntimeId(agentName);
   runtime.stdout.log(`Creating private bucket ${names.bucket}`);
   await hub.createBucket(names.bucket, true);
   const manifest = {
@@ -9887,11 +9889,11 @@ async function bootstrap(opts, runtime) {
     owner,
     bucket: names.bucket,
     space: names.space,
-    localRuntimeId: newLocalRuntimeId(agentName),
+    localRuntimeId,
     gatewayLocation,
     model,
     runtimeImage,
-    createdAt: now,
+    createdAt: existingManifest?.createdAt ?? now,
     updatedAt: now
   };
   const secrets = deploymentSecrets({
@@ -9942,7 +9944,8 @@ async function bootstrap(opts, runtime) {
     await startLocalGateway({
       manifest,
       runtime,
-      pull: shouldPull(opts)
+      pull: shouldPull(opts),
+      refresh: true
     });
   }
   runtime.stdout.log("");
@@ -10025,9 +10028,14 @@ async function startLocalGateway(params) {
   const containerName = containerNameFor(manifest.agent);
   const volumeName = volumeNameFor(manifest.agent);
   const existing = await runtime.dockerRunner.inspect(containerName);
+  const shouldRefresh = Boolean(params.refresh || params.resetVolume);
   if (existing?.running) {
-    runtime.stdout.log(`Local gateway already running: ${containerName}`);
-    return;
+    if (!shouldRefresh) {
+      runtime.stdout.log(`Local gateway already running: ${containerName}`);
+      return;
+    }
+    await runtime.dockerRunner.stop(containerName);
+    runtime.stdout.log(`Local gateway stopped for config refresh: ${containerName}`);
   }
   if (existing) {
     await runtime.dockerRunner.rm(containerName);
@@ -10177,12 +10185,20 @@ async function gatewayMigrate(agent, opts, runtime) {
       HUGGINGCLAW_RUNTIME_ID: spaceRuntimeId(agent)
     });
   } else {
+    await assertNoLiveForeignLease({
+      hub,
+      bucket: current.bucket,
+      runtimeId: updated.localRuntimeId,
+      allowedRuntimeIds: [spaceRuntimeId(current.agent)],
+      takeover: Boolean(opts.takeover)
+    });
     await disableAndPauseSpaceGateway({ manifest: current, hub, runtime });
     await assertNoLiveForeignLease({
       hub,
       bucket: current.bucket,
       runtimeId: updated.localRuntimeId,
-      takeover: true
+      allowedRuntimeIds: [spaceRuntimeId(current.agent)],
+      takeover: Boolean(opts.takeover)
     });
     await writeSecretEnv(runtime.configRoot, agent, {
       ...secrets,

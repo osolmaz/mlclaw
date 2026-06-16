@@ -87,10 +87,17 @@ export async function assertNoLiveForeignLease(params: {
   hub: HubApi;
   bucket: string;
   runtimeId: string;
+  allowedRuntimeIds?: string[];
   takeover?: boolean;
 }): Promise<void> {
   const lease = await readRuntimeLease(params.hub, params.bucket);
-  if (!lease || lease.runtimeId === params.runtimeId || !runtimeLeaseIsLive(lease) || params.takeover) {
+  if (
+    !lease ||
+    lease.runtimeId === params.runtimeId ||
+    params.allowedRuntimeIds?.includes(lease.runtimeId) ||
+    !runtimeLeaseIsLive(lease) ||
+    params.takeover
+  ) {
     return;
   }
   throw new Error(
