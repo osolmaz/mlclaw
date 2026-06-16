@@ -80,7 +80,7 @@ describe("supervise", () => {
       requestId: "request-1",
       agent: "test-agent",
       runtimeId: "space-test-agent",
-      requestedAt: "2026-06-16T00:00:00.000Z",
+      requestedAt: new Date().toISOString(),
       targetRuntimeId: "local-test-agent",
     }) + "\n"));
 
@@ -138,12 +138,51 @@ describe("supervise", () => {
       requestId: "request-1",
       agent: "test-agent",
       runtimeId: "space-test-agent",
-      requestedAt: "2026-06-16T00:00:00.000Z",
+      requestedAt: new Date().toISOString(),
       targetRuntimeId: "local-test-agent",
     }) + "\n"));
 
     await expect(running).rejects.toThrow("final snapshot did not upload");
     expect(hub.objects.has("openclaw-state/runtime/handoff-ack.json")).toBe(false);
     expect(hub.objects.has("openclaw-state/runtime/handoff-request.json")).toBe(true);
+  });
+
+  it("ignores and clears an expired handoff request on the next runtime start", async () => {
+    const liveDir = path.join(dir, "live");
+    const stateDir = path.join(liveDir, ".openclaw");
+    await fs.mkdir(stateDir, { recursive: true });
+    await fs.writeFile(path.join(stateDir, "openclaw.json"), "{}");
+    const config: SyncConfig = {
+      liveDir,
+      bucket: "tester/bucket",
+      bucketPrefix: "openclaw-state",
+      intervalSeconds: 3600,
+      handoffPollSeconds: 0.01,
+      keepSnapshots: 2,
+      runId: "run-space-test-agent",
+      runtimeId: "space-test-agent",
+      agentName: "test-agent",
+      gatewayLocation: "space",
+      runtimeImage: "example/runtime:test",
+    };
+    const hub = createFakeHub();
+    hub.objects.set("openclaw-state/runtime/handoff-request.json", Buffer.from(JSON.stringify({
+      schemaVersion: 1,
+      requestId: "stale-request",
+      agent: "test-agent",
+      runtimeId: "space-test-agent",
+      requestedAt: "2000-01-01T00:00:00.000Z",
+      targetRuntimeId: "local-test-agent",
+    }) + "\n"));
+
+    const exitCode = await supervise({
+      config,
+      hub,
+      command: [process.execPath, "-e", "setTimeout(() => process.exit(7), 200)"],
+    });
+
+    expect(exitCode).toBe(7);
+    expect(hub.objects.has("openclaw-state/runtime/handoff-request.json")).toBe(false);
+    expect(hub.objects.has("openclaw-state/runtime/handoff-ack.json")).toBe(false);
   });
 });

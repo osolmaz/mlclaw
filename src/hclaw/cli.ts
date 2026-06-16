@@ -854,7 +854,7 @@ async function spaceGatewayCanAcknowledgeHandoff(params: {
     readRuntimeLease(params.hub, params.manifest.bucket, params.bucketPrefix).catch(() => null),
   ]);
   const stage = typeof runtimeInfo?.stage === "string" ? runtimeInfo.stage.toUpperCase() : "";
-  const stageCanRunGateway = !stage || stage === "RUNNING";
+  const stageCanRunGateway = !stage || stage === "RUNNING" || stage === "RUNNING_BUILDING";
   const leaseIsCurrentSpace =
     lease?.runtimeId === expectedRuntimeId &&
     lease.gatewayLocation === "space" &&

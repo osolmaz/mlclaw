@@ -8,6 +8,7 @@ import { type SyncConfig, log, logError, remotePath } from "./paths.js";
 import { runSnapshot, type SnapshotOutcome } from "./snapshot.js";
 
 const LEASE_HEARTBEAT_MS = 60_000;
+const HANDOFF_REQUEST_TTL_MS = 10 * 60 * 1000;
 
 /**
  * Run OpenClaw as a child process with a periodic snapshot loop. On SIGTERM/
@@ -63,9 +64,18 @@ export async function supervise(params: {
         parsed?.schemaVersion !== 1 ||
         parsed.agent !== config.agentName ||
         parsed.runtimeId !== config.runtimeId ||
+        typeof parsed.requestedAt !== "string" ||
         typeof parsed.requestId !== "string" ||
         !parsed.requestId
       ) {
+        return null;
+      }
+      const requestedAt = Date.parse(parsed.requestedAt);
+      if (!Number.isFinite(requestedAt) || Date.now() - requestedAt > HANDOFF_REQUEST_TTL_MS) {
+        log(`ignoring expired handoff request ${parsed.requestId}`);
+        await hub.delete([remotePath(config, "runtime/handoff-request.json")]).catch((err) => {
+          logError(`failed to clear expired handoff request: ${err instanceof Error ? err.message : String(err)}`);
+        });
         return null;
       }
       return parsed;

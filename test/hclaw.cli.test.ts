@@ -807,4 +807,50 @@ describe("hclaw CLI", () => {
     )).toBe(false);
     expect(hub.calls).toContainEqual({ name: "pauseSpace", args: ["alice/research"] });
   });
+
+  it("waits for a final Space snapshot while the Space is RUNNING_BUILDING", async () => {
+    const hub = createFakeHub({
+      spaceRuntime: { stage: "RUNNING_BUILDING", hardware: "cpu-upgrade", requested_hardware: "cpu-upgrade", sleep_time: -1 },
+    });
+    const { prompt } = createPrompt([]);
+    const runtime = await createRuntime(hub, prompt);
+    await writeManifest(runtime.configRoot, {
+      version: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-existing",
+      gatewayLocation: "space",
+      model: "test-model",
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      createdAt: "2026-06-16T00:00:00.000Z",
+      updatedAt: "2026-06-16T00:00:00.000Z",
+    });
+    hub.bucketObjects.set("openclaw-state/runtime/status.json", JSON.stringify({
+      schemaVersion: 1,
+      agent: "research",
+      runtimeId: "space-research",
+      gatewayLocation: "space",
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      startedAt: "2026-06-16T00:00:00.000Z",
+      lastHeartbeatAt: "2026-06-16T00:00:01.000Z",
+    }) + "\n");
+
+    await expect(main(["gateway", "stop", "research"], runtime)).resolves.toBe(0);
+
+    const disableIndex = hub.calls.findIndex((call) =>
+      call.name === "addSpaceVariable" &&
+      call.args[1] === "HUGGINGCLAW_GATEWAY_DISABLED"
+    );
+    const handoffIndex = hub.calls.findIndex((call) =>
+      call.name === "bucket.uploadFiles" &&
+      Array.isArray(call.args[0]) &&
+      call.args[0].includes("openclaw-state/runtime/handoff-request.json")
+    );
+    const pauseIndex = hub.calls.findIndex((call) => call.name === "pauseSpace");
+    expect(disableIndex).toBeGreaterThanOrEqual(0);
+    expect(handoffIndex).toBeGreaterThan(disableIndex);
+    expect(pauseIndex).toBeGreaterThan(handoffIndex);
+  });
 });

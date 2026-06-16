@@ -9245,6 +9245,7 @@ import os3 from "node:os";
 import path5 from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 var LEASE_HEARTBEAT_MS = 6e4;
+var HANDOFF_REQUEST_TTL_MS = 10 * 60 * 1e3;
 async function supervise(params) {
   const { config, hub, command } = params;
   const [binary, ...args] = command;
@@ -9283,7 +9284,15 @@ async function supervise(params) {
         return null;
       }
       const parsed = JSON.parse(await fs6.readFile(file, "utf8"));
-      if (parsed?.schemaVersion !== 1 || parsed.agent !== config.agentName || parsed.runtimeId !== config.runtimeId || typeof parsed.requestId !== "string" || !parsed.requestId) {
+      if (parsed?.schemaVersion !== 1 || parsed.agent !== config.agentName || parsed.runtimeId !== config.runtimeId || typeof parsed.requestedAt !== "string" || typeof parsed.requestId !== "string" || !parsed.requestId) {
+        return null;
+      }
+      const requestedAt = Date.parse(parsed.requestedAt);
+      if (!Number.isFinite(requestedAt) || Date.now() - requestedAt > HANDOFF_REQUEST_TTL_MS) {
+        log(`ignoring expired handoff request ${parsed.requestId}`);
+        await hub.delete([remotePath(config, "runtime/handoff-request.json")]).catch((err) => {
+          logError(`failed to clear expired handoff request: ${err instanceof Error ? err.message : String(err)}`);
+        });
         return null;
       }
       return parsed;
