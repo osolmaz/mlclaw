@@ -4307,6 +4307,7 @@ async function readToken(env = process.env) {
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 var execFileAsync = promisify(execFile);
+var DOCKER_STOP_GRACE_SECONDS = 300;
 var CliDockerRunner = class {
   async pull(image) {
     await docker(["pull", image]);
@@ -4334,7 +4335,7 @@ var CliDockerRunner = class {
     await docker(["start", containerName]);
   }
   async stop(containerName) {
-    await docker(["stop", containerName]);
+    await docker(["stop", "--time", String(DOCKER_STOP_GRACE_SECONDS), containerName]);
   }
   async rm(containerName) {
     await docker(["rm", containerName]);
@@ -10315,9 +10316,9 @@ async function handoffAndStopLocalGateway(params) {
 async function disableAndPauseSpaceGateway(params) {
   const handoffStartedAt = params.runtime.now();
   const requestId = randomBytes(16).toString("hex");
-  await params.hub.addSpaceVariable(params.manifest.space, "HUGGINGCLAW_GATEWAY_DISABLED", "1");
   const shouldWaitForHandoff = await spaceGatewayCanAcknowledgeHandoff(params);
   if (!shouldWaitForHandoff) {
+    await params.hub.addSpaceVariable(params.manifest.space, "HUGGINGCLAW_GATEWAY_DISABLED", "1");
     await clearRuntimeHandoffRequest(params.hub, params.manifest.bucket, params.bucketPrefix).catch(() => void 0);
     await params.hub.pauseSpace(params.manifest.space);
     params.runtime.stdout.log(`Space pause requested: ${params.manifest.space}`);
@@ -10331,6 +10332,7 @@ async function disableAndPauseSpaceGateway(params) {
     requestedAt: handoffStartedAt.toISOString(),
     targetRuntimeId: params.manifest.localRuntimeId
   }, params.bucketPrefix);
+  await params.hub.addSpaceVariable(params.manifest.space, "HUGGINGCLAW_GATEWAY_DISABLED", "1");
   params.runtime.stdout.log("Waiting for Space gateway to upload a final snapshot");
   await waitForRuntimeHandoffAck({
     hub: params.hub,

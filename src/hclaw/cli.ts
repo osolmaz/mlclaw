@@ -810,9 +810,9 @@ async function disableAndPauseSpaceGateway(params: {
 }): Promise<void> {
   const handoffStartedAt = params.runtime.now();
   const requestId = randomBytes(16).toString("hex");
-  await params.hub.addSpaceVariable(params.manifest.space, "HUGGINGCLAW_GATEWAY_DISABLED", "1");
   const shouldWaitForHandoff = await spaceGatewayCanAcknowledgeHandoff(params);
   if (!shouldWaitForHandoff) {
+    await params.hub.addSpaceVariable(params.manifest.space, "HUGGINGCLAW_GATEWAY_DISABLED", "1");
     await clearRuntimeHandoffRequest(params.hub, params.manifest.bucket, params.bucketPrefix).catch(() => undefined);
     await params.hub.pauseSpace(params.manifest.space);
     params.runtime.stdout.log(`Space pause requested: ${params.manifest.space}`);
@@ -826,6 +826,7 @@ async function disableAndPauseSpaceGateway(params: {
     requestedAt: handoffStartedAt.toISOString(),
     targetRuntimeId: params.manifest.localRuntimeId,
   }, params.bucketPrefix);
+  await params.hub.addSpaceVariable(params.manifest.space, "HUGGINGCLAW_GATEWAY_DISABLED", "1");
   params.runtime.stdout.log("Waiting for Space gateway to upload a final snapshot");
   await waitForRuntimeHandoffAck({
     hub: params.hub,

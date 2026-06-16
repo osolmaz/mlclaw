@@ -606,8 +606,9 @@ describe("hclaw CLI", () => {
     const removeVolumeIndex = runtime.dockerRunner.calls.findIndex((call) => call.name === "rmVolume");
     const startIndex = runtime.dockerRunner.calls.findIndex((call) => call.name === "run");
     expect(disableIndex).toBeGreaterThanOrEqual(0);
-    expect(handoffIndex).toBeGreaterThan(disableIndex);
-    expect(pauseIndex).toBeGreaterThan(handoffIndex);
+    expect(handoffIndex).toBeGreaterThanOrEqual(0);
+    expect(disableIndex).toBeGreaterThan(handoffIndex);
+    expect(pauseIndex).toBeGreaterThan(disableIndex);
     expect(removeIndex).toBeGreaterThanOrEqual(0);
     expect(removeVolumeIndex).toBeGreaterThan(removeIndex);
     expect(startIndex).toBeGreaterThan(removeVolumeIndex);
@@ -850,7 +851,8 @@ describe("hclaw CLI", () => {
     );
     const pauseIndex = hub.calls.findIndex((call) => call.name === "pauseSpace");
     expect(disableIndex).toBeGreaterThanOrEqual(0);
-    expect(handoffIndex).toBeGreaterThan(disableIndex);
-    expect(pauseIndex).toBeGreaterThan(handoffIndex);
+    expect(handoffIndex).toBeGreaterThanOrEqual(0);
+    expect(disableIndex).toBeGreaterThan(handoffIndex);
+    expect(pauseIndex).toBeGreaterThan(disableIndex);
   });
 });

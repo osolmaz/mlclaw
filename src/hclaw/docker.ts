@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+const DOCKER_STOP_GRACE_SECONDS = 300;
 
 export type DockerRunner = {
   pull(image: string): Promise<void>;
@@ -62,7 +63,7 @@ export class CliDockerRunner implements DockerRunner {
   }
 
   async stop(containerName: string): Promise<void> {
-    await docker(["stop", containerName]);
+    await docker(["stop", "--time", String(DOCKER_STOP_GRACE_SECONDS), containerName]);
   }
 
   async rm(containerName: string): Promise<void> {

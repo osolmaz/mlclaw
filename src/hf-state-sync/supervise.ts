@@ -209,6 +209,17 @@ export async function supervise(params: {
   stopping = true;
 
   log(`child exited with code ${exitCode}, taking final snapshot`);
+  if (!handoffState.request) {
+    try {
+      const shutdownRequest = await readHandoffRequest();
+      if (shutdownRequest) {
+        handoffState.request = shutdownRequest;
+        log(`handoff ${shutdownRequest.requestId} requested for ${shutdownRequest.targetRuntimeId}`);
+      }
+    } catch (err) {
+      logError(`shutdown handoff check failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
   const finalOutcome = await snapshotFinal();
   if (handoffState.request) {
     const request = handoffState.request;

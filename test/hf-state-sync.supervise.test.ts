@@ -185,4 +185,48 @@ describe("supervise", () => {
     expect(hub.objects.has("openclaw-state/runtime/handoff-request.json")).toBe(false);
     expect(hub.objects.has("openclaw-state/runtime/handoff-ack.json")).toBe(false);
   });
+
+  it("acknowledges a fresh handoff request discovered during shutdown", async () => {
+    const liveDir = path.join(dir, "live");
+    const stateDir = path.join(liveDir, ".openclaw");
+    await fs.mkdir(stateDir, { recursive: true });
+    await fs.writeFile(path.join(stateDir, "openclaw.json"), "{}");
+    const config: SyncConfig = {
+      liveDir,
+      bucket: "tester/bucket",
+      bucketPrefix: "openclaw-state",
+      intervalSeconds: 3600,
+      handoffPollSeconds: 3600,
+      keepSnapshots: 2,
+      runId: "run-space-test-agent",
+      runtimeId: "space-test-agent",
+      agentName: "test-agent",
+      gatewayLocation: "space",
+      runtimeImage: "example/runtime:test",
+    };
+    const hub = createFakeHub();
+    hub.objects.set("openclaw-state/runtime/handoff-request.json", Buffer.from(JSON.stringify({
+      schemaVersion: 1,
+      requestId: "request-at-shutdown",
+      agent: "test-agent",
+      runtimeId: "space-test-agent",
+      requestedAt: new Date().toISOString(),
+      targetRuntimeId: "local-test-agent",
+    }) + "\n"));
+
+    const exitCode = await supervise({
+      config,
+      hub,
+      command: [process.execPath, "-e", "process.exit(7)"],
+    });
+
+    expect(exitCode).toBe(0);
+    expect(hub.objects.has("openclaw-state/runtime/handoff-request.json")).toBe(false);
+    const ack = JSON.parse(hub.objects.get("openclaw-state/runtime/handoff-ack.json")?.toString("utf8") ?? "{}");
+    expect(ack).toMatchObject({
+      schemaVersion: 1,
+      requestId: "request-at-shutdown",
+      runtimeId: "space-test-agent",
+    });
+  });
 });
