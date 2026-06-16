@@ -97,4 +97,53 @@ describe("supervise", () => {
     });
     expect(ack.lastSnapshotId).toEqual(expect.stringContaining("snapshots/state-"));
   });
+
+  it("does not acknowledge a handoff request when the final snapshot upload fails", async () => {
+    const liveDir = path.join(dir, "live");
+    const stateDir = path.join(liveDir, ".openclaw");
+    await fs.mkdir(stateDir, { recursive: true });
+    await fs.writeFile(path.join(stateDir, "openclaw.json"), "{}");
+    const config: SyncConfig = {
+      liveDir,
+      bucket: "tester/bucket",
+      bucketPrefix: "openclaw-state",
+      intervalSeconds: 3600,
+      handoffPollSeconds: 1,
+      keepSnapshots: 2,
+      runId: "run-space-test-agent",
+      runtimeId: "space-test-agent",
+      agentName: "test-agent",
+      gatewayLocation: "space",
+      runtimeImage: "example/runtime:test",
+    };
+    const baseHub = createFakeHub();
+    const hub = {
+      ...baseHub,
+      async upload(localPath: string, remotePath: string) {
+        if (remotePath.startsWith("openclaw-state/snapshots/")) {
+          throw new Error("bucket upload failed");
+        }
+        await baseHub.upload(localPath, remotePath);
+      },
+    };
+    const running = supervise({
+      config,
+      hub,
+      command: [process.execPath, "-e", "setInterval(() => {}, 1000)"],
+    });
+
+    await delay(50);
+    hub.objects.set("openclaw-state/runtime/handoff-request.json", Buffer.from(JSON.stringify({
+      schemaVersion: 1,
+      requestId: "request-1",
+      agent: "test-agent",
+      runtimeId: "space-test-agent",
+      requestedAt: "2026-06-16T00:00:00.000Z",
+      targetRuntimeId: "local-test-agent",
+    }) + "\n"));
+
+    await expect(running).rejects.toThrow("final snapshot did not upload");
+    expect(hub.objects.has("openclaw-state/runtime/handoff-ack.json")).toBe(false);
+    expect(hub.objects.has("openclaw-state/runtime/handoff-request.json")).toBe(true);
+  });
 });

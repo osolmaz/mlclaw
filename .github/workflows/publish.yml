@@ -20,6 +20,11 @@ jobs:
           node-version: "24"
           cache: npm
           registry-url: "https://registry.npmjs.org"
+      - id: package-version
+        shell: bash
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
       - run: npm ci
       - run: npm run build
       - run: npm run typecheck
@@ -39,5 +44,6 @@ jobs:
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/huggingclaw-runtime:latest
+            ghcr.io/${{ github.repository_owner }}/huggingclaw-runtime:${{ steps.package-version.outputs.version }}
             ghcr.io/${{ github.repository_owner }}/huggingclaw-runtime:${{ github.event.release.tag_name }}
       - run: npm publish --access public --provenance

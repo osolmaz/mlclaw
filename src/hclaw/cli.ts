@@ -348,9 +348,13 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
     ...(opts.telegramProxy ? { telegramProxy: opts.telegramProxy } : {}),
     ...(opts.telegramApiRoot ? { telegramApiRoot: opts.telegramApiRoot } : {}),
   });
-  await writeLocalDeployment(runtime.configRoot, manifest, secrets);
-
   if (gatewayLocation === "space") {
+    await assertNoLiveForeignLease({
+      hub,
+      bucket: names.bucket,
+      runtimeId: spaceRuntimeId(agentName),
+      takeover: Boolean(opts.takeover),
+    });
     const paidHardware = await resolveHardware({
       ...(opts.hardware ? { requestedHardware: opts.hardware } : {}),
       ...(typeof opts.sleepTime === "number" ? { requestedSleepTime: opts.sleepTime } : {}),
@@ -366,6 +370,7 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
       hardware: paidHardware.hardware,
       ...(typeof paidHardware.sleepTime === "number" ? { sleepTime: paidHardware.sleepTime } : {}),
     });
+    await writeLocalDeployment(runtime.configRoot, manifest, secrets);
   } else {
     await assertNoLiveForeignLease({
       hub,
@@ -373,6 +378,7 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
       runtimeId: manifest.localRuntimeId,
       takeover: Boolean(opts.takeover),
     });
+    await writeLocalDeployment(runtime.configRoot, manifest, secrets);
     await startLocalGateway({
       manifest,
       runtime,

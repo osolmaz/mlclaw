@@ -5,7 +5,9 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { BucketHub } from "./hub.js";
 import { type SyncConfig, log, logError, remotePath } from "./paths.js";
-import { runSnapshot } from "./snapshot.js";
+import { runSnapshot, type SnapshotOutcome } from "./snapshot.js";
+
+const LEASE_HEARTBEAT_MS = 60_000;
 
 /**
  * Run OpenClaw as a child process with a periodic snapshot loop. On SIGTERM/
@@ -102,8 +104,8 @@ export async function supervise(params: {
   });
 
   let stopping = false;
-  let inFlight: Promise<void> | null = null;
-  const runOnce = async (label: string) => {
+  let inFlight: Promise<SnapshotOutcome> | null = null;
+  const runOnce = async (label: string): Promise<SnapshotOutcome> => {
     try {
       const outcome = await runSnapshot({ config, hub, bootTime });
       if (outcome.kind === "failed") {
@@ -114,31 +116,31 @@ export async function supervise(params: {
       await writeLease().catch((err) => {
         logError(`${label}: lease heartbeat failed: ${err instanceof Error ? err.message : String(err)}`);
       });
+      return outcome;
     } finally {
       inFlight = null;
     }
   };
-  const snapshotInterval = () => {
+  const snapshotInterval = async () => {
     if (inFlight) {
       log("interval: previous snapshot still running, skipping");
-      return Promise.resolve();
+      return;
     }
     inFlight = runOnce("interval");
-    return inFlight;
+    await inFlight;
   };
   // The final snapshot must neither be skipped nor kill an in-flight upload:
   // wait the in-flight one out, then take a fresh snapshot of the quiesced
   // state before the process is allowed to exit.
-  const snapshotFinal = async () => {
+  const snapshotFinal = async (): Promise<SnapshotOutcome> => {
     if (inFlight) {
       await inFlight;
     }
     inFlight = runOnce("final");
-    await inFlight;
+    return await inFlight;
   };
 
-  const loop = (async () => {
-    await writeLease().catch((err) => logError(`initial lease failed: ${err instanceof Error ? err.message : String(err)}`));
+  const snapshotLoop = (async () => {
     while (!stopping) {
       await delay(config.intervalSeconds * 1000);
       if (stopping) {
@@ -147,7 +149,21 @@ export async function supervise(params: {
       await snapshotInterval();
     }
   })();
-  void loop;
+  void snapshotLoop;
+
+  const heartbeatLoop = (async () => {
+    await writeLease().catch((err) => logError(`initial lease failed: ${err instanceof Error ? err.message : String(err)}`));
+    while (!stopping) {
+      await delay(LEASE_HEARTBEAT_MS);
+      if (stopping) {
+        return;
+      }
+      await writeLease().catch((err) => {
+        logError(`lease heartbeat failed: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }
+  })();
+  void heartbeatLoop;
 
   const handoffLoop = (async () => {
     while (!stopping && !handoffState.request) {
@@ -183,9 +199,12 @@ export async function supervise(params: {
   stopping = true;
 
   log(`child exited with code ${exitCode}, taking final snapshot`);
-  await snapshotFinal();
+  const finalOutcome = await snapshotFinal();
   if (handoffState.request) {
     const request = handoffState.request;
+    if (finalOutcome.kind !== "uploaded") {
+      throw new Error(`handoff ${request.requestId} final snapshot did not upload: ${snapshotFailureDetail(finalOutcome)}`);
+    }
     await writeHandoffAck(request).catch((err) => {
       throw new Error(`handoff ${request.requestId} snapshot completed but ack failed: ${err instanceof Error ? err.message : String(err)}`);
     });
@@ -193,6 +212,17 @@ export async function supervise(params: {
     return 0;
   }
   return exitCode;
+}
+
+function snapshotFailureDetail(outcome: SnapshotOutcome): string {
+  switch (outcome.kind) {
+    case "uploaded":
+      return "uploaded";
+    case "failed":
+      return outcome.detail;
+    case "skipped":
+      return outcome.reason;
+  }
 }
 
 type RuntimeHandoffRequest = {

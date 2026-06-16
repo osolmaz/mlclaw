@@ -3,7 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { main } from "../src/hclaw/cli.js";
-import { readManifest, readSecretEnv } from "../src/hclaw/local-config.js";
+import { DEFAULT_RUNTIME_IMAGE } from "../src/hclaw/runtime-image.js";
+import { readManifest, readSecretEnv, writeManifest, type DeploymentManifest } from "../src/hclaw/local-config.js";
 import type { HubApi, SpaceRuntime } from "../src/hclaw/hub-api.js";
 import type { DockerRunner, DockerInspect, DockerRunParams } from "../src/hclaw/docker.js";
 import type { BucketEntry } from "../src/hf-bucket-client/client.js";
@@ -118,7 +119,7 @@ function createFakeHub() {
         agent,
         runtimeId: variables.get("HUGGINGCLAW_RUNTIME_ID")?.value ?? `space-${agent}`,
         gatewayLocation: variables.get("HUGGINGCLAW_GATEWAY_LOCATION")?.value ?? "space",
-        runtimeImage: variables.get("HUGGINGCLAW_RUNTIME_IMAGE")?.value ?? "ghcr.io/osolmaz/huggingclaw-runtime:latest",
+        runtimeImage: variables.get("HUGGINGCLAW_RUNTIME_IMAGE")?.value ?? DEFAULT_RUNTIME_IMAGE,
         startedAt: "2026-06-16T00:00:00.000Z",
         lastHeartbeatAt: "2026-06-16T00:00:01.000Z",
         lastSnapshotId: `${bucket}/snapshot.tar.zst`,
@@ -225,7 +226,7 @@ describe("hclaw CLI", () => {
       args: [
         expect.objectContaining({
           containerName: "huggingclaw-research",
-          image: "ghcr.io/osolmaz/huggingclaw-runtime:latest",
+          image: DEFAULT_RUNTIME_IMAGE,
         }),
       ],
     });
@@ -246,8 +247,90 @@ describe("hclaw CLI", () => {
     expect(code).toBe(0);
     expect(runtime.dockerRunner.calls).toContainEqual({
       name: "pull",
-      args: ["ghcr.io/osolmaz/huggingclaw-runtime:latest"],
+      args: [DEFAULT_RUNTIME_IMAGE],
     });
+  });
+
+  it("does not rewrite local config when bootstrap is blocked by a live Space lease", async () => {
+    const hub = createFakeHub();
+    hub.bucketObjects.set("openclaw-state/runtime/status.json", JSON.stringify({
+      schemaVersion: 1,
+      agent: "research",
+      runtimeId: "space-research",
+      gatewayLocation: "space",
+      runtimeImage: "example/runtime:old",
+      startedAt: new Date().toISOString(),
+      lastHeartbeatAt: new Date().toISOString(),
+    }) + "\n");
+    const { prompt } = createPrompt([]);
+    const stderr: string[] = [];
+    const runtime = await createRuntime(hub, prompt, stderr);
+    const original: DeploymentManifest = {
+      version: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-original",
+      gatewayLocation: "space" as const,
+      model: "old-model",
+      runtimeImage: "example/runtime:old",
+      createdAt: "2026-06-15T00:00:00.000Z",
+      updatedAt: "2026-06-15T00:00:00.000Z",
+    };
+    await writeManifest(runtime.configRoot, original);
+
+    const code = await main([
+      "bootstrap",
+      "--name",
+      "research",
+      "--telegram-token",
+      "telegram-token",
+      "--telegram-user-id",
+      "7216393410",
+      "--gateway-token",
+      "gateway-token",
+      "--no-pull",
+    ], runtime);
+
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain("another gateway appears active");
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toEqual(original);
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(false);
+  });
+
+  it("blocks Space bootstrap when a local gateway lease is live", async () => {
+    const hub = createFakeHub();
+    hub.bucketObjects.set("openclaw-state/runtime/status.json", JSON.stringify({
+      schemaVersion: 1,
+      agent: "research",
+      runtimeId: "local-research-existing",
+      gatewayLocation: "local",
+      runtimeImage: "example/runtime:old",
+      startedAt: new Date().toISOString(),
+      lastHeartbeatAt: new Date().toISOString(),
+    }) + "\n");
+    const { prompt } = createPrompt([]);
+    const stderr: string[] = [];
+    const runtime = await createRuntime(hub, prompt, stderr);
+
+    const code = await main([
+      "bootstrap",
+      "--gateway",
+      "space",
+      "--telegram-token",
+      "telegram-token",
+      "--telegram-user-id",
+      "7216393410",
+      "--gateway-token",
+      "gateway-token",
+      "--yes",
+    ], runtime);
+
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain("another gateway appears active");
+    expect(hub.calls.some((call) => call.name === "createDockerSpace")).toBe(false);
+    await expect(readManifest(runtime.configRoot, "research")).rejects.toThrow();
   });
 
   it("runs bootstrap as Space gateway when requested and prompts for paid hardware", async () => {

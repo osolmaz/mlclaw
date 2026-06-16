@@ -9240,6 +9240,7 @@ import fs6 from "node:fs/promises";
 import os3 from "node:os";
 import path5 from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+var LEASE_HEARTBEAT_MS = 6e4;
 async function supervise(params) {
   const { config, hub, command } = params;
   const [binary, ...args] = command;
@@ -9327,27 +9328,27 @@ async function supervise(params) {
       await writeLease().catch((err) => {
         logError(`${label}: lease heartbeat failed: ${err instanceof Error ? err.message : String(err)}`);
       });
+      return outcome;
     } finally {
       inFlight = null;
     }
   };
-  const snapshotInterval = () => {
+  const snapshotInterval = async () => {
     if (inFlight) {
       log("interval: previous snapshot still running, skipping");
-      return Promise.resolve();
+      return;
     }
     inFlight = runOnce("interval");
-    return inFlight;
+    await inFlight;
   };
   const snapshotFinal = async () => {
     if (inFlight) {
       await inFlight;
     }
     inFlight = runOnce("final");
-    await inFlight;
+    return await inFlight;
   };
-  const loop = (async () => {
-    await writeLease().catch((err) => logError(`initial lease failed: ${err instanceof Error ? err.message : String(err)}`));
+  const snapshotLoop = (async () => {
     while (!stopping) {
       await delay(config.intervalSeconds * 1e3);
       if (stopping) {
@@ -9356,7 +9357,20 @@ async function supervise(params) {
       await snapshotInterval();
     }
   })();
-  void loop;
+  void snapshotLoop;
+  const heartbeatLoop = (async () => {
+    await writeLease().catch((err) => logError(`initial lease failed: ${err instanceof Error ? err.message : String(err)}`));
+    while (!stopping) {
+      await delay(LEASE_HEARTBEAT_MS);
+      if (stopping) {
+        return;
+      }
+      await writeLease().catch((err) => {
+        logError(`lease heartbeat failed: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }
+  })();
+  void heartbeatLoop;
   const handoffLoop = (async () => {
     while (!stopping && !handoffState.request) {
       await delay(config.handoffPollSeconds * 1e3);
@@ -9388,9 +9402,12 @@ async function supervise(params) {
   const exitCode = await childExit;
   stopping = true;
   log(`child exited with code ${exitCode}, taking final snapshot`);
-  await snapshotFinal();
+  const finalOutcome = await snapshotFinal();
   if (handoffState.request) {
     const request = handoffState.request;
+    if (finalOutcome.kind !== "uploaded") {
+      throw new Error(`handoff ${request.requestId} final snapshot did not upload: ${snapshotFailureDetail(finalOutcome)}`);
+    }
     await writeHandoffAck(request).catch((err) => {
       throw new Error(`handoff ${request.requestId} snapshot completed but ack failed: ${err instanceof Error ? err.message : String(err)}`);
     });
@@ -9398,6 +9415,16 @@ async function supervise(params) {
     return 0;
   }
   return exitCode;
+}
+function snapshotFailureDetail(outcome) {
+  switch (outcome.kind) {
+    case "uploaded":
+      return "uploaded";
+    case "failed":
+      return outcome.detail;
+    case "skipped":
+      return outcome.reason;
+  }
 }
 
 // src/hf-state-sync/cli.ts

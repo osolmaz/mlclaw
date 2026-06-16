@@ -1195,8 +1195,8 @@ var require_command = __commonJS({
   "node_modules/commander/lib/command.js"(exports) {
     var EventEmitter = __require("node:events").EventEmitter;
     var childProcess = __require("node:child_process");
-    var path4 = __require("node:path");
-    var fs5 = __require("node:fs");
+    var path5 = __require("node:path");
+    var fs6 = __require("node:fs");
     var process3 = __require("node:process");
     var { Argument: Argument2, humanReadableArgName } = require_argument();
     var { CommanderError: CommanderError2 } = require_error();
@@ -2190,7 +2190,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
        * @param {string} subcommandName
        */
       _checkForMissingExecutable(executableFile, executableDir, subcommandName) {
-        if (fs5.existsSync(executableFile)) return;
+        if (fs6.existsSync(executableFile)) return;
         const executableDirMessage = executableDir ? `searched for local subcommand relative to directory '${executableDir}'` : "no directory for search for local subcommand, use .executableDir() to supply a custom directory";
         const executableMissing = `'${executableFile}' does not exist
  - if '${subcommandName}' is not meant to be an executable command, remove description parameter from '.command()' and use '.description()' instead
@@ -2208,11 +2208,11 @@ Expecting one of '${allowedValues.join("', '")}'`);
         let launchWithNode = false;
         const sourceExt = [".js", ".ts", ".tsx", ".mjs", ".cjs"];
         function findFile(baseDir, baseName) {
-          const localBin = path4.resolve(baseDir, baseName);
-          if (fs5.existsSync(localBin)) return localBin;
-          if (sourceExt.includes(path4.extname(baseName))) return void 0;
+          const localBin = path5.resolve(baseDir, baseName);
+          if (fs6.existsSync(localBin)) return localBin;
+          if (sourceExt.includes(path5.extname(baseName))) return void 0;
           const foundExt = sourceExt.find(
-            (ext) => fs5.existsSync(`${localBin}${ext}`)
+            (ext) => fs6.existsSync(`${localBin}${ext}`)
           );
           if (foundExt) return `${localBin}${foundExt}`;
           return void 0;
@@ -2224,21 +2224,21 @@ Expecting one of '${allowedValues.join("', '")}'`);
         if (this._scriptPath) {
           let resolvedScriptPath;
           try {
-            resolvedScriptPath = fs5.realpathSync(this._scriptPath);
+            resolvedScriptPath = fs6.realpathSync(this._scriptPath);
           } catch {
             resolvedScriptPath = this._scriptPath;
           }
-          executableDir = path4.resolve(
-            path4.dirname(resolvedScriptPath),
+          executableDir = path5.resolve(
+            path5.dirname(resolvedScriptPath),
             executableDir
           );
         }
         if (executableDir) {
           let localFile = findFile(executableDir, executableFile);
           if (!localFile && !subcommand._executableFile && this._scriptPath) {
-            const legacyName = path4.basename(
+            const legacyName = path5.basename(
               this._scriptPath,
-              path4.extname(this._scriptPath)
+              path5.extname(this._scriptPath)
             );
             if (legacyName !== this._name) {
               localFile = findFile(
@@ -2249,7 +2249,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
           }
           executableFile = localFile || executableFile;
         }
-        launchWithNode = sourceExt.includes(path4.extname(executableFile));
+        launchWithNode = sourceExt.includes(path5.extname(executableFile));
         let proc;
         if (process3.platform !== "win32") {
           if (launchWithNode) {
@@ -3164,7 +3164,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
        * @return {Command}
        */
       nameFromFilename(filename) {
-        this._name = path4.basename(filename, path4.extname(filename));
+        this._name = path5.basename(filename, path5.extname(filename));
         return this;
       }
       /**
@@ -3178,9 +3178,9 @@ Expecting one of '${allowedValues.join("', '")}'`);
        * @param {string} [path]
        * @return {(string|null|Command)}
        */
-      executableDir(path5) {
-        if (path5 === void 0) return this._executableDir;
-        this._executableDir = path5;
+      executableDir(path6) {
+        if (path6 === void 0) return this._executableDir;
+        this._executableDir = path6;
         return this;
       }
       /**
@@ -3515,7 +3515,7 @@ var require_src = __commonJS({
 });
 
 // src/hclaw/cli.ts
-import fs4 from "node:fs/promises";
+import fs5 from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import process2 from "node:process";
 import { randomBytes } from "node:crypto";
@@ -4392,10 +4392,10 @@ function parseGatewayLocation(value) {
 
 // src/hclaw/git.ts
 import { execFile as execFile2 } from "node:child_process";
-import fs2 from "node:fs/promises";
+import fs3 from "node:fs/promises";
 import os2 from "node:os";
-import path2 from "node:path";
-import { fileURLToPath } from "node:url";
+import path3 from "node:path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
 import { promisify as promisify2 } from "node:util";
 
 // src/vendor/hfjs-xet/error.ts
@@ -8218,10 +8218,10 @@ var CurrentXorbInfo = class {
       hash: computeXorbHash(xorbChunksCleaned),
       chunks: xorbChunksCleaned,
       id: this.id,
-      files: Object.entries(this.fileProcessedBytes).map(([path4, processedBytes]) => ({
-        path: path4,
-        progress: processedBytes / this.fileSize[path4],
-        lastSentProgress: ((this.fileUploadedBytes[path4] ?? 0) + (processedBytes - (this.fileUploadedBytes[path4] ?? 0)) * PROCESSING_PROGRESS_RATIO) / this.fileSize[path4]
+      files: Object.entries(this.fileProcessedBytes).map(([path5, processedBytes]) => ({
+        path: path5,
+        progress: processedBytes / this.fileSize[path5],
+        lastSentProgress: ((this.fileUploadedBytes[path5] ?? 0) + (processedBytes - (this.fileUploadedBytes[path5] ?? 0)) * PROCESSING_PROGRESS_RATIO) / this.fileSize[path5]
       }))
     };
   }
@@ -9094,7 +9094,7 @@ var BucketClient = class {
     if (paths.length === 0) {
       return;
     }
-    await this.batch(paths.map((path4) => ({ type: "deleteFile", path: path4 })));
+    await this.batch(paths.map((path5) => ({ type: "deleteFile", path: path5 })));
   }
   async batch(operations) {
     const body = `${operations.map((op) => JSON.stringify(op)).join("\n")}
@@ -9110,8 +9110,8 @@ var BucketClient = class {
    * any other failure (including bucket/auth errors), so a missing object is
    * never conflated with an unreachable bucket.
    */
-  async downloadFile(path4) {
-    const url = `${this.hubUrl}/buckets/${this.bucket}/resolve/${encodeURIComponent(path4)}`;
+  async downloadFile(path5) {
+    const url = `${this.hubUrl}/buckets/${this.bucket}/resolve/${encodeURIComponent(path5)}`;
     const response = await this.fetchWithRetry(url);
     if (response.status === 404) {
       await this.assertBucketAccessible();
@@ -9341,9 +9341,9 @@ var HubApi = class {
           encoding: "base64"
         }
       })),
-      ...(params.deletePaths ?? []).map((path4) => ({
+      ...(params.deletePaths ?? []).map((path5) => ({
         key: "deletedFile",
-        value: { path: path4 }
+        value: { path: path5 }
       }))
     ].map((entry) => JSON.stringify(entry)).join("\n");
     await this.request(`/api/spaces/${repoId}/commit/${encodeURIComponent(params.branch ?? "main")}`, {
@@ -9415,20 +9415,48 @@ function sseDataToText(raw) {
 }
 
 // src/hclaw/runtime-image.ts
-var DEFAULT_RUNTIME_IMAGE = "ghcr.io/osolmaz/huggingclaw-runtime:latest";
+import fs2 from "node:fs";
+import path2 from "node:path";
+import { fileURLToPath } from "node:url";
+var RUNTIME_IMAGE_REPOSITORY = "ghcr.io/osolmaz/huggingclaw-runtime";
+var DEFAULT_RUNTIME_IMAGE = `${RUNTIME_IMAGE_REPOSITORY}:${readPackageVersion()}`;
 function resolveRuntimeImage(value, env = process.env) {
   return value?.trim() || env.HUGGINGCLAW_RUNTIME_IMAGE?.trim() || DEFAULT_RUNTIME_IMAGE;
+}
+function readPackageVersion() {
+  let dir = path2.dirname(fileURLToPath(import.meta.url));
+  while (true) {
+    const candidate = path2.join(dir, "package.json");
+    try {
+      const parsed = JSON.parse(fs2.readFileSync(candidate, "utf8"));
+      if (typeof parsed.version === "string" && parsed.version.trim()) {
+        return parsed.version.trim();
+      }
+    } catch (err) {
+      if (!isMissingFileError(err)) {
+        throw err;
+      }
+    }
+    const parent = path2.dirname(dir);
+    if (parent === dir) {
+      throw new Error("could not find package.json while resolving default runtime image");
+    }
+    dir = parent;
+  }
+}
+function isMissingFileError(err) {
+  return err instanceof Error && "code" in err && err.code === "ENOENT";
 }
 
 // src/hclaw/git.ts
 var execFileAsync2 = promisify2(execFile2);
 async function pushTemplateToSpace(params) {
-  const tempRoot = await fs2.mkdtemp(path2.join(os2.tmpdir(), "hclaw-space-"));
+  const tempRoot = await fs3.mkdtemp(path3.join(os2.tmpdir(), "hclaw-space-"));
   try {
     const sourceDir = params.sourceDir ?? process.env.HCLAW_SOURCE_DIR ?? await findPackagedSourceRoot();
     const templateRev = await currentTemplateRev(sourceDir);
-    const outDir = path2.join(tempRoot, "space");
-    await fs2.mkdir(outDir, { recursive: true });
+    const outDir = path3.join(tempRoot, "space");
+    await fs3.mkdir(outDir, { recursive: true });
     await generateSpaceRepo(sourceDir, outDir, {
       ...params.runtimeImage ? { runtimeImage: params.runtimeImage } : {}
     });
@@ -9446,7 +9474,7 @@ async function pushTemplateToSpace(params) {
     });
     return { templateRev };
   } finally {
-    await fs2.rm(tempRoot, { recursive: true, force: true });
+    await fs3.rm(tempRoot, { recursive: true, force: true });
   }
 }
 async function currentTemplateRev(sourceDir) {
@@ -9459,7 +9487,7 @@ async function currentTemplateRev(sourceDir) {
     }
   } catch {
   }
-  const pkg = JSON.parse(await fs2.readFile(path2.join(sourceDir, "package.json"), "utf8"));
+  const pkg = JSON.parse(await fs3.readFile(path3.join(sourceDir, "package.json"), "utf8"));
   return `npm:${pkg.name ?? "huggingclaw"}@${pkg.version ?? "unknown"}`;
 }
 async function generateSpaceRepo(sourceDir, outDir, options = {}) {
@@ -9469,23 +9497,23 @@ async function generateSpaceRepo(sourceDir, outDir, options = {}) {
     ["space/README.md", "README.md"]
   ];
   for (const [from, to] of copies) {
-    await copyExisting(path2.join(sourceDir, from), path2.join(outDir, to));
+    await copyExisting(path3.join(sourceDir, from), path3.join(outDir, to));
   }
-  await fs2.writeFile(
-    path2.join(outDir, "Dockerfile"),
+  await fs3.writeFile(
+    path3.join(outDir, "Dockerfile"),
     `FROM ${options.runtimeImage ?? DEFAULT_RUNTIME_IMAGE}
 `,
     "utf8"
   );
 }
 async function findPackagedSourceRoot() {
-  const start = path2.dirname(fileURLToPath(import.meta.url));
+  const start = path3.dirname(fileURLToPath2(import.meta.url));
   let dir = start;
   while (true) {
     if (await hasPackagedSourceFiles(dir)) {
       return dir;
     }
-    const parent = path2.dirname(dir);
+    const parent = path3.dirname(dir);
     if (parent === dir) {
       throw new Error("Could not find packaged Hugging Claw source files. Reinstall the huggingclaw npm package.");
     }
@@ -9502,20 +9530,20 @@ async function hasPackagedSourceFiles(dir) {
     "src/hf-bucket-client/client.ts"
   ];
   try {
-    await Promise.all(required.map((file) => fs2.access(path2.join(dir, file))));
+    await Promise.all(required.map((file) => fs3.access(path3.join(dir, file))));
     return true;
   } catch {
     return false;
   }
 }
 async function copyExisting(from, to) {
-  const stat = await fs2.stat(from);
-  await fs2.mkdir(path2.dirname(to), { recursive: true });
+  const stat = await fs3.stat(from);
+  await fs3.mkdir(path3.dirname(to), { recursive: true });
   if (stat.isDirectory()) {
-    await fs2.cp(from, to, { recursive: true });
+    await fs3.cp(from, to, { recursive: true });
   } else {
-    await fs2.copyFile(from, to);
-    await fs2.chmod(to, stat.mode);
+    await fs3.copyFile(from, to);
+    await fs3.chmod(to, stat.mode);
   }
 }
 async function readFilesForCommit(root) {
@@ -9523,24 +9551,24 @@ async function readFilesForCommit(root) {
   for (const relativePath of await listFiles(root)) {
     files.push({
       path: relativePath,
-      content: await fs2.readFile(path2.join(root, relativePath))
+      content: await fs3.readFile(path3.join(root, relativePath))
     });
   }
   return files;
 }
 async function listFiles(root, dir = "") {
-  const absoluteDir = path2.join(root, dir);
-  const entries = await fs2.readdir(absoluteDir, { withFileTypes: true });
+  const absoluteDir = path3.join(root, dir);
+  const entries = await fs3.readdir(absoluteDir, { withFileTypes: true });
   const files = [];
   for (const entry of entries) {
-    const relativePath = path2.posix.join(dir.split(path2.sep).join(path2.posix.sep), entry.name);
-    const absolutePath = path2.join(root, relativePath);
+    const relativePath = path3.posix.join(dir.split(path3.sep).join(path3.posix.sep), entry.name);
+    const absolutePath = path3.join(root, relativePath);
     if (entry.isDirectory()) {
       files.push(...await listFiles(root, relativePath));
     } else if (entry.isFile()) {
       files.push(relativePath);
     } else {
-      const stat = await fs2.stat(absolutePath);
+      const stat = await fs3.stat(absolutePath);
       if (stat.isFile()) {
         files.push(relativePath);
       }
@@ -9594,9 +9622,9 @@ async function assertNoLiveForeignLease(params) {
 }
 
 // src/hclaw/local-config.ts
-import fs3 from "node:fs/promises";
+import fs4 from "node:fs/promises";
 import os3 from "node:os";
-import path3 from "node:path";
+import path4 from "node:path";
 function defaultConfigRoot(env = process.env) {
   const explicit = env.HUGGINGCLAW_CONFIG_HOME?.trim();
   if (explicit) {
@@ -9604,32 +9632,32 @@ function defaultConfigRoot(env = process.env) {
   }
   const xdg = env.XDG_CONFIG_HOME?.trim();
   if (xdg) {
-    return path3.join(xdg, "huggingclaw");
+    return path4.join(xdg, "huggingclaw");
   }
-  return path3.join(os3.homedir(), ".config", "huggingclaw");
+  return path4.join(os3.homedir(), ".config", "huggingclaw");
 }
 function localConfigPaths(root) {
   return {
     root,
-    deploymentsDir: path3.join(root, "deployments"),
-    secretsDir: path3.join(root, "secrets")
+    deploymentsDir: path4.join(root, "deployments"),
+    secretsDir: path4.join(root, "secrets")
   };
 }
 function manifestPath(root, agent) {
-  return path3.join(localConfigPaths(root).deploymentsDir, `${agent}.json`);
+  return path4.join(localConfigPaths(root).deploymentsDir, `${agent}.json`);
 }
 function secretEnvPath(root, agent) {
-  return path3.join(localConfigPaths(root).secretsDir, `${agent}.env`);
+  return path4.join(localConfigPaths(root).secretsDir, `${agent}.env`);
 }
 async function writeManifest(root, manifest) {
   const file = manifestPath(root, manifest.agent);
-  await fs3.mkdir(path3.dirname(file), { recursive: true });
-  await fs3.writeFile(file, `${JSON.stringify(manifest, null, 2)}
+  await fs4.mkdir(path4.dirname(file), { recursive: true });
+  await fs4.writeFile(file, `${JSON.stringify(manifest, null, 2)}
 `, "utf8");
 }
 async function readManifest(root, agent) {
   const file = manifestPath(root, agent);
-  const parsed = JSON.parse(await fs3.readFile(file, "utf8"));
+  const parsed = JSON.parse(await fs4.readFile(file, "utf8"));
   if (parsed.version !== 1) {
     throw new Error(`unsupported deployment manifest version in ${file}`);
   }
@@ -9637,7 +9665,7 @@ async function readManifest(root, agent) {
 }
 async function manifestExists(root, agent) {
   try {
-    await fs3.access(manifestPath(root, agent));
+    await fs4.access(manifestPath(root, agent));
     return true;
   } catch {
     return false;
@@ -9649,12 +9677,12 @@ function renderSecretEnv(values) {
 }
 async function writeSecretEnv(root, agent, values) {
   const file = secretEnvPath(root, agent);
-  await fs3.mkdir(path3.dirname(file), { recursive: true, mode: 448 });
-  await fs3.writeFile(file, renderSecretEnv(values), { encoding: "utf8", mode: 384 });
-  await fs3.chmod(file, 384);
+  await fs4.mkdir(path4.dirname(file), { recursive: true, mode: 448 });
+  await fs4.writeFile(file, renderSecretEnv(values), { encoding: "utf8", mode: 384 });
+  await fs4.chmod(file, 384);
 }
 async function readSecretEnv(root, agent) {
-  return parseSecretEnv(await fs3.readFile(secretEnvPath(root, agent), "utf8"));
+  return parseSecretEnv(await fs4.readFile(secretEnvPath(root, agent), "utf8"));
 }
 function parseSecretEnv(raw) {
   const out = {};
@@ -9863,8 +9891,13 @@ async function bootstrap(opts, runtime) {
     ...opts.telegramProxy ? { telegramProxy: opts.telegramProxy } : {},
     ...opts.telegramApiRoot ? { telegramApiRoot: opts.telegramApiRoot } : {}
   });
-  await writeLocalDeployment(runtime.configRoot, manifest, secrets);
   if (gatewayLocation === "space") {
+    await assertNoLiveForeignLease({
+      hub,
+      bucket: names.bucket,
+      runtimeId: spaceRuntimeId(agentName),
+      takeover: Boolean(opts.takeover)
+    });
     const paidHardware = await resolveHardware({
       ...opts.hardware ? { requestedHardware: opts.hardware } : {},
       ...typeof opts.sleepTime === "number" ? { requestedSleepTime: opts.sleepTime } : {},
@@ -9880,6 +9913,7 @@ async function bootstrap(opts, runtime) {
       hardware: paidHardware.hardware,
       ...typeof paidHardware.sleepTime === "number" ? { sleepTime: paidHardware.sleepTime } : {}
     });
+    await writeLocalDeployment(runtime.configRoot, manifest, secrets);
   } else {
     await assertNoLiveForeignLease({
       hub,
@@ -9887,6 +9921,7 @@ async function bootstrap(opts, runtime) {
       runtimeId: manifest.localRuntimeId,
       takeover: Boolean(opts.takeover)
     });
+    await writeLocalDeployment(runtime.configRoot, manifest, secrets);
     await startLocalGateway({
       manifest,
       runtime,
@@ -10394,7 +10429,7 @@ async function readTelegramToken(opts, runtime) {
     return direct;
   }
   if (opts.telegramTokenFile) {
-    const raw = await fs4.readFile(opts.telegramTokenFile, "utf8");
+    const raw = await fs5.readFile(opts.telegramTokenFile, "utf8");
     const match = raw.match(/(?:^|\n)\s*TELEGRAM_BOT_TOKEN\s*=\s*['"]?([^'"\n]+)['"]?/);
     return (match?.[1] ?? raw.trim()).trim();
   }
