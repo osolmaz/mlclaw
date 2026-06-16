@@ -4337,6 +4337,9 @@ var CliDockerRunner = class {
   async rm(containerName) {
     await docker(["rm", containerName]);
   }
+  async disableRestart(containerName) {
+    await docker(["update", "--restart", "no", containerName]);
+  }
   async logs(containerName, tail = 200) {
     const { stdout } = await docker(["logs", "--tail", String(tail), containerName]);
     return stdout;
@@ -4357,7 +4360,7 @@ var CliDockerRunner = class {
         ...image ? { image } : {}
       };
     } catch (err) {
-      if (err instanceof Error && "code" in err) {
+      if (isMissingContainerError(err)) {
         return null;
       }
       throw err;
@@ -4380,6 +4383,10 @@ ${err.stderr}`;
     }
     throw err;
   }
+}
+function isMissingContainerError(err) {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes("No such object") || message.includes("No such container");
 }
 
 // src/hclaw/gateway-location.ts
@@ -9672,7 +9679,7 @@ async function manifestExists(root, agent) {
   }
 }
 function renderSecretEnv(values) {
-  return `${Object.entries(values).map(([key, value]) => `${key}=${quoteEnvValue(value)}`).join("\n")}
+  return `${Object.entries(values).map(([key, value]) => renderEnvLine(key, value)).join("\n")}
 `;
 }
 async function writeSecretEnv(root, agent, values) {
@@ -9687,34 +9694,26 @@ async function readSecretEnv(root, agent) {
 function parseSecretEnv(raw) {
   const out = {};
   for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) {
+    if (!line.trim() || line.trimStart().startsWith("#")) {
       continue;
     }
-    const equals = trimmed.indexOf("=");
+    const equals = line.indexOf("=");
     if (equals <= 0) {
       continue;
     }
-    const key = trimmed.slice(0, equals);
-    const value = trimmed.slice(equals + 1);
-    out[key] = unquoteEnvValue(value);
+    const key = line.slice(0, equals).trim();
+    out[key] = line.slice(equals + 1);
   }
   return out;
 }
-function quoteEnvValue(value) {
-  if (/^[A-Za-z0-9_./:@+-]+$/.test(value)) {
-    return value;
+function renderEnvLine(key, value) {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+    throw new Error(`invalid env key: ${key}`);
   }
-  return JSON.stringify(value);
-}
-function unquoteEnvValue(value) {
-  if (value.startsWith('"') && value.endsWith('"')) {
-    return JSON.parse(value);
+  if (/[\r\n]/.test(value)) {
+    throw new Error(`env value for ${key} cannot contain newlines`);
   }
-  if (value.startsWith("'") && value.endsWith("'")) {
-    return value.slice(1, -1);
-  }
-  return value;
+  return `${key}=${value}`;
 }
 
 // src/hclaw/naming.ts
@@ -10132,7 +10131,7 @@ async function gatewayMigrate(agent, opts, runtime) {
       yes: Boolean(opts.yes),
       runtime
     });
-    await stopLocalGateway(current, runtime);
+    await handoffAndStopLocalGateway({ manifest: current, hub, runtime });
     await deploySpaceGateway({
       hub,
       runtime,
@@ -10192,6 +10191,42 @@ function runtimeIdFor(manifest) {
 }
 function spaceRuntimeId(agent) {
   return `space-${agent}`;
+}
+async function handoffAndStopLocalGateway(params) {
+  const containerName = containerNameFor(params.manifest.agent);
+  const existing = await params.runtime.dockerRunner.inspect(containerName);
+  if (!existing) {
+    params.runtime.stdout.log(`Local gateway does not exist: ${containerName}`);
+    return;
+  }
+  if (!existing.running) {
+    params.runtime.stdout.log(`Local gateway already stopped: ${containerName}`);
+    return;
+  }
+  await params.runtime.dockerRunner.disableRestart(containerName);
+  const handoffStartedAt = params.runtime.now();
+  const requestId = randomBytes(16).toString("hex");
+  await writeRuntimeHandoffRequest(params.hub, params.manifest.bucket, {
+    schemaVersion: 1,
+    requestId,
+    agent: params.manifest.agent,
+    runtimeId: params.manifest.localRuntimeId,
+    requestedAt: handoffStartedAt.toISOString(),
+    targetRuntimeId: spaceRuntimeId(params.manifest.agent)
+  });
+  params.runtime.stdout.log("Waiting for local gateway to upload a final snapshot");
+  await waitForRuntimeHandoffAck({
+    hub: params.hub,
+    bucket: params.manifest.bucket,
+    requestId,
+    runtimeId: params.manifest.localRuntimeId,
+    since: handoffStartedAt,
+    timeoutMs: SPACE_HANDOFF_TIMEOUT_MS,
+    pollMs: SPACE_HANDOFF_POLL_MS
+  });
+  await clearRuntimeHandoffRequest(params.hub, params.manifest.bucket).catch(() => void 0);
+  params.runtime.stdout.log("Local final snapshot observed");
+  await stopLocalGateway(params.manifest, params.runtime);
 }
 async function disableAndPauseSpaceGateway(params) {
   const handoffStartedAt = params.runtime.now();
@@ -10355,22 +10390,11 @@ async function doctor(repoId, opts, hub, runtime) {
   }
 }
 async function settings(repoId, opts, hub, runtime) {
-  if (!opts.hardware && typeof opts.sleepTime !== "number" && !opts.gateway) {
-    throw new Error("usage: hclaw settings <owner/space> [--gateway local|space] [--hardware flavor] [--sleep-time seconds]");
-  }
-  if (opts.gateway && !repoId.includes("/") && await manifestExists(runtime.configRoot, repoId)) {
-    const gatewayLocation = parseGatewayLocation(opts.gateway);
-    const manifest = await readDeploymentManifest(runtime, repoId);
-    await writeManifest(runtime.configRoot, {
-      ...manifest,
-      gatewayLocation,
-      updatedAt: runtime.now().toISOString()
-    });
-    runtime.stdout.log(`Gateway setting recorded: ${gatewayLocation}`);
-    return;
+  if (opts.gateway) {
+    throw new Error("gateway location changes must use `hclaw gateway migrate` to preserve state");
   }
   if (!opts.hardware && typeof opts.sleepTime !== "number") {
-    throw new Error("Space hardware or sleep time is required when settings targets a Space repo");
+    throw new Error("usage: hclaw settings <owner/space> [--hardware flavor] [--sleep-time seconds]");
   }
   if (opts.hardware && isPaidHardware(opts.hardware)) {
     await confirmPaidHardware({

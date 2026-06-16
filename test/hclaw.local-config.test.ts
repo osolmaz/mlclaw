@@ -52,8 +52,20 @@ describe("local Hugging Claw config", () => {
     expect(stat.mode & 0o777).toBe(0o600);
   });
 
-  it("quotes only env values that need quoting", () => {
-    expect(renderSecretEnv({ A: "plain-token", B: "has spaces" })).toBe('A=plain-token\nB="has spaces"\n');
-    expect(parseSecretEnv('A=plain-token\nB="has spaces"\n')).toEqual({ A: "plain-token", B: "has spaces" });
+  it("writes Docker env-file values without shell quotes", () => {
+    const raw = "A=plain-token\nB=has spaces\nC=123,456\nD=https://proxy.example/?a=b&c=d\n";
+    expect(renderSecretEnv({
+      A: "plain-token",
+      B: "has spaces",
+      C: "123,456",
+      D: "https://proxy.example/?a=b&c=d",
+    })).toBe(raw);
+    expect(parseSecretEnv(raw)).toEqual({
+      A: "plain-token",
+      B: "has spaces",
+      C: "123,456",
+      D: "https://proxy.example/?a=b&c=d",
+    });
+    expect(() => renderSecretEnv({ A: "line\nbreak" })).toThrow("cannot contain newlines");
   });
 });

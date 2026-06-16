@@ -76,9 +76,12 @@ hclaw gateway migrate <agent> --to space
 Settings:
 
 ```bash
-hclaw settings <agent-or-space> --gateway local
-hclaw settings <agent-or-space> --gateway space --hardware cpu-upgrade --sleep-time -1
+hclaw settings <owner/space> --hardware cpu-upgrade --sleep-time -1
 ```
+
+Do not use settings as a shortcut for gateway location changes. Gateway moves
+must go through `hclaw gateway migrate` so the old runtime uploads a final
+snapshot and stops before the new runtime starts.
 
 The initial interactive prompt should be:
 
@@ -268,14 +271,16 @@ write new runtime lease
 ### Local To Space
 
 1. Confirm paid hardware if Space mode needs Telegram/Discord.
-2. Stop local Docker container.
-3. Wait for final snapshot upload.
-4. Create/update private Space with the shared runtime image.
-5. Set Space secrets and variables.
-6. Set `gatewayLocation` in manifest to `space`.
-7. Start/restart Space.
-8. Verify Space logs show restore and snapshot.
-9. Update runtime lease to `space`.
+2. Disable Docker auto-restart for the local container.
+3. Write a handoff request for the local runtime and wait for its final
+   snapshot ack.
+4. Stop the local Docker container if it is still running.
+5. Create/update private Space with the shared runtime image.
+6. Set Space secrets and variables.
+7. Set `gatewayLocation` in manifest to `space`.
+8. Start/restart Space.
+9. Verify Space logs show restore and snapshot.
+10. Update runtime lease to `space`.
 
 ### Space To Local
 

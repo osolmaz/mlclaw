@@ -30,7 +30,7 @@ function createPrompt(answers: PromptAnswer[], interactive = true) {
   };
 }
 
-function createFakeHub() {
+function createFakeHub(opts: { acknowledgeHandoff?: boolean } = {}) {
   const calls: Array<{ name: string; args: unknown[] }> = [];
   const variables = new Map<string, { value?: string }>();
   const secrets = new Map<string, { key: string }>();
@@ -41,14 +41,14 @@ function createFakeHub() {
       for (const file of files) {
         const text = await file.content.text();
         bucketObjects.set(file.path, text);
-        if (file.path === "openclaw-state/runtime/handoff-request.json") {
+        if (file.path === "openclaw-state/runtime/handoff-request.json" && opts.acknowledgeHandoff !== false) {
           const request = JSON.parse(text) as { requestId: string; agent: string; runtimeId: string };
           bucketObjects.set("openclaw-state/runtime/handoff-ack.json", JSON.stringify({
             schemaVersion: 1,
             requestId: request.requestId,
             agent: request.agent,
             runtimeId: request.runtimeId,
-            gatewayLocation: "space",
+            gatewayLocation: request.runtimeId.startsWith("local-") ? "local" : "space",
             completedAt: "2026-06-16T00:00:01.000Z",
             lastSnapshotId: "openclaw-state/snapshots/state-test.tar.zst",
           }));
@@ -197,6 +197,9 @@ function createFakeDocker(): DockerRunner & { calls: Array<{ name: string; args:
     async rm(...args: unknown[]) {
       this.calls.push({ name: "rm", args });
       this.inspectValue = null;
+    },
+    async disableRestart(...args: unknown[]) {
+      this.calls.push({ name: "disableRestart", args });
     },
     async logs(...args: unknown[]) {
       this.calls.push({ name: "logs", args });
@@ -437,6 +440,22 @@ describe("hclaw CLI", () => {
     });
   });
 
+  it("rejects settings gateway changes so migrations stay state-safe", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([]);
+    const stderr: string[] = [];
+
+    const code = await main([
+      "settings",
+      "research",
+      "--gateway",
+      "local",
+    ], await createRuntime(hub, prompt, stderr));
+
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain("gateway location changes must use `hclaw gateway migrate`");
+  });
+
   it("preserves the configured Space runtime image during update", async () => {
     const hub = createFakeHub();
     await hub.addSpaceVariable("alice/research", "OPENCLAW_HF_TEMPLATE_REV", "old-template");
@@ -488,8 +507,19 @@ describe("hclaw CLI", () => {
       "--yes",
     ], runtime)).resolves.toBe(0);
 
+    const disableRestartIndex = runtime.dockerRunner.calls.findIndex((call) => call.name === "disableRestart");
     const stopIndex = runtime.dockerRunner.calls.findIndex((call) => call.name === "stop");
+    const localHandoffIndex = hub.calls.findIndex((call) =>
+      call.name === "bucket.uploadFiles" &&
+      Array.isArray(call.args[0]) &&
+      call.args[0].includes("openclaw-state/runtime/handoff-request.json")
+    );
+    const createSpaceIndex = hub.calls.findIndex((call) => call.name === "createDockerSpace");
+    expect(disableRestartIndex).toBeGreaterThanOrEqual(0);
     expect(stopIndex).toBeGreaterThanOrEqual(0);
+    expect(stopIndex).toBeGreaterThan(disableRestartIndex);
+    expect(localHandoffIndex).toBeGreaterThanOrEqual(0);
+    expect(createSpaceIndex).toBeGreaterThan(localHandoffIndex);
     expect(hub.calls).toContainEqual({ name: "createDockerSpace", args: ["alice/research", expect.any(Object)] });
     expect(hub.calls).toContainEqual({ name: "restartSpace", args: ["alice/research", true] });
 

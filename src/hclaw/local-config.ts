@@ -77,7 +77,7 @@ export async function manifestExists(root: string, agent: string): Promise<boole
 
 export function renderSecretEnv(values: Record<string, string>): string {
   return `${Object.entries(values)
-    .map(([key, value]) => `${key}=${quoteEnvValue(value)}`)
+    .map(([key, value]) => renderEnvLine(key, value))
     .join("\n")}\n`;
 }
 
@@ -95,34 +95,25 @@ export async function readSecretEnv(root: string, agent: string): Promise<Record
 export function parseSecretEnv(raw: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) {
+    if (!line.trim() || line.trimStart().startsWith("#")) {
       continue;
     }
-    const equals = trimmed.indexOf("=");
+    const equals = line.indexOf("=");
     if (equals <= 0) {
       continue;
     }
-    const key = trimmed.slice(0, equals);
-    const value = trimmed.slice(equals + 1);
-    out[key] = unquoteEnvValue(value);
+    const key = line.slice(0, equals).trim();
+    out[key] = line.slice(equals + 1);
   }
   return out;
 }
 
-function quoteEnvValue(value: string): string {
-  if (/^[A-Za-z0-9_./:@+-]+$/.test(value)) {
-    return value;
+function renderEnvLine(key: string, value: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+    throw new Error(`invalid env key: ${key}`);
   }
-  return JSON.stringify(value);
-}
-
-function unquoteEnvValue(value: string): string {
-  if (value.startsWith('"') && value.endsWith('"')) {
-    return JSON.parse(value) as string;
+  if (/[\r\n]/.test(value)) {
+    throw new Error(`env value for ${key} cannot contain newlines`);
   }
-  if (value.startsWith("'") && value.endsWith("'")) {
-    return value.slice(1, -1);
-  }
-  return value;
+  return `${key}=${value}`;
 }

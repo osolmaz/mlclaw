@@ -9,6 +9,7 @@ export type DockerRunner = {
   start(containerName: string): Promise<void>;
   stop(containerName: string): Promise<void>;
   rm(containerName: string): Promise<void>;
+  disableRestart(containerName: string): Promise<void>;
   logs(containerName: string, tail?: number): Promise<string>;
   inspect(containerName: string): Promise<DockerInspect | null>;
 };
@@ -63,6 +64,10 @@ export class CliDockerRunner implements DockerRunner {
     await docker(["rm", containerName]);
   }
 
+  async disableRestart(containerName: string): Promise<void> {
+    await docker(["update", "--restart", "no", containerName]);
+  }
+
   async logs(containerName: string, tail = 200): Promise<string> {
     const { stdout } = await docker(["logs", "--tail", String(tail), containerName]);
     return stdout;
@@ -84,7 +89,7 @@ export class CliDockerRunner implements DockerRunner {
         ...(image ? { image } : {}),
       };
     } catch (err) {
-      if (err instanceof Error && "code" in err) {
+      if (isMissingContainerError(err)) {
         return null;
       }
       throw err;
@@ -109,4 +114,9 @@ async function docker(args: string[]): Promise<{ stdout: string; stderr: string 
     }
     throw err;
   }
+}
+
+function isMissingContainerError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes("No such object") || message.includes("No such container");
 }

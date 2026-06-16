@@ -632,7 +632,7 @@ async function gatewayMigrate(agent: string, opts: GatewayCommandOptions, runtim
       yes: Boolean(opts.yes),
       runtime,
     });
-    await stopLocalGateway(current, runtime);
+    await handoffAndStopLocalGateway({ manifest: current, hub, runtime });
     await deploySpaceGateway({
       hub,
       runtime,
@@ -696,6 +696,48 @@ function runtimeIdFor(manifest: DeploymentManifest): string {
 
 function spaceRuntimeId(agent: string): string {
   return `space-${agent}`;
+}
+
+async function handoffAndStopLocalGateway(params: {
+  manifest: DeploymentManifest;
+  hub: HubApi;
+  runtime: Required<CliRuntime>;
+}): Promise<void> {
+  const containerName = containerNameFor(params.manifest.agent);
+  const existing = await params.runtime.dockerRunner.inspect(containerName);
+  if (!existing) {
+    params.runtime.stdout.log(`Local gateway does not exist: ${containerName}`);
+    return;
+  }
+  if (!existing.running) {
+    params.runtime.stdout.log(`Local gateway already stopped: ${containerName}`);
+    return;
+  }
+
+  await params.runtime.dockerRunner.disableRestart(containerName);
+  const handoffStartedAt = params.runtime.now();
+  const requestId = randomBytes(16).toString("hex");
+  await writeRuntimeHandoffRequest(params.hub, params.manifest.bucket, {
+    schemaVersion: 1,
+    requestId,
+    agent: params.manifest.agent,
+    runtimeId: params.manifest.localRuntimeId,
+    requestedAt: handoffStartedAt.toISOString(),
+    targetRuntimeId: spaceRuntimeId(params.manifest.agent),
+  });
+  params.runtime.stdout.log("Waiting for local gateway to upload a final snapshot");
+  await waitForRuntimeHandoffAck({
+    hub: params.hub,
+    bucket: params.manifest.bucket,
+    requestId,
+    runtimeId: params.manifest.localRuntimeId,
+    since: handoffStartedAt,
+    timeoutMs: SPACE_HANDOFF_TIMEOUT_MS,
+    pollMs: SPACE_HANDOFF_POLL_MS,
+  });
+  await clearRuntimeHandoffRequest(params.hub, params.manifest.bucket).catch(() => undefined);
+  params.runtime.stdout.log("Local final snapshot observed");
+  await stopLocalGateway(params.manifest, params.runtime);
 }
 
 async function disableAndPauseSpaceGateway(params: {
@@ -893,22 +935,11 @@ async function doctor(repoId: string, opts: DoctorOptions, hub: HubApi, runtime:
 }
 
 async function settings(repoId: string, opts: SettingsOptions, hub: HubApi, runtime: Required<CliRuntime>): Promise<void> {
-  if (!opts.hardware && typeof opts.sleepTime !== "number" && !opts.gateway) {
-    throw new Error("usage: hclaw settings <owner/space> [--gateway local|space] [--hardware flavor] [--sleep-time seconds]");
-  }
-  if (opts.gateway && !repoId.includes("/") && await manifestExists(runtime.configRoot, repoId)) {
-    const gatewayLocation = parseGatewayLocation(opts.gateway);
-    const manifest = await readDeploymentManifest(runtime, repoId);
-    await writeManifest(runtime.configRoot, {
-      ...manifest,
-      gatewayLocation,
-      updatedAt: runtime.now().toISOString(),
-    });
-    runtime.stdout.log(`Gateway setting recorded: ${gatewayLocation}`);
-    return;
+  if (opts.gateway) {
+    throw new Error("gateway location changes must use `hclaw gateway migrate` to preserve state");
   }
   if (!opts.hardware && typeof opts.sleepTime !== "number") {
-    throw new Error("Space hardware or sleep time is required when settings targets a Space repo");
+    throw new Error("usage: hclaw settings <owner/space> [--hardware flavor] [--sleep-time seconds]");
   }
   if (opts.hardware && isPaidHardware(opts.hardware)) {
     await confirmPaidHardware({
