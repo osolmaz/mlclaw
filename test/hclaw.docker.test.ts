@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isMissingContainerError, isMissingVolumeError, mergeDockerLogStreams } from "../src/hclaw/docker.js";
+import { isMissingContainerError, isMissingVolumeError, mergeDockerLogStreams, withContext } from "../src/hclaw/docker.js";
 
 describe("Docker error matching", () => {
   it("matches missing resources regardless of Docker message casing", () => {
@@ -14,5 +14,10 @@ describe("Docker error matching", () => {
 
   it("keeps stderr diagnostics in returned Docker logs", () => {
     expect(mergeDockerLogStreams("started\n", "snapshot failed\n")).toBe("started\nsnapshot failed\n");
+  });
+
+  it("prefixes Docker commands with an explicit context when provided", () => {
+    expect(withContext("desktop-linux", ["ps"])).toEqual(["--context", "desktop-linux", "ps"]);
+    expect(withContext(undefined, ["ps"])).toEqual(["ps"]);
   });
 });

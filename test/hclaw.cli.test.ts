@@ -204,10 +204,26 @@ async function createRuntime(hub: HubApi, prompt: ReturnType<typeof createPrompt
   };
 }
 
-function createFakeDocker(): DockerRunner & { calls: Array<{ name: string; args: unknown[] }>; inspectValue: DockerInspect | null } {
+function createFakeDocker(): DockerRunner & {
+  calls: Array<{ name: string; args: unknown[] }>;
+  currentContextValue: string;
+  contexts: Map<string, string>;
+  inspectValue: DockerInspect | null;
+} {
   return {
     calls: [],
+    currentContextValue: "desktop-linux",
+    contexts: new Map([["desktop-linux", "unix:///docker-desktop.sock"], ["colima", "unix:///colima.sock"]]),
     inspectValue: null,
+    async currentContext() {
+      return this.currentContextValue;
+    },
+    async contextExists(context: string) {
+      return this.contexts.has(context);
+    },
+    async contextEndpoint(context: string) {
+      return this.contexts.get(context);
+    },
     async pull(...args: unknown[]) {
       this.calls.push({ name: "pull", args });
     },
@@ -288,8 +304,131 @@ describe("hclaw CLI", () => {
     expect(code).toBe(0);
     expect(runtime.dockerRunner.calls).toContainEqual({
       name: "pull",
-      args: [DEFAULT_RUNTIME_IMAGE],
+      args: [DEFAULT_RUNTIME_IMAGE, "desktop-linux"],
     });
+  });
+
+  it("pins the current Docker context during local bootstrap", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt(["telegram-token", "7216393410"]);
+    const runtime = await createRuntime(hub, prompt);
+    runtime.dockerRunner.currentContextValue = "colima";
+
+    const code = await main(["--gateway-token", "gateway-token", "--no-pull"], runtime);
+
+    expect(code).toBe(0);
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      localGateway: {
+        engine: "docker",
+        dockerContext: "colima",
+        dockerEndpoint: "unix:///colima.sock",
+      },
+    });
+    expect(runtime.dockerRunner.calls).toContainEqual({
+      name: "run",
+      args: [
+        expect.objectContaining({
+          context: "colima",
+        }),
+      ],
+    });
+  });
+
+  it("honors an explicit Docker context during local bootstrap", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt(["telegram-token", "7216393410"]);
+    const runtime = await createRuntime(hub, prompt);
+
+    const code = await main([
+      "--docker-context",
+      "colima",
+      "--gateway-token",
+      "gateway-token",
+      "--no-pull",
+    ], runtime);
+
+    expect(code).toBe(0);
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      localGateway: {
+        dockerContext: "colima",
+      },
+    });
+    expect(runtime.dockerRunner.calls).toContainEqual({
+      name: "run",
+      args: [
+        expect.objectContaining({
+          context: "colima",
+        }),
+      ],
+    });
+  });
+
+  it("warns on shell Docker context mismatch but uses the pinned context", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([]);
+    const stdout: string[] = [];
+    const runtime = {
+      ...await createRuntime(hub, prompt),
+      stdout: { log: (message: unknown) => stdout.push(String(message)) },
+    };
+    runtime.dockerRunner.currentContextValue = "colima";
+    await writeManifest(runtime.configRoot, {
+      version: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-existing",
+      gatewayLocation: "local",
+      model: "test-model",
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      localGateway: {
+        engine: "docker",
+        dockerContext: "desktop-linux",
+        dockerEndpoint: "unix:///docker-desktop.sock",
+      },
+      createdAt: "2026-06-16T00:00:00.000Z",
+      updatedAt: "2026-06-16T00:00:00.000Z",
+    });
+
+    await expect(main(["gateway", "status", "research"], runtime)).resolves.toBe(0);
+
+    expect(stdout.join("\n")).toContain("Using Docker context desktop-linux from the deployment manifest. Current shell context is colima.");
+    expect(stdout.join("\n")).toContain("Docker: desktop-linux");
+    expect(runtime.dockerRunner.calls).toContainEqual({
+      name: "inspect",
+      args: ["huggingclaw-research", "desktop-linux"],
+    });
+  });
+
+  it("refuses to silently change a pinned Docker context during start", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([]);
+    const stderr: string[] = [];
+    const runtime = await createRuntime(hub, prompt, stderr);
+    await writeManifest(runtime.configRoot, {
+      version: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-existing",
+      gatewayLocation: "local",
+      model: "test-model",
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      localGateway: {
+        engine: "docker",
+        dockerContext: "desktop-linux",
+      },
+      createdAt: "2026-06-16T00:00:00.000Z",
+      updatedAt: "2026-06-16T00:00:00.000Z",
+    });
+
+    const code = await main(["gateway", "start", "research", "--docker-context", "colima"], runtime);
+
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain("Run `hclaw gateway rebind research --docker-context colima`");
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(false);
   });
 
   it("uses an explicit bootstrap bucket as the durable state pointer", async () => {
@@ -785,6 +924,67 @@ describe("hclaw CLI", () => {
     expect(runtime.dockerRunner.calls.some((call) => call.name === "start")).toBe(false);
   });
 
+  it("migrates from Space to an explicit local Docker context when the previous context is stale", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([]);
+    const runtime = await createRuntime(hub, prompt);
+    runtime.dockerRunner.contexts.delete("desktop-linux");
+    await writeManifest(runtime.configRoot, {
+      version: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-existing",
+      gatewayLocation: "space",
+      model: "test-model",
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      localGateway: {
+        engine: "docker",
+        dockerContext: "desktop-linux",
+        dockerEndpoint: "unix:///docker-desktop.sock",
+      },
+      createdAt: "2026-06-16T00:00:00.000Z",
+      updatedAt: "2026-06-16T00:00:00.000Z",
+    });
+    await writeSecretEnv(runtime.configRoot, "research", {
+      OPENCLAW_HF_STATE_BUCKET: "alice/research-data",
+      OPENCLAW_AGENT_NAME: "research",
+      OPENCLAW_MODEL: "test-model",
+      HUGGINGCLAW_GATEWAY_LOCATION: "space",
+      HUGGINGCLAW_RUNTIME_IMAGE: DEFAULT_RUNTIME_IMAGE,
+      HUGGINGCLAW_RUNTIME_ID: "space-research",
+    });
+
+    await expect(main([
+      "gateway",
+      "migrate",
+      "research",
+      "--to",
+      "local",
+      "--docker-context",
+      "colima",
+      "--no-pull",
+    ], runtime)).resolves.toBe(0);
+
+    const runCall = runtime.dockerRunner.calls.find((call) => call.name === "run");
+    expect(runCall).toEqual({
+      name: "run",
+      args: [
+        expect.objectContaining({
+          context: "colima",
+        }),
+      ],
+    });
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      gatewayLocation: "local",
+      localGateway: {
+        dockerContext: "colima",
+        dockerEndpoint: "unix:///colima.sock",
+      },
+    });
+  });
+
   it("adopts a state bucket for a local deployment and resets stale live disk", async () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt(["telegram-token", "7216393410"]);
@@ -821,6 +1021,275 @@ describe("hclaw CLI", () => {
     expect(removeVolumeIndex).toBeGreaterThan(removeIndex);
     expect(runIndex).toBeGreaterThan(removeVolumeIndex);
     expect(runtime.dockerRunner.calls.some((call) => call.name === "start")).toBe(false);
+  });
+
+  it("rebinds a local gateway to another Docker context through bucket handoff", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([]);
+    const runtime = await createRuntime(hub, prompt);
+    runtime.dockerRunner.inspectValue = {
+      exists: true,
+      running: true,
+      status: "running",
+      image: DEFAULT_RUNTIME_IMAGE,
+    };
+    await writeManifest(runtime.configRoot, {
+      version: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-existing",
+      gatewayLocation: "local",
+      model: "test-model",
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      localGateway: {
+        engine: "docker",
+        dockerContext: "desktop-linux",
+        dockerEndpoint: "unix:///docker-desktop.sock",
+      },
+      createdAt: "2026-06-16T00:00:00.000Z",
+      updatedAt: "2026-06-16T00:00:00.000Z",
+    });
+
+    await expect(main([
+      "gateway",
+      "rebind",
+      "research",
+      "--docker-context",
+      "colima",
+      "--no-pull",
+    ], runtime)).resolves.toBe(0);
+
+    const disableRestartIndex = runtime.dockerRunner.calls.findIndex((call) => call.name === "disableRestart");
+    const stopIndex = runtime.dockerRunner.calls.findIndex((call) => call.name === "stop");
+    const removeIndex = runtime.dockerRunner.calls.findIndex((call) => call.name === "rm");
+    const removeVolumeIndex = runtime.dockerRunner.calls.findIndex((call) => call.name === "rmVolume");
+    const runIndex = runtime.dockerRunner.calls.findIndex((call) => call.name === "run");
+    expect(disableRestartIndex).toBeGreaterThanOrEqual(0);
+    expect(runtime.dockerRunner.calls[disableRestartIndex]).toEqual({
+      name: "disableRestart",
+      args: ["huggingclaw-research", "desktop-linux"],
+    });
+    expect(stopIndex).toBeGreaterThan(disableRestartIndex);
+    expect(runtime.dockerRunner.calls[stopIndex]).toEqual({
+      name: "stop",
+      args: ["huggingclaw-research", "desktop-linux"],
+    });
+    expect(removeIndex).toBeGreaterThan(stopIndex);
+    expect(removeVolumeIndex).toBeGreaterThan(removeIndex);
+    expect(runIndex).toBeGreaterThan(removeVolumeIndex);
+    expect(runtime.dockerRunner.calls[runIndex]).toEqual({
+      name: "run",
+      args: [
+        expect.objectContaining({
+          context: "colima",
+        }),
+      ],
+    });
+    expect(hub.calls.some((call) =>
+      call.name === "bucket.uploadFiles" &&
+      Array.isArray(call.args[0]) &&
+      call.args[0].includes("openclaw-state/runtime/handoff-request.json")
+    )).toBe(true);
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      localGateway: {
+        dockerContext: "colima",
+        dockerEndpoint: "unix:///colima.sock",
+      },
+    });
+  });
+
+  it("rebinds with takeover when the previous Docker context is unavailable", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([]);
+    const runtime = await createRuntime(hub, prompt);
+    runtime.dockerRunner.contexts.delete("desktop-linux");
+    await writeManifest(runtime.configRoot, {
+      version: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-existing",
+      gatewayLocation: "local",
+      model: "test-model",
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      localGateway: {
+        engine: "docker",
+        dockerContext: "desktop-linux",
+        dockerEndpoint: "unix:///docker-desktop.sock",
+      },
+      createdAt: "2026-06-16T00:00:00.000Z",
+      updatedAt: "2026-06-16T00:00:00.000Z",
+    });
+
+    await expect(main([
+      "gateway",
+      "rebind",
+      "research",
+      "--docker-context",
+      "colima",
+      "--takeover",
+      "--no-pull",
+    ], runtime)).resolves.toBe(0);
+
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "disableRestart")).toBe(false);
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "stop")).toBe(false);
+    expect(hub.calls.some((call) =>
+      call.name === "bucket.uploadFiles" &&
+      Array.isArray(call.args[0]) &&
+      call.args[0].includes("openclaw-state/runtime/handoff-request.json")
+    )).toBe(false);
+    const runCall = runtime.dockerRunner.calls.find((call) => call.name === "run");
+    expect(runCall).toEqual({
+      name: "run",
+      args: [
+        expect.objectContaining({
+          context: "colima",
+        }),
+      ],
+    });
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      localGateway: {
+        dockerContext: "colima",
+        dockerEndpoint: "unix:///colima.sock",
+      },
+    });
+  });
+
+  it("does not persist a rebind until the target gateway starts", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([]);
+    const stderr: string[] = [];
+    const runtime = await createRuntime(hub, prompt, stderr);
+    await writeManifest(runtime.configRoot, {
+      version: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-existing",
+      gatewayLocation: "local",
+      model: "test-model",
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      localGateway: {
+        engine: "docker",
+        dockerContext: "desktop-linux",
+        dockerEndpoint: "unix:///docker-desktop.sock",
+      },
+      createdAt: "2026-06-16T00:00:00.000Z",
+      updatedAt: "2026-06-16T00:00:00.000Z",
+    });
+    const originalRun = runtime.dockerRunner.run.bind(runtime.dockerRunner);
+    let failRun = true;
+    runtime.dockerRunner.run = async (params) => {
+      if (failRun) {
+        throw new Error("target Docker startup failed");
+      }
+      await originalRun(params);
+    };
+
+    await expect(main([
+      "gateway",
+      "rebind",
+      "research",
+      "--docker-context",
+      "colima",
+      "--no-pull",
+    ], runtime)).resolves.toBe(1);
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      localGateway: {
+        dockerContext: "desktop-linux",
+      },
+    });
+
+    failRun = false;
+    runtime.dockerRunner.calls.length = 0;
+    await expect(main([
+      "gateway",
+      "rebind",
+      "research",
+      "--docker-context",
+      "colima",
+      "--no-pull",
+    ], runtime)).resolves.toBe(0);
+
+    expect(runtime.dockerRunner.calls.find((call) => call.name === "run")).toEqual({
+      name: "run",
+      args: [
+        expect.objectContaining({
+          context: "colima",
+        }),
+      ],
+    });
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      localGateway: {
+        dockerContext: "colima",
+        dockerEndpoint: "unix:///colima.sock",
+      },
+    });
+  });
+
+  it("stops the old local gateway before takeover continues after handoff failure", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([]);
+    const runtime = await createRuntime(hub, prompt);
+    runtime.dockerRunner.inspectValue = {
+      exists: true,
+      running: true,
+      status: "running",
+      image: DEFAULT_RUNTIME_IMAGE,
+    };
+    await writeManifest(runtime.configRoot, {
+      version: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-existing",
+      gatewayLocation: "local",
+      model: "test-model",
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      localGateway: {
+        engine: "docker",
+        dockerContext: "desktop-linux",
+        dockerEndpoint: "unix:///docker-desktop.sock",
+      },
+      createdAt: "2026-06-16T00:00:00.000Z",
+      updatedAt: "2026-06-16T00:00:00.000Z",
+    });
+    runtime.dockerRunner.disableRestart = async (...args: unknown[]) => {
+      runtime.dockerRunner.calls.push({ name: "disableRestart", args });
+      throw new Error("handoff setup failed");
+    };
+
+    await expect(main([
+      "gateway",
+      "rebind",
+      "research",
+      "--docker-context",
+      "colima",
+      "--takeover",
+      "--no-pull",
+    ], runtime)).resolves.toBe(0);
+
+    const stopIndex = runtime.dockerRunner.calls.findIndex((call) => call.name === "stop");
+    const runIndex = runtime.dockerRunner.calls.findIndex((call) => call.name === "run");
+    expect(stopIndex).toBeGreaterThanOrEqual(0);
+    expect(runtime.dockerRunner.calls[stopIndex]).toEqual({
+      name: "stop",
+      args: ["huggingclaw-research", "desktop-linux"],
+    });
+    expect(runIndex).toBeGreaterThan(stopIndex);
+    expect(runtime.dockerRunner.calls[runIndex]).toEqual({
+      name: "run",
+      args: [
+        expect.objectContaining({
+          context: "colima",
+        }),
+      ],
+    });
   });
 
   it("reads runtime leases from the configured bucket prefix", async () => {

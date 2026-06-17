@@ -29,6 +29,7 @@ import {
   readSecretEnv,
   secretEnvPath,
   type DeploymentManifest,
+  type LocalGatewayBinding,
   writeManifest,
   writeSecretEnv,
 } from "./local-config.js";
@@ -67,6 +68,7 @@ type BootstrapOptions = {
   model?: string;
   runtimeImage?: string;
   gatewayToken?: string;
+  dockerContext?: string;
   pull?: boolean;
   takeover?: boolean;
   yes?: boolean;
@@ -94,10 +96,17 @@ type GatewayCommandOptions = {
   hardware?: string;
   sleepTime?: number;
   runtimeImage?: string;
+  dockerContext?: string;
   pull?: boolean;
   takeover?: boolean;
   yes?: boolean;
   tail?: number;
+};
+
+type GatewayRebindOptions = {
+  dockerContext?: string;
+  pull?: boolean;
+  takeover?: boolean;
 };
 
 type StateAdoptOptions = {
@@ -191,6 +200,7 @@ export function createProgram(runtimeOverrides: CliRuntime = {}): Command {
     .option("--model <model>", "OpenClaw model identifier", DEFAULT_MODEL)
     .option("--runtime-image <image>", "Hugging Claw runtime image")
     .option("--gateway-token <token>", "OpenClaw gateway token")
+    .option("--docker-context <name>", "Docker context for local gateway mode")
     .option("--no-pull", "Do not docker pull before starting a local gateway")
     .option("--takeover", "Start even if a stale runtime lease is present", false)
     .option("--yes", "Confirm paid hardware prompts for automation", false)
@@ -243,6 +253,7 @@ export function createProgram(runtimeOverrides: CliRuntime = {}): Command {
   gateway
     .command("start")
     .argument("<agent>", "Agent name")
+    .option("--docker-context <name>", "Set Docker context only when the deployment has no pinned context")
     .option("--no-pull", "Do not docker pull before starting a local gateway")
     .option("--takeover", "Start even if another live runtime lease is present", false)
     .action(async (agent: string, opts: GatewayCommandOptions) => {
@@ -288,11 +299,22 @@ export function createProgram(runtimeOverrides: CliRuntime = {}): Command {
     .option("--hardware <flavor>", "Hugging Face Space hardware flavor", TELEGRAM_HARDWARE)
     .option("--sleep-time <seconds>", "Space sleep timeout in seconds; -1 means never sleep", parseInteger, TELEGRAM_SLEEP_TIME)
     .option("--runtime-image <image>", "Hugging Claw runtime image")
+    .option("--docker-context <name>", "Docker context for local gateway startup when migrating to local")
     .option("--no-pull", "Do not docker pull before starting a local gateway")
     .option("--takeover", "Start even if another live runtime lease is present", false)
     .option("--yes", "Confirm paid hardware prompts for automation", false)
     .action(async (agent: string, opts: GatewayCommandOptions) => {
       await gatewayMigrate(agent, opts, runtime);
+    });
+
+  gateway
+    .command("rebind")
+    .argument("<agent>", "Agent name")
+    .requiredOption("--docker-context <name>", "Target Docker context")
+    .option("--no-pull", "Do not docker pull before starting the rebound local gateway")
+    .option("--takeover", "Rebind even if the old Docker context is unavailable", false)
+    .action(async (agent: string, opts: GatewayRebindOptions) => {
+      await gatewayRebind(agent, opts, runtime);
     });
 
   const state = program
@@ -332,6 +354,9 @@ export async function main(argv = process.argv.slice(2), runtimeOverrides: CliRu
 async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>): Promise<void> {
   runtime.prompt.intro("HuggingClaw bootstrap");
   const gatewayLocation = parseGatewayLocation(opts.gateway ?? DEFAULT_GATEWAY_LOCATION);
+  if (opts.dockerContext && gatewayLocation !== "local") {
+    throw new Error("--docker-context only applies to local gateway mode");
+  }
   const hfToken = await runtime.readToken(runtime.env);
   const hub = runtime.hubFactory(hfToken);
   const me = await hub.whoami();
@@ -356,6 +381,14 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
   const existingSecrets = await readSecretEnv(runtime.configRoot, agentName).catch(() => ({}));
   const bucketPrefix = bootstrapBucketPrefix(existingManifest, existingSecrets, runtime);
   const localRuntimeId = existingManifest?.localRuntimeId ?? newLocalRuntimeId(agentName);
+  const localGateway = gatewayLocation === "local"
+    ? await resolveLocalGatewayBinding({
+      manifest: existingManifest,
+      requestedContext: opts.dockerContext,
+      runtime,
+      persist: false,
+    })
+    : existingManifest?.localGateway;
   const bucket = await resolveBootstrapBucket({
     explicitBucket: opts.bucket,
     defaultBucket: names.bucket,
@@ -376,6 +409,7 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
     gatewayLocation,
     model,
     runtimeImage,
+    ...(localGateway ? { localGateway } : {}),
     createdAt: existingManifest?.createdAt ?? now,
     updatedAt: now,
   };
@@ -444,6 +478,9 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
   }
   runtime.stdout.log(`Agent:  ${agentName}${bot ? ` (@${bot.username})` : ""}`);
   runtime.stdout.log(`Gateway: ${gatewayLocation}`);
+  if (gatewayLocation === "local" && manifest.localGateway) {
+    runtime.stdout.log(`Docker:  ${manifest.localGateway.dockerContext}`);
+  }
   runtime.stdout.log(`Runtime image: ${runtimeImage}`);
   if (!providedGatewayToken) {
     runtime.stdout.log("");
@@ -766,7 +803,8 @@ async function startLocalGateway(params: {
   const { manifest, runtime } = params;
   const containerName = containerNameFor(manifest.agent);
   const volumeName = volumeNameFor(manifest.agent);
-  const existing = await runtime.dockerRunner.inspect(containerName);
+  const dockerContext = dockerContextFor(manifest);
+  const existing = await runtime.dockerRunner.inspect(containerName, dockerContext);
   const shouldRefresh = Boolean(params.refresh || params.resetVolume);
   if (existing?.running) {
     if (!shouldRefresh) {
@@ -775,18 +813,18 @@ async function startLocalGateway(params: {
     }
   }
   if (params.pull) {
-    await runtime.dockerRunner.pull(manifest.runtimeImage);
+    await runtime.dockerRunner.pull(manifest.runtimeImage, dockerContext);
   }
   if (existing?.running) {
-    await runtime.dockerRunner.stop(containerName);
+    await runtime.dockerRunner.stop(containerName, dockerContext);
     runtime.stdout.log(`Local gateway stopped for config refresh: ${containerName}`);
   }
   if (existing) {
-    await runtime.dockerRunner.rm(containerName);
+    await runtime.dockerRunner.rm(containerName, dockerContext);
     runtime.stdout.log(`Local gateway removed for config refresh: ${containerName}`);
   }
   if (params.resetVolume) {
-    await runtime.dockerRunner.rmVolume(volumeName);
+    await runtime.dockerRunner.rmVolume(volumeName, dockerContext);
     runtime.stdout.log(`Local gateway volume reset for bucket restore: ${volumeName}`);
   }
   await runtime.dockerRunner.run({
@@ -796,13 +834,15 @@ async function startLocalGateway(params: {
     volumeName,
     volumeMountPath: LOCAL_VOLUME_MOUNT_PATH,
     liveDir: LOCAL_LIVE_DIR,
+    ...(dockerContext ? { context: dockerContext } : {}),
   });
   runtime.stdout.log(`Local gateway created: ${containerName}`);
 }
 
 async function stopLocalGateway(manifest: DeploymentManifest, runtime: Required<CliRuntime>): Promise<void> {
   const containerName = containerNameFor(manifest.agent);
-  const existing = await runtime.dockerRunner.inspect(containerName);
+  const dockerContext = dockerContextFor(manifest);
+  const existing = await runtime.dockerRunner.inspect(containerName, dockerContext);
   if (!existing) {
     runtime.stdout.log(`Local gateway does not exist: ${containerName}`);
     return;
@@ -811,12 +851,12 @@ async function stopLocalGateway(manifest: DeploymentManifest, runtime: Required<
     runtime.stdout.log(`Local gateway already stopped: ${containerName}`);
     return;
   }
-  await runtime.dockerRunner.stop(containerName);
+  await runtime.dockerRunner.stop(containerName, dockerContext);
   runtime.stdout.log(`Local gateway stopped: ${containerName}`);
 }
 
 async function gatewayStart(agent: string, opts: GatewayCommandOptions, runtime: Required<CliRuntime>): Promise<void> {
-  const manifest = await readDeploymentManifest(runtime, agent);
+  const manifest = await readDeploymentManifest(runtime, agent, { requestedDockerContext: opts.dockerContext });
   const bucketPrefix = await readDeploymentBucketPrefix(runtime, agent);
   const token = await runtime.readToken(runtime.env);
   const hub = runtime.hubFactory(token);
@@ -856,7 +896,13 @@ async function gatewayStatus(agent: string, runtime: Required<CliRuntime>): Prom
   runtime.stdout.log(`Bucket: ${manifest.bucket}`);
   runtime.stdout.log(`Space: ${manifest.space}`);
   if (manifest.gatewayLocation === "local") {
-    const inspect = await runtime.dockerRunner.inspect(containerNameFor(manifest.agent));
+    if (manifest.localGateway) {
+      runtime.stdout.log(`Docker: ${manifest.localGateway.dockerContext}`);
+      if (manifest.localGateway.dockerEndpoint) {
+        runtime.stdout.log(`Endpoint: ${manifest.localGateway.dockerEndpoint}`);
+      }
+    }
+    const inspect = await runtime.dockerRunner.inspect(containerNameFor(manifest.agent), dockerContextFor(manifest));
     runtime.stdout.log(`Container: ${inspect ? inspect.status ?? "exists" : "missing"}`);
     runtime.stdout.log(`Running: ${inspect?.running ? "yes" : "no"}`);
   } else {
@@ -883,7 +929,7 @@ async function gatewayStatus(agent: string, runtime: Required<CliRuntime>): Prom
 async function gatewayLogs(agent: string, opts: GatewayCommandOptions, runtime: Required<CliRuntime>): Promise<void> {
   const manifest = await readDeploymentManifest(runtime, agent);
   if (manifest.gatewayLocation === "local") {
-    runtime.stdout.log(await runtime.dockerRunner.logs(containerNameFor(manifest.agent), opts.tail));
+    runtime.stdout.log(await runtime.dockerRunner.logs(containerNameFor(manifest.agent), opts.tail, dockerContextFor(manifest)));
     return;
   }
   const token = await runtime.readToken(runtime.env);
@@ -893,7 +939,7 @@ async function gatewayLogs(agent: string, opts: GatewayCommandOptions, runtime: 
 
 async function gatewayMigrate(agent: string, opts: GatewayCommandOptions, runtime: Required<CliRuntime>): Promise<void> {
   const target = parseGatewayLocation(requiredOption(opts.to, "--to"));
-  const current = await readDeploymentManifest(runtime, agent);
+  const current = await readDeploymentManifest(runtime, agent, { requestedDockerContext: target === "space" ? opts.dockerContext : undefined });
   if (current.gatewayLocation === target) {
     runtime.stdout.log(`Gateway already uses ${target}`);
     return;
@@ -943,6 +989,13 @@ async function gatewayMigrate(agent: string, opts: GatewayCommandOptions, runtim
       HUGGINGCLAW_RUNTIME_ID: spaceRuntimeId(agent),
     });
   } else {
+    updated.localGateway = await resolveLocalGatewayBinding({
+      manifest: opts.dockerContext ? undefined : current.localGateway ? current : undefined,
+      requestedContext: opts.dockerContext,
+      runtime,
+      persist: false,
+      agent: current.agent,
+    });
     await assertNoLiveForeignLease({
       hub,
       bucket: current.bucket,
@@ -972,18 +1025,160 @@ async function gatewayMigrate(agent: string, opts: GatewayCommandOptions, runtim
   runtime.stdout.log(`Gateway migrated to ${target}`);
 }
 
-async function readDeploymentManifest(runtime: Required<CliRuntime>, agent: string): Promise<DeploymentManifest> {
-  const manifest = await readManifest(runtime.configRoot, agent);
-  if (manifest.localRuntimeId) {
-    return manifest;
+async function gatewayRebind(agent: string, opts: GatewayRebindOptions, runtime: Required<CliRuntime>): Promise<void> {
+  const targetContext = requiredOption(opts.dockerContext, "--docker-context").trim();
+  const current = await readDeploymentManifest(runtime, agent, { validateLocalGateway: false });
+  if (current.gatewayLocation !== "local") {
+    throw new Error("Docker context rebind only applies to local gateway deployments");
   }
-  const updated = {
+
+  const targetBinding = await resolveLocalGatewayBinding({
+    manifest: undefined,
+    requestedContext: targetContext,
+    runtime,
+    persist: false,
+    agent,
+  });
+  const currentContext = current.localGateway?.dockerContext;
+  if (currentContext === targetBinding.dockerContext) {
+    runtime.stdout.log(`Local gateway already uses Docker context ${targetBinding.dockerContext}`);
+    return;
+  }
+
+  const token = await runtime.readToken(runtime.env);
+  const hub = runtime.hubFactory(token);
+  const bucketPrefix = await readDeploymentBucketPrefix(runtime, agent);
+  if (currentContext && await runtime.dockerRunner.contextExists(currentContext)) {
+    try {
+      await handoffAndStopLocalGateway({
+        manifest: current,
+        hub,
+        runtime,
+        bucketPrefix,
+        targetRuntimeId: current.localRuntimeId,
+      });
+    } catch (err) {
+      if (!opts.takeover) {
+        throw err;
+      }
+      await clearRuntimeHandoffRequest(hub, current.bucket, bucketPrefix).catch(() => undefined);
+      await stopLocalGateway(current, runtime);
+      runtime.stdout.log(`Old Docker context handoff failed; rebinding with --takeover: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  } else if (!opts.takeover) {
+    const missing = currentContext ? `Docker context ${currentContext} is not available` : "Deployment has no pinned Docker context";
+    throw new Error(`${missing}. Run with --takeover to rebind without a final snapshot from the old context.`);
+  } else {
+    runtime.stdout.log("Old Docker context unavailable; rebinding with --takeover and using the latest bucket snapshot.");
+  }
+
+  const updated: DeploymentManifest = {
+    ...current,
+    localGateway: targetBinding,
+    updatedAt: runtime.now().toISOString(),
+  };
+  await startLocalGateway({ manifest: updated, runtime, pull: shouldPull(opts), resetVolume: true });
+  await writeManifest(runtime.configRoot, updated);
+  runtime.stdout.log(`Local gateway rebound to Docker context ${targetBinding.dockerContext}`);
+}
+
+async function readDeploymentManifest(
+  runtime: Required<CliRuntime>,
+  agent: string,
+  opts: { requestedDockerContext?: string | undefined; validateLocalGateway?: boolean | undefined } = {},
+): Promise<DeploymentManifest> {
+  const manifest = await readManifest(runtime.configRoot, agent);
+  let updated: DeploymentManifest = manifest.localRuntimeId ? manifest : {
     ...manifest,
     localRuntimeId: newLocalRuntimeId(manifest.agent),
     updatedAt: runtime.now().toISOString(),
   };
-  await writeManifest(runtime.configRoot, updated);
+  if (updated.gatewayLocation === "local" && opts.validateLocalGateway !== false) {
+    const localGateway = await resolveLocalGatewayBinding({
+      manifest: updated,
+      requestedContext: opts.requestedDockerContext,
+      runtime,
+      persist: false,
+      agent: updated.agent,
+    });
+    if (!sameLocalGatewayBinding(updated.localGateway, localGateway)) {
+      updated = {
+        ...updated,
+        localGateway,
+        updatedAt: runtime.now().toISOString(),
+      };
+    }
+  } else if (opts.requestedDockerContext) {
+    throw new Error("--docker-context only applies when the local gateway is used");
+  }
+  if (updated !== manifest) {
+    await writeManifest(runtime.configRoot, updated);
+  }
   return updated;
+}
+
+async function resolveLocalGatewayBinding(params: {
+  manifest?: DeploymentManifest | null | undefined;
+  requestedContext?: string | undefined;
+  runtime: Required<CliRuntime>;
+  persist: boolean;
+  agent?: string | undefined;
+}): Promise<LocalGatewayBinding> {
+  const requestedContext = params.requestedContext?.trim();
+  const existing = params.manifest?.localGateway;
+  const agent = params.agent ?? params.manifest?.agent ?? "deployment";
+  if (existing && requestedContext && existing.dockerContext !== requestedContext) {
+    throw new Error(
+      `local gateway ${agent} is pinned to Docker context ${existing.dockerContext}. ` +
+      `Run \`hclaw gateway rebind ${agent} --docker-context ${requestedContext}\` to move it.`,
+    );
+  }
+
+  const dockerContext = existing?.dockerContext ?? requestedContext ?? await params.runtime.dockerRunner.currentContext();
+  if (!dockerContext) {
+    throw new Error("could not determine Docker context");
+  }
+  if (!await params.runtime.dockerRunner.contextExists(dockerContext)) {
+    throw new Error(
+      `Docker context ${dockerContext} is not available. ` +
+      `Run \`hclaw gateway rebind ${agent} --docker-context <context>\` to move this local gateway to another Docker engine.`,
+    );
+  }
+
+  if (existing) {
+    await warnOnDockerContextMismatch(dockerContext, params.runtime);
+  }
+  const endpoint = await params.runtime.dockerRunner.contextEndpoint(dockerContext);
+  const binding: LocalGatewayBinding = {
+    engine: "docker",
+    dockerContext,
+    ...(endpoint ? { dockerEndpoint: endpoint } : {}),
+  };
+  if (params.persist && params.manifest && !sameLocalGatewayBinding(params.manifest.localGateway, binding)) {
+    await writeManifest(params.runtime.configRoot, {
+      ...params.manifest,
+      localGateway: binding,
+      updatedAt: params.runtime.now().toISOString(),
+    });
+  }
+  return binding;
+}
+
+async function warnOnDockerContextMismatch(pinnedContext: string, runtime: Required<CliRuntime>): Promise<void> {
+  const currentContext = await runtime.dockerRunner.currentContext().catch(() => undefined);
+  if (currentContext && currentContext !== pinnedContext) {
+    runtime.stdout.log(`Using Docker context ${pinnedContext} from the deployment manifest. Current shell context is ${currentContext}.`);
+  }
+}
+
+function sameLocalGatewayBinding(a: LocalGatewayBinding | undefined, b: LocalGatewayBinding | undefined): boolean {
+  return a?.engine === b?.engine &&
+    a?.dockerContext === b?.dockerContext &&
+    a?.dockerEndpoint === b?.dockerEndpoint;
+}
+
+function dockerContextFor(manifest: DeploymentManifest): string | undefined {
+  return manifest.localGateway?.dockerContext;
 }
 
 async function readDeploymentBucketPrefix(runtime: Required<CliRuntime>, agent: string): Promise<string | undefined> {
@@ -1032,7 +1227,8 @@ async function handoffAndStopLocalGateway(params: {
   targetRuntimeId?: string | undefined;
 }): Promise<void> {
   const containerName = containerNameFor(params.manifest.agent);
-  const existing = await params.runtime.dockerRunner.inspect(containerName);
+  const dockerContext = dockerContextFor(params.manifest);
+  const existing = await params.runtime.dockerRunner.inspect(containerName, dockerContext);
   if (!existing) {
     params.runtime.stdout.log(`Local gateway does not exist: ${containerName}`);
     return;
@@ -1042,7 +1238,7 @@ async function handoffAndStopLocalGateway(params: {
     return;
   }
 
-  await params.runtime.dockerRunner.disableRestart(containerName);
+  await params.runtime.dockerRunner.disableRestart(containerName, dockerContext);
   const handoffStartedAt = params.runtime.now();
   const requestId = randomBytes(16).toString("hex");
   await writeRuntimeHandoffRequest(params.hub, params.manifest.bucket, {

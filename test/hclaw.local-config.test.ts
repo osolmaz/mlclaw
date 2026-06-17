@@ -25,6 +25,11 @@ describe("local Hugging Claw config", () => {
       gatewayLocation: "local",
       model: "huggingface/google/gemma-4-26B-A4B-it",
       runtimeImage: "example/runtime:test",
+      localGateway: {
+        engine: "docker",
+        dockerContext: "desktop-linux",
+        dockerEndpoint: "unix:///docker.sock",
+      },
       createdAt: "2026-06-16T00:00:00.000Z",
       updatedAt: "2026-06-16T00:00:00.000Z",
     });
@@ -33,6 +38,11 @@ describe("local Hugging Claw config", () => {
       agent: "research",
       gatewayLocation: "local",
       bucket: "alice/research-data",
+      localGateway: {
+        engine: "docker",
+        dockerContext: "desktop-linux",
+        dockerEndpoint: "unix:///docker.sock",
+      },
     });
   });
 

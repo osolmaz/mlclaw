@@ -111,6 +111,18 @@ hclaw gateway stop research
 hclaw gateway start research
 ```
 
+Local Docker deployments are pinned to the Docker context used at bootstrap
+time. If your machine has Docker Desktop, Colima, or OrbStack, choose the
+target explicitly:
+
+```bash
+hclaw bootstrap --gateway local --docker-context desktop-linux
+hclaw gateway rebind research --docker-context desktop-linux
+```
+
+`rebind` moves the local gateway through the bucket snapshot/restore path. It
+does not copy Docker volumes between engines.
+
 ## Keep it healthy
 
 Update a Space gateway to the current Hugging Claw source (its bucket — the

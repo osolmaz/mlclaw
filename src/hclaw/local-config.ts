@@ -13,8 +13,15 @@ export type DeploymentManifest = {
   gatewayLocation: GatewayLocation;
   model: string;
   runtimeImage: string;
+  localGateway?: LocalGatewayBinding;
   createdAt: string;
   updatedAt: string;
+};
+
+export type LocalGatewayBinding = {
+  engine: "docker";
+  dockerContext: string;
+  dockerEndpoint?: string;
 };
 
 export type LocalConfigPaths = {
