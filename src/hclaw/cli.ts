@@ -990,7 +990,7 @@ async function gatewayMigrate(agent: string, opts: GatewayCommandOptions, runtim
     });
   } else {
     updated.localGateway = await resolveLocalGatewayBinding({
-      manifest: current.localGateway ? current : undefined,
+      manifest: opts.dockerContext ? undefined : current.localGateway ? current : undefined,
       requestedContext: opts.dockerContext,
       runtime,
       persist: false,
@@ -1027,7 +1027,7 @@ async function gatewayMigrate(agent: string, opts: GatewayCommandOptions, runtim
 
 async function gatewayRebind(agent: string, opts: GatewayRebindOptions, runtime: Required<CliRuntime>): Promise<void> {
   const targetContext = requiredOption(opts.dockerContext, "--docker-context").trim();
-  const current = await readDeploymentManifest(runtime, agent);
+  const current = await readDeploymentManifest(runtime, agent, { validateLocalGateway: false });
   if (current.gatewayLocation !== "local") {
     throw new Error("Docker context rebind only applies to local gateway deployments");
   }
@@ -1083,7 +1083,7 @@ async function gatewayRebind(agent: string, opts: GatewayRebindOptions, runtime:
 async function readDeploymentManifest(
   runtime: Required<CliRuntime>,
   agent: string,
-  opts: { requestedDockerContext?: string | undefined } = {},
+  opts: { requestedDockerContext?: string | undefined; validateLocalGateway?: boolean | undefined } = {},
 ): Promise<DeploymentManifest> {
   const manifest = await readManifest(runtime.configRoot, agent);
   let updated: DeploymentManifest = manifest.localRuntimeId ? manifest : {
@@ -1091,7 +1091,7 @@ async function readDeploymentManifest(
     localRuntimeId: newLocalRuntimeId(manifest.agent),
     updatedAt: runtime.now().toISOString(),
   };
-  if (updated.gatewayLocation === "local") {
+  if (updated.gatewayLocation === "local" && opts.validateLocalGateway !== false) {
     const localGateway = await resolveLocalGatewayBinding({
       manifest: updated,
       requestedContext: opts.requestedDockerContext,

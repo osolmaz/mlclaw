@@ -924,6 +924,67 @@ describe("hclaw CLI", () => {
     expect(runtime.dockerRunner.calls.some((call) => call.name === "start")).toBe(false);
   });
 
+  it("migrates from Space to an explicit local Docker context when the previous context is stale", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([]);
+    const runtime = await createRuntime(hub, prompt);
+    runtime.dockerRunner.contexts.delete("desktop-linux");
+    await writeManifest(runtime.configRoot, {
+      version: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-existing",
+      gatewayLocation: "space",
+      model: "test-model",
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      localGateway: {
+        engine: "docker",
+        dockerContext: "desktop-linux",
+        dockerEndpoint: "unix:///docker-desktop.sock",
+      },
+      createdAt: "2026-06-16T00:00:00.000Z",
+      updatedAt: "2026-06-16T00:00:00.000Z",
+    });
+    await writeSecretEnv(runtime.configRoot, "research", {
+      OPENCLAW_HF_STATE_BUCKET: "alice/research-data",
+      OPENCLAW_AGENT_NAME: "research",
+      OPENCLAW_MODEL: "test-model",
+      HUGGINGCLAW_GATEWAY_LOCATION: "space",
+      HUGGINGCLAW_RUNTIME_IMAGE: DEFAULT_RUNTIME_IMAGE,
+      HUGGINGCLAW_RUNTIME_ID: "space-research",
+    });
+
+    await expect(main([
+      "gateway",
+      "migrate",
+      "research",
+      "--to",
+      "local",
+      "--docker-context",
+      "colima",
+      "--no-pull",
+    ], runtime)).resolves.toBe(0);
+
+    const runCall = runtime.dockerRunner.calls.find((call) => call.name === "run");
+    expect(runCall).toEqual({
+      name: "run",
+      args: [
+        expect.objectContaining({
+          context: "colima",
+        }),
+      ],
+    });
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      gatewayLocation: "local",
+      localGateway: {
+        dockerContext: "colima",
+        dockerEndpoint: "unix:///colima.sock",
+      },
+    });
+  });
+
   it("adopts a state bucket for a local deployment and resets stale live disk", async () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt(["telegram-token", "7216393410"]);
@@ -1031,6 +1092,64 @@ describe("hclaw CLI", () => {
       Array.isArray(call.args[0]) &&
       call.args[0].includes("openclaw-state/runtime/handoff-request.json")
     )).toBe(true);
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      localGateway: {
+        dockerContext: "colima",
+        dockerEndpoint: "unix:///colima.sock",
+      },
+    });
+  });
+
+  it("rebinds with takeover when the previous Docker context is unavailable", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([]);
+    const runtime = await createRuntime(hub, prompt);
+    runtime.dockerRunner.contexts.delete("desktop-linux");
+    await writeManifest(runtime.configRoot, {
+      version: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-existing",
+      gatewayLocation: "local",
+      model: "test-model",
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      localGateway: {
+        engine: "docker",
+        dockerContext: "desktop-linux",
+        dockerEndpoint: "unix:///docker-desktop.sock",
+      },
+      createdAt: "2026-06-16T00:00:00.000Z",
+      updatedAt: "2026-06-16T00:00:00.000Z",
+    });
+
+    await expect(main([
+      "gateway",
+      "rebind",
+      "research",
+      "--docker-context",
+      "colima",
+      "--takeover",
+      "--no-pull",
+    ], runtime)).resolves.toBe(0);
+
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "disableRestart")).toBe(false);
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "stop")).toBe(false);
+    expect(hub.calls.some((call) =>
+      call.name === "bucket.uploadFiles" &&
+      Array.isArray(call.args[0]) &&
+      call.args[0].includes("openclaw-state/runtime/handoff-request.json")
+    )).toBe(false);
+    const runCall = runtime.dockerRunner.calls.find((call) => call.name === "run");
+    expect(runCall).toEqual({
+      name: "run",
+      args: [
+        expect.objectContaining({
+          context: "colima",
+        }),
+      ],
+    });
     await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
       localGateway: {
         dockerContext: "colima",
