@@ -182,6 +182,11 @@ Docker container running the shared runtime image
 
 Local mode does not create or upgrade a paid Space by default.
 
+Follow-up: local Docker operations must pin the Docker context used by each
+deployment so Docker Desktop, Colima, OrbStack, and Linux Docker are not
+silently mixed. See
+[`2026-06-17-docker-context-binding-plan.md`](2026-06-17-docker-context-binding-plan.md).
+
 Docker command shape:
 
 ```bash
