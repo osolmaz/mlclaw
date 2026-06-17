@@ -33,6 +33,7 @@ function createPrompt(answers: PromptAnswer[], interactive = true) {
 function createFakeHub(opts: {
   acknowledgeHandoff?: boolean;
   ackCompletedAt?: string;
+  downloadFileError?: Error;
   spaceRuntime?: SpaceRuntime;
 } = {}) {
   const calls: Array<{ name: string; args: unknown[] }> = [];
@@ -68,6 +69,9 @@ function createFakeHub(opts: {
     },
     async downloadFile(file: string) {
       calls.push({ name: "bucket.downloadFile", args: [file] });
+      if (opts.downloadFileError) {
+        throw opts.downloadFileError;
+      }
       const value = bucketObjects.get(file);
       return value ? new Blob([value]) : null;
     },
@@ -513,7 +517,7 @@ describe("hclaw CLI", () => {
     expect(stderr.join("\n")).toContain("gateway location changes must use `hclaw gateway migrate`");
   });
 
-  it("preserves the configured Space runtime image during update", async () => {
+  it("uses the current runtime image during update by default", async () => {
     const hub = createFakeHub();
     await hub.addSpaceVariable("alice/research", "OPENCLAW_HF_TEMPLATE_REV", "old-template");
     await hub.addSpaceVariable("alice/research", "HUGGINGCLAW_RUNTIME_IMAGE", "registry.example/huggingclaw:test");
@@ -531,10 +535,43 @@ describe("hclaw CLI", () => {
     const code = await main(["update", "alice/research"], runtime);
 
     expect(code).toBe(0);
-    expect(pushed).toEqual([{ runtimeImage: "registry.example/huggingclaw:test" }]);
+    expect(pushed).toEqual([{ runtimeImage: DEFAULT_RUNTIME_IMAGE }]);
     expect(hub.calls).toContainEqual({
       name: "addSpaceVariable",
-      args: ["alice/research", "HUGGINGCLAW_RUNTIME_IMAGE", "registry.example/huggingclaw:test"],
+      args: ["alice/research", "HUGGINGCLAW_RUNTIME_IMAGE", DEFAULT_RUNTIME_IMAGE],
+    });
+    expect(hub.calls).toContainEqual({
+      name: "addSpaceVariable",
+      args: ["alice/research", "HUGGINGCLAW_GATEWAY_LOCATION", "space"],
+    });
+    expect(hub.calls).toContainEqual({
+      name: "addSpaceVariable",
+      args: ["alice/research", "HUGGINGCLAW_RUNTIME_ID", "space-research"],
+    });
+  });
+
+  it("honors an explicit runtime image override during update", async () => {
+    const hub = createFakeHub();
+    await hub.addSpaceVariable("alice/research", "OPENCLAW_HF_TEMPLATE_REV", "old-template");
+    await hub.addSpaceVariable("alice/research", "HUGGINGCLAW_RUNTIME_IMAGE", "registry.example/huggingclaw:old");
+    const { prompt } = createPrompt([]);
+    const baseRuntime = await createRuntime(hub, prompt);
+    const pushed: Array<{ runtimeImage: string | undefined }> = [];
+    const runtime = {
+      ...baseRuntime,
+      pushTemplateToSpace: async (params: { runtimeImage?: string }) => {
+        pushed.push({ runtimeImage: params.runtimeImage });
+        return { templateRev: "test-template" };
+      },
+    };
+
+    const code = await main(["update", "alice/research", "--runtime-image", "registry.example/huggingclaw:new"], runtime);
+
+    expect(code).toBe(0);
+    expect(pushed).toEqual([{ runtimeImage: "registry.example/huggingclaw:new" }]);
+    expect(hub.calls).toContainEqual({
+      name: "addSpaceVariable",
+      args: ["alice/research", "HUGGINGCLAW_RUNTIME_IMAGE", "registry.example/huggingclaw:new"],
     });
     expect(hub.calls).toContainEqual({
       name: "addSpaceVariable",
@@ -900,5 +937,34 @@ describe("hclaw CLI", () => {
     expect(handoffIndex).toBeGreaterThanOrEqual(0);
     expect(disableIndex).toBeGreaterThan(handoffIndex);
     expect(pauseIndex).toBeGreaterThan(disableIndex);
+  });
+
+  it("does not pause a Space gateway when the runtime lease is unreadable", async () => {
+    const hub = createFakeHub({ downloadFileError: new Error("bucket read failed") });
+    const { prompt } = createPrompt([]);
+    const stderr: string[] = [];
+    const runtime = await createRuntime(hub, prompt, stderr);
+    await writeManifest(runtime.configRoot, {
+      version: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-existing",
+      gatewayLocation: "space",
+      model: "test-model",
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      createdAt: "2026-06-16T00:00:00.000Z",
+      updatedAt: "2026-06-16T00:00:00.000Z",
+    });
+
+    await expect(main(["gateway", "stop", "research"], runtime)).resolves.toBe(1);
+
+    expect(stderr.join("\n")).toContain("bucket read failed");
+    expect(hub.calls.some((call) =>
+      call.name === "addSpaceVariable" &&
+      call.args[1] === "HUGGINGCLAW_GATEWAY_DISABLED"
+    )).toBe(false);
+    expect(hub.calls.some((call) => call.name === "pauseSpace")).toBe(false);
   });
 });

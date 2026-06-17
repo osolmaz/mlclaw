@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isMissingContainerError, isMissingVolumeError } from "../src/hclaw/docker.js";
+import { isMissingContainerError, isMissingVolumeError, mergeDockerLogStreams } from "../src/hclaw/docker.js";
 
 describe("Docker error matching", () => {
   it("matches missing resources regardless of Docker message casing", () => {
@@ -10,5 +10,9 @@ describe("Docker error matching", () => {
     expect(isMissingContainerError(new Error("Error: No such container: huggingclaw-test"))).toBe(true);
     expect(isMissingContainerError(new Error("Error response from daemon: no such object: huggingclaw-test")))
       .toBe(true);
+  });
+
+  it("keeps stderr diagnostics in returned Docker logs", () => {
+    expect(mergeDockerLogStreams("started\n", "snapshot failed\n")).toBe("started\nsnapshot failed\n");
   });
 });

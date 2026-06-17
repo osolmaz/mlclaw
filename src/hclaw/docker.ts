@@ -83,8 +83,8 @@ export class CliDockerRunner implements DockerRunner {
   }
 
   async logs(containerName: string, tail = 200): Promise<string> {
-    const { stdout } = await docker(["logs", "--tail", String(tail), containerName]);
-    return stdout;
+    const { stdout, stderr } = await docker(["logs", "--tail", String(tail), containerName]);
+    return mergeDockerLogStreams(stdout, stderr);
   }
 
   async inspect(containerName: string): Promise<DockerInspect | null> {
@@ -117,6 +117,10 @@ export function containerNameFor(agent: string): string {
 
 export function volumeNameFor(agent: string): string {
   return `huggingclaw-${agent}-live`;
+}
+
+export function mergeDockerLogStreams(stdout: string, stderr: string): string {
+  return `${stdout}${stderr}`;
 }
 
 async function docker(args: string[]): Promise<{ stdout: string; stderr: string }> {

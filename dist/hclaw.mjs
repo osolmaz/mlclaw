@@ -4352,8 +4352,8 @@ var CliDockerRunner = class {
     await docker(["update", "--restart", "no", containerName]);
   }
   async logs(containerName, tail = 200) {
-    const { stdout } = await docker(["logs", "--tail", String(tail), containerName]);
-    return stdout;
+    const { stdout, stderr } = await docker(["logs", "--tail", String(tail), containerName]);
+    return mergeDockerLogStreams(stdout, stderr);
   }
   async inspect(containerName) {
     try {
@@ -4383,6 +4383,9 @@ function containerNameFor(agent) {
 }
 function volumeNameFor(agent) {
   return `huggingclaw-${agent}-live`;
+}
+function mergeDockerLogStreams(stdout, stderr) {
+  return `${stdout}${stderr}`;
 }
 async function docker(args) {
   try {
@@ -10361,7 +10364,7 @@ async function spaceGatewayCanAcknowledgeHandoff(params) {
   const expectedRuntimeId = spaceRuntimeId(params.manifest.agent);
   const [runtimeInfo, lease] = await Promise.all([
     params.hub.getSpaceRuntime(params.manifest.space).catch(() => null),
-    readRuntimeLease(params.hub, params.manifest.bucket, params.bucketPrefix).catch(() => null)
+    readRuntimeLease(params.hub, params.manifest.bucket, params.bucketPrefix)
   ]);
   const stage = typeof runtimeInfo?.stage === "string" ? runtimeInfo.stage.toUpperCase() : "";
   const stageCanRunGateway = !stage || stage === "RUNNING" || stage === "RUNNING_BUILDING";
@@ -10415,7 +10418,7 @@ async function update(repoId, opts, hub, hfToken, runtime) {
   if (!variables.has("OPENCLAW_HF_TEMPLATE_REV") && !opts.force) {
     throw new Error(`${repoId} does not look like a HuggingClaw deployment; pass --force to update anyway`);
   }
-  const runtimeImage = resolveRuntimeImage(opts.runtimeImage ?? variables.get("HUGGINGCLAW_RUNTIME_IMAGE")?.value, runtime.env);
+  const runtimeImage = resolveRuntimeImage(opts.runtimeImage, runtime.env);
   const agentName = variables.get("OPENCLAW_AGENT_NAME")?.value?.trim() || repoId.split("/")[1] || "openclaw";
   runtime.stdout.log(`Generating current Space files into ${repoId}`);
   const { templateRev } = await runtime.pushTemplateToSpace({

@@ -868,7 +868,7 @@ async function spaceGatewayCanAcknowledgeHandoff(params: {
   const expectedRuntimeId = spaceRuntimeId(params.manifest.agent);
   const [runtimeInfo, lease] = await Promise.all([
     params.hub.getSpaceRuntime(params.manifest.space).catch(() => null),
-    readRuntimeLease(params.hub, params.manifest.bucket, params.bucketPrefix).catch(() => null),
+    readRuntimeLease(params.hub, params.manifest.bucket, params.bucketPrefix),
   ]);
   const stage = typeof runtimeInfo?.stage === "string" ? runtimeInfo.stage.toUpperCase() : "";
   const stageCanRunGateway = !stage || stage === "RUNNING" || stage === "RUNNING_BUILDING";
@@ -951,7 +951,7 @@ async function update(
   if (!variables.has("OPENCLAW_HF_TEMPLATE_REV") && !opts.force) {
     throw new Error(`${repoId} does not look like a HuggingClaw deployment; pass --force to update anyway`);
   }
-  const runtimeImage = resolveRuntimeImage(opts.runtimeImage ?? variables.get("HUGGINGCLAW_RUNTIME_IMAGE")?.value, runtime.env);
+  const runtimeImage = resolveRuntimeImage(opts.runtimeImage, runtime.env);
   const agentName = variables.get("OPENCLAW_AGENT_NAME")?.value?.trim() || repoId.split("/")[1] || "openclaw";
   runtime.stdout.log(`Generating current Space files into ${repoId}`);
   const { templateRev } = await runtime.pushTemplateToSpace({
