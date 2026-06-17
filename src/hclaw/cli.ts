@@ -436,6 +436,7 @@ function deploymentSecrets(params: {
 }): Record<string, string> {
   return {
     HF_TOKEN: params.hfToken,
+    HUGGINGFACE_HUB_TOKEN: params.hfToken,
     TELEGRAM_BOT_TOKEN: params.telegramToken,
     TELEGRAM_ALLOWED_USERS: params.telegramUserId,
     OPENCLAW_GATEWAY_TOKEN: params.gatewayToken,
@@ -499,6 +500,7 @@ async function deploySpaceGateway(params: {
   await setDeploymentSecrets(hub, manifest.space, {
     OPENCLAW_GATEWAY_TOKEN: requiredSecret(secrets, "OPENCLAW_GATEWAY_TOKEN"),
     HF_TOKEN: requiredSecret(secrets, "HF_TOKEN"),
+    HUGGINGFACE_HUB_TOKEN: requiredSecret(secrets, "HF_TOKEN"),
     TELEGRAM_BOT_TOKEN: requiredSecret(secrets, "TELEGRAM_BOT_TOKEN"),
     TELEGRAM_ALLOWED_USERS: requiredSecret(secrets, "TELEGRAM_ALLOWED_USERS"),
     ...(secrets.TELEGRAM_PROXY ? { TELEGRAM_PROXY: secrets.TELEGRAM_PROXY } : {}),

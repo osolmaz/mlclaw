@@ -38,6 +38,7 @@ const required = [
   "space/README.md",
   "space/package-lock.json",
   "scripts/configure-telegram.mjs",
+  "scripts/configure-huggingface-model.mjs",
   "scripts/report-telegram-probe.mjs",
   "src/hf-bucket-client/client.ts",
   "src/hf-state-sync/cli.ts",

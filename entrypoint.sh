@@ -8,6 +8,10 @@ if [ "${HUGGINGCLAW_GATEWAY_DISABLED:-0}" = "1" ]; then
   exit 0
 fi
 
+if [ -z "${HUGGINGFACE_HUB_TOKEN:-}" ] && [ -n "${HF_TOKEN:-}" ]; then
+  export HUGGINGFACE_HUB_TOKEN="$HF_TOKEN"
+fi
+
 # State, workspace, and config paths are ALWAYS derived from the live dir,
 # never inherited: older deployments set OPENCLAW_STATE_DIR=/data/... as Space
 # variables, and any state written outside the live dir would be invisible to
@@ -36,6 +40,12 @@ if [ ! -f "$CONFIG_PATH" ]; then
   cp /app/openclaw.default.json "$CONFIG_PATH"
 fi
 chown -R node:node "$LIVE_DIR"
+
+if [ -n "${OPENCLAW_MODEL:-}" ]; then
+  echo "[huggingface-config] configuring selected Hugging Face model"
+  gosu node node /app/scripts/configure-huggingface-model.mjs "$CONFIG_PATH"
+  echo "[huggingface-config] Hugging Face model configured"
+fi
 
 if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_ALLOWED_USERS:-}" ]; then
   echo "[telegram-config] configuring Telegram channel"

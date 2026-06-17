@@ -27,6 +27,7 @@
     "openclaw.default.json",
     "README.md",
     "scripts/configure-telegram.mjs",
+    "scripts/configure-huggingface-model.mjs",
     "scripts/report-telegram-probe.mjs",
     "space/",
     "src/hf-bucket-client/",

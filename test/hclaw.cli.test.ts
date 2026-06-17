@@ -252,7 +252,9 @@ describe("hclaw CLI", () => {
     const manifest = await readManifest(runtime.configRoot, "research");
     expect(manifest.localRuntimeId).toMatch(/^local-research-[a-f0-9]{16}$/);
     await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
+      HUGGINGFACE_HUB_TOKEN: "hf_test_token",
       HUGGINGCLAW_RUNTIME_ID: manifest.localRuntimeId,
+      HF_TOKEN: "hf_test_token",
       OPENCLAW_MODEL: DEFAULT_MODEL,
     });
   });
