@@ -203,6 +203,31 @@ describe("ML Claw Space runtime", () => {
 
     expect(exitCodes).toEqual([7]);
   });
+
+  it("stops OpenClaw if the public HTTP port cannot bind", async () => {
+    const blockedPort = await freePort();
+    const blocker = http.createServer();
+    await listen(blocker, blockedPort, "0.0.0.0");
+    cleanups.push(() => closeServer(blocker));
+
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "mlclaw-bind-failure-"));
+    const pidFile = path.join(root, "pid");
+    const config = await testConfig({
+      port: blockedPort,
+      openclawArgs: [
+        "-e",
+        `require("fs").writeFileSync(${JSON.stringify(pidFile)},String(process.pid));setInterval(()=>undefined,100000)`,
+      ],
+    });
+    const runtime = new SpaceRuntimeServer(config);
+    cleanups.push(() => runtime.stop(), () => fs.rm(root, { recursive: true, force: true }));
+
+    await expect(runtime.start()).rejects.toThrow(/EADDRINUSE|address already in use/i);
+    const pid = await readPidFile(pidFile);
+    if (pid) {
+      await waitFor(() => !processIsAlive(pid));
+    }
+  });
 });
 
 async function testConfig(overrides: Partial<SpaceRuntimeConfig> = {}): Promise<SpaceRuntimeConfig> {
@@ -243,6 +268,24 @@ async function testConfig(overrides: Partial<SpaceRuntimeConfig> = {}): Promise<
   };
 }
 
+async function readPidFile(file: string): Promise<number | undefined> {
+  try {
+    const pid = Number.parseInt(await fs.readFile(file, "utf8"), 10);
+    return Number.isFinite(pid) ? pid : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function freePort(): Promise<number> {
   const server = http.createServer();
   await listen(server, 0);
@@ -254,9 +297,9 @@ async function freePort(): Promise<number> {
   return address.port;
 }
 
-async function listen(server: http.Server, port: number): Promise<void> {
+async function listen(server: http.Server, port: number, host = "127.0.0.1"): Promise<void> {
   await new Promise<void>((resolve) => {
-    server.listen(port, "127.0.0.1", resolve);
+    server.listen(port, host, resolve);
   });
 }
 
@@ -266,9 +309,9 @@ async function closeServer(server: http.Server): Promise<void> {
   });
 }
 
-async function waitFor(predicate: () => boolean): Promise<void> {
+async function waitFor(predicate: () => boolean | Promise<boolean>): Promise<void> {
   const deadline = Date.now() + 2_000;
-  while (!predicate()) {
+  while (!await predicate()) {
     if (Date.now() > deadline) {
       throw new Error("timed out waiting for condition");
     }

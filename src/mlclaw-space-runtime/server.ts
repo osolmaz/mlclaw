@@ -69,9 +69,25 @@ export class SpaceRuntimeServer {
       proxyWebSocket(req, netSocket, head, this.config, { username: session.username });
     });
 
-    await new Promise<void>((resolve) => {
-      server.listen(this.config.port, "0.0.0.0", resolve);
-    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const onError = (err: Error) => {
+          server.off("listening", onListening);
+          reject(err);
+        };
+        const onListening = () => {
+          server.off("error", onError);
+          resolve();
+        };
+        server.once("error", onError);
+        server.once("listening", onListening);
+        server.listen(this.config.port, "0.0.0.0");
+      });
+    } catch (err) {
+      await this.stop();
+      server.close();
+      throw err;
+    }
     process.stdout.write(`[mlclaw] listening on ${this.config.port} in ${this.config.mode} mode\n`);
     return server;
   }
