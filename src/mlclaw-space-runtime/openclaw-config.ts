@@ -13,7 +13,7 @@ export async function configureOpenClawGateway(config: SpaceRuntimeConfig): Prom
     mode: "trusted-proxy",
     trustedProxy: {
       userHeader: "x-forwarded-user",
-      requiredHeaders: ["x-forwarded-proto"],
+      requiredHeaders: ["x-forwarded-proto", "x-forwarded-host"],
       allowLoopback: true,
     },
   };

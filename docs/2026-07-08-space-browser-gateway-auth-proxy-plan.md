@@ -45,7 +45,7 @@ Configure OpenClaw like this:
       "mode": "trusted-proxy",
       "trustedProxy": {
         "userHeader": "x-forwarded-user",
-        "requiredHeaders": ["x-forwarded-proto"],
+        "requiredHeaders": ["x-forwarded-proto", "x-forwarded-host"],
         "allowLoopback": true
       }
     },
@@ -63,12 +63,13 @@ The ML Claw proxy injects these headers only after HF OAuth session validation:
 x-forwarded-user: <hf username>
 x-forwarded-proto: https
 x-forwarded-host: <space host>
-x-openclaw-scopes: operator.read,operator.write,operator.approvals
+x-openclaw-scopes: operator.admin,operator.read,operator.write,operator.approvals,operator.pairing
 ```
 
-Admin-only operations can later be scoped by a stronger allowlist. For the MVP,
-the duplicated Space owner is the default admin and additional users come from
-`MLCLAW_ALLOWED_USERS`.
+The full scope set is injected only for ML Claw admin users. The duplicated
+Space owner is the default admin, and `MLCLAW_ADMINS` can override that list.
+Other allowed signed-in users receive
+`operator.read,operator.write,operator.approvals`.
 
 ## HF OAuth Contract
 

@@ -63,7 +63,9 @@ describe("ML Claw Space runtime", () => {
 
   it("proxies browser traffic as an authenticated trusted proxy user", async () => {
     const openclawPort = await freePort();
+    let capturedHeaders: http.IncomingHttpHeaders | undefined;
     const upstream = http.createServer((req, res) => {
+      capturedHeaders = req.headers;
       res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
       res.end(String(req.headers["x-forwarded-user"]));
     });
@@ -85,11 +87,54 @@ describe("ML Claw Space runtime", () => {
       headers: {
         cookie,
         "x-forwarded-user": "mallory",
+        "x-openclaw-scopes": "operator.admin",
+        authorization: "Bearer attacker",
       },
     });
 
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("alice");
+    expect(capturedHeaders).toMatchObject({
+      "x-forwarded-user": "alice",
+      "x-forwarded-proto": "http",
+      "x-forwarded-host": `127.0.0.1:${config.port}`,
+      "x-openclaw-scopes": "operator.admin,operator.read,operator.write,operator.approvals,operator.pairing",
+    });
+    expect(capturedHeaders?.authorization).toBeUndefined();
+  });
+
+  it("does not grant admin Control UI scopes to non-admin allowed users", async () => {
+    const openclawPort = await freePort();
+    let capturedHeaders: http.IncomingHttpHeaders | undefined;
+    const upstream = http.createServer((req, res) => {
+      capturedHeaders = req.headers;
+      res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+      res.end("ok");
+    });
+    await listen(upstream, openclawPort);
+    cleanups.push(() => closeServer(upstream));
+
+    const config = await testConfig({
+      openclawPort,
+      allowedUsers: ["alice", "bob"],
+      adminUsers: ["alice"],
+    });
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(() => closeServer(server), () => runtime.stop());
+
+    const cookie = createSignedCookie({
+      name: "mlclaw_session",
+      secret: config.sessionSecret,
+      maxAgeSeconds: 60,
+      secure: false,
+    }, { username: "bob" });
+    const response = await fetch(`http://127.0.0.1:${config.port}/`, {
+      headers: { cookie },
+    });
+
+    expect(response.status).toBe(200);
+    expect(capturedHeaders?.["x-openclaw-scopes"]).toBe("operator.read,operator.write,operator.approvals");
   });
 
   it("stores OpenAI credentials as a Space secret and a 0600 runtime file", async () => {

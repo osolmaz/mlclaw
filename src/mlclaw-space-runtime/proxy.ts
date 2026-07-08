@@ -6,6 +6,20 @@ export type ProxyIdentity = {
   username: string;
 };
 
+const ADMIN_CONTROL_UI_SCOPES = [
+  "operator.admin",
+  "operator.read",
+  "operator.write",
+  "operator.approvals",
+  "operator.pairing",
+] as const;
+
+const USER_CONTROL_UI_SCOPES = [
+  "operator.read",
+  "operator.write",
+  "operator.approvals",
+] as const;
+
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
   "keep-alive",
@@ -117,5 +131,14 @@ function addTrustedProxyHeaders(
   headers["x-forwarded-user"] = identity.username;
   headers["x-forwarded-proto"] = config.publicUrl.startsWith("https://") ? "https" : "http";
   headers["x-forwarded-host"] = new URL(config.publicUrl).host;
-  headers["x-openclaw-scopes"] = "operator.read,operator.write,operator.approvals";
+  headers["x-openclaw-scopes"] = resolveControlUiScopes(config, identity).join(",");
+}
+
+function resolveControlUiScopes(
+  config: Pick<SpaceRuntimeConfig, "adminUsers">,
+  identity: ProxyIdentity,
+): readonly string[] {
+  return config.adminUsers.includes(identity.username)
+    ? ADMIN_CONTROL_UI_SCOPES
+    : USER_CONTROL_UI_SCOPES;
 }
