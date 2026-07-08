@@ -84,5 +84,8 @@ describe("generated Space repository", () => {
     expect(dockerfile).toContain("FROM ghcr.io/openclaw/openclaw:latest");
     expect(dockerfile).toContain("COPY --chown=node:node runtime/hf-state-sync.js /app/hf-state-sync.js");
     expect(dockerfile).toContain("CMD [\"/app/entrypoint.sh\"]");
+    await expect(fs.readFile(path.join(outDir, "runtime/openclaw.default.json"), "utf8")).resolves.toContain(
+      "\"dangerouslyDisableDeviceAuth\": true",
+    );
   });
 });

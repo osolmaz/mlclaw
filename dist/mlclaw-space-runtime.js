@@ -4332,6 +4332,7 @@ async function configureOpenClawGateway(config2) {
   gateway.trustedProxies = ["127.0.0.1", "::1"];
   gateway.controlUi = {
     ...typeof gateway.controlUi === "object" && gateway.controlUi ? gateway.controlUi : {},
+    dangerouslyDisableDeviceAuth: true,
     allowedOrigins: [config2.publicUrl]
   };
   await fs.mkdir(path.dirname(config2.openclawConfigPath), { recursive: true });

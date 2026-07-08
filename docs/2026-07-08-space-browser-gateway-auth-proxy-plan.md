@@ -32,6 +32,14 @@ OpenClaw binds only to loopback on an internal port and uses
 
 The browser never receives `OPENCLAW_GATEWAY_TOKEN`.
 
+`gateway.controlUi.dangerouslyDisableDeviceAuth=true` is deliberate for the
+hosted Space runtime. OpenClaw is bound to loopback and accepts trusted-proxy
+headers only from the ML Claw Space server. The ML Claw server strips inbound
+`x-openclaw-*`, `x-forwarded-*`, and `authorization` headers, validates the
+signed HF OAuth session, and then injects the trusted OpenClaw identity and
+scopes itself. In this deployment, the ML Claw proxy is the authenticated device
+boundary.
+
 ## OpenClaw Auth Contract
 
 Configure OpenClaw like this:
@@ -51,6 +59,7 @@ Configure OpenClaw like this:
     },
     "trustedProxies": ["127.0.0.1", "::1"],
     "controlUi": {
+      "dangerouslyDisableDeviceAuth": true,
       "allowedOrigins": ["https://<space-host>"]
     }
   }

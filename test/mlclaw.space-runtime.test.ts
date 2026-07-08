@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createSignedCookie } from "../src/mlclaw-space-runtime/cookies.js";
 import { loadConfig, type SpaceRuntimeConfig } from "../src/mlclaw-space-runtime/config.js";
+import { configureOpenClawGateway } from "../src/mlclaw-space-runtime/openclaw-config.js";
 import { SpaceRuntimeServer } from "../src/mlclaw-space-runtime/server.js";
 
 const cleanups: Array<() => Promise<void> | void> = [];
@@ -342,6 +343,45 @@ describe("ML Claw Space runtime", () => {
     if (pid) {
       await waitFor(() => !processIsAlive(pid));
     }
+  });
+
+  it("configures OpenClaw as a loopback trusted-proxy browser gateway", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "mlclaw-openclaw-config-"));
+    cleanups.push(() => fs.rm(root, { recursive: true, force: true }));
+    const configPath = path.join(root, "openclaw.json");
+    await fs.writeFile(configPath, JSON.stringify({
+      gateway: {
+        controlUi: {
+          allowedOrigins: ["https://old.example"],
+        },
+      },
+    }));
+    const config = await testConfig({
+      publicUrl: "https://alice-research.hf.space",
+      openclawConfigPath: configPath,
+    });
+
+    await configureOpenClawGateway(config);
+
+    const rewritten = JSON.parse(await fs.readFile(configPath, "utf8"));
+    expect(rewritten.gateway).toMatchObject({
+      mode: "local",
+      bind: "loopback",
+      port: config.openclawPort,
+      auth: {
+        mode: "trusted-proxy",
+        trustedProxy: {
+          userHeader: "x-forwarded-user",
+          requiredHeaders: ["x-forwarded-proto", "x-forwarded-host"],
+          allowLoopback: true,
+        },
+      },
+      trustedProxies: ["127.0.0.1", "::1"],
+      controlUi: {
+        dangerouslyDisableDeviceAuth: true,
+        allowedOrigins: ["https://alice-research.hf.space"],
+      },
+    });
   });
 
   it("makes the duplicated Space owner the default admin", () => {

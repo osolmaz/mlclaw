@@ -20,6 +20,7 @@ export async function configureOpenClawGateway(config: SpaceRuntimeConfig): Prom
   gateway.trustedProxies = ["127.0.0.1", "::1"];
   gateway.controlUi = {
     ...(typeof gateway.controlUi === "object" && gateway.controlUi ? gateway.controlUi : {}),
+    dangerouslyDisableDeviceAuth: true,
     allowedOrigins: [config.publicUrl],
   };
 
