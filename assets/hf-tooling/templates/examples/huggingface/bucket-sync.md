@@ -15,5 +15,5 @@ hf buckets list
 Upload a file to an explicit bucket path:
 
 ```bash
-hf upload "$OPENCLAW_HF_STATE_BUCKET" ./local-file.txt examples/local-file.txt
+hf buckets cp ./local-file.txt "hf://buckets/$OPENCLAW_HF_STATE_BUCKET/examples/local-file.txt"
 ```
