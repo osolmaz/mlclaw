@@ -2,6 +2,65 @@ import { describe, expect, it } from "vitest";
 import { HubApi } from "../src/mlclaw/hub-api.js";
 
 describe("HubApi Space commits", () => {
+  it("creates Docker Spaces as private by default", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const hub = new HubApi({
+      token: "hf_test_token",
+      fetch: async (url, init) => {
+        requests.push({ url: String(url), init: init ?? {} });
+        if (String(url).endsWith("/api/whoami-v2")) {
+          return new Response(JSON.stringify({ name: "alice" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+      },
+    });
+
+    await hub.createDockerSpace("alice/research");
+
+    const request = requests.find((entry) => entry.url === "https://huggingface.co/api/repos/create");
+    expect(request).toBeDefined();
+    expect(request?.init.method).toBe("POST");
+    expect(JSON.parse(String(request?.init.body))).toMatchObject({
+      name: "research",
+      organization: null,
+      type: "space",
+      sdk: "docker",
+      private: true,
+    });
+  });
+
+  it("creates public Docker Spaces only when explicitly requested", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const hub = new HubApi({
+      token: "hf_test_token",
+      fetch: async (url, init) => {
+        requests.push({ url: String(url), init: init ?? {} });
+        if (String(url).endsWith("/api/whoami-v2")) {
+          return new Response(JSON.stringify({ name: "alice" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+      },
+    });
+
+    await hub.createDockerSpace("alice/research", { private: false });
+
+    const request = requests.find((entry) => entry.url === "https://huggingface.co/api/repos/create");
+    expect(request).toBeDefined();
+    expect(JSON.parse(String(request?.init.body))).toMatchObject({
+      name: "research",
+      organization: null,
+      type: "space",
+      sdk: "docker",
+      private: false,
+    });
+  });
+
   it("uploads files and deletes stale paths through the commit API", async () => {
     const requests: Array<{ url: string; init: RequestInit }> = [];
     const hub = new HubApi({
