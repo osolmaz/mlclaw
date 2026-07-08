@@ -964,6 +964,75 @@ describe("mlclaw CLI", () => {
     });
   });
 
+  it("updates the canonical template Space without deployment-only repairs", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([]);
+    const baseRuntime = await createRuntime(hub, prompt);
+    const runtime = {
+      ...baseRuntime,
+      env: { MLCLAW_CANONICAL_SPACE_ID: "alice/mlclaw-template" },
+      pushTemplateToSpace: async () => ({ templateRev: "test-template" }),
+    };
+
+    const code = await main(["update", "alice/mlclaw-template"], runtime);
+
+    expect(code).toBe(0);
+    expect(hub.calls).toContainEqual({
+      name: "addSpaceVariable",
+      args: ["alice/mlclaw-template", "MLCLAW_TEMPLATE_REV", "test-template"],
+    });
+    expect(hub.calls).toContainEqual({
+      name: "addSpaceVariable",
+      args: ["alice/mlclaw-template", "MLCLAW_RUNTIME_IMAGE", "bundled:test-template"],
+    });
+    expect(hub.calls).toContainEqual({
+      name: "addSpaceVariable",
+      args: ["alice/mlclaw-template", "MLCLAW_CANONICAL_SPACE_ID", "alice/mlclaw-template"],
+    });
+    expect(hub.calls).not.toContainEqual({
+      name: "addSpaceVariable",
+      args: ["alice/mlclaw-template", "MLCLAW_GATEWAY_LOCATION", "space"],
+    });
+    expect(hub.calls.some((call) =>
+      call.name === "addSpaceVariable" &&
+      call.args[0] === "alice/mlclaw-template" &&
+      (call.args[1] === "MLCLAW_ALLOWED_USERS" || call.args[1] === "MLCLAW_ADMINS")
+    )).toBe(false);
+    expect(hub.calls).not.toContainEqual({
+      name: "assertBucketAccessible",
+      args: [expect.anything()],
+    });
+    expect(hub.calls.some((call) => call.name === "fetchSpaceLogs")).toBe(false);
+    expect(hub.calls).toContainEqual({
+      name: "restartSpace",
+      args: ["alice/mlclaw-template", true],
+    });
+  });
+
+  it("runs template-aware doctor checks for the canonical template Space", async () => {
+    const hub = createFakeHub();
+    await hub.addSpaceVariable("alice/mlclaw-template", "MLCLAW_TEMPLATE_REV", "test-template");
+    await hub.addSpaceVariable("alice/mlclaw-template", "MLCLAW_RUNTIME_IMAGE", "bundled:test-template");
+    await hub.addSpaceVariable("alice/mlclaw-template", "MLCLAW_CANONICAL_SPACE_ID", "alice/mlclaw-template");
+    const { prompt } = createPrompt([]);
+    const output: string[] = [];
+    const runtime = {
+      ...await createRuntime(hub, prompt),
+      env: { MLCLAW_CANONICAL_SPACE_ID: "alice/mlclaw-template" },
+      stdout: { log: (message: unknown) => output.push(String(message)) },
+    };
+
+    const code = await main(["doctor", "alice/mlclaw-template"], runtime);
+
+    expect(code).toBe(0);
+    expect(output).toContain("Mode: template");
+    expect(output).toContain("Doctor: clean");
+    expect(output.join("\n")).not.toContain("OPENCLAW_HF_STATE_BUCKET");
+    expect(output.join("\n")).not.toContain("secret HF_TOKEN");
+    expect(hub.calls.some((call) => call.name === "fetchSpaceLogs")).toBe(false);
+    expect(hub.calls.some((call) => call.name === "assertBucketAccessible")).toBe(false);
+  });
+
   it("migrates local to Space and back without starting both gateways", async () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt(["telegram-token", "1234567890"]);

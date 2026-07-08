@@ -52,6 +52,7 @@ export const SPACE_HANDOFF_POLL_MS = 5_000;
 
 const STALE_PATH_VARS = ["OPENCLAW_STATE_DIR", "OPENCLAW_WORKSPACE_DIR", "OPENCLAW_CONFIG_PATH"];
 const SNAPSHOT_MANIFEST_REMOTE_NAME = "manifest.json";
+const DEFAULT_CANONICAL_TEMPLATE_SPACE = "osolmaz/mlclaw";
 const PAID_HARDWARE_COST_NOTE =
   "Paid Hugging Face Space hardware costs money while allocated. The cheapest option is cpu-upgrade at $0.03/hour, about $22/month if kept always on.";
 
@@ -1432,7 +1433,8 @@ async function update(
   runtime: Required<CliRuntime>,
 ): Promise<void> {
   const variables = await hub.getSpaceVariables(repoId);
-  if (!variables.has("MLCLAW_TEMPLATE_REV") && !variables.has("OPENCLAW_HF_TEMPLATE_REV") && !opts.force) {
+  const canonicalTemplate = isCanonicalTemplateSpace(repoId, runtime.env);
+  if (!canonicalTemplate && !variables.has("MLCLAW_TEMPLATE_REV") && !variables.has("OPENCLAW_HF_TEMPLATE_REV") && !opts.force) {
     throw new Error(`${repoId} does not look like a ML Claw deployment; pass --force to update anyway`);
   }
   const runtimeImage = resolveRuntimeImageOverride(opts.runtimeImage, runtime.env);
@@ -1445,6 +1447,12 @@ async function update(
   });
   await hub.addSpaceVariable(repoId, "MLCLAW_TEMPLATE_REV", templateRev);
   await hub.addSpaceVariable(repoId, "MLCLAW_RUNTIME_IMAGE", runtimeImage ?? bundledSpaceRuntimeRef(templateRev));
+  if (canonicalTemplate) {
+    await hub.addSpaceVariable(repoId, "MLCLAW_CANONICAL_SPACE_ID", canonicalTemplateSpaceId(runtime.env));
+    await doctor(repoId, { fix: true }, hub, runtime);
+    await hub.restartSpace(repoId, true);
+    return;
+  }
   await hub.addSpaceVariable(repoId, "MLCLAW_GATEWAY_LOCATION", "space");
   await hub.addSpaceVariable(repoId, "MLCLAW_RUNTIME_ID", spaceRuntimeId(agentName));
   await hub.addSpaceVariable(repoId, "MLCLAW_OPENCLAW_PORT", String(DEFAULT_SPACE_OPENCLAW_PORT));
@@ -1463,6 +1471,45 @@ async function doctor(repoId: string, opts: DoctorOptions, hub: HubApi, runtime:
   const secrets = await hub.getSpaceSecrets(repoId);
   const issues: string[] = [];
   const fixed: string[] = [];
+  const canonicalTemplate = isCanonicalTemplateSpace(repoId, runtime.env);
+
+  if (canonicalTemplate) {
+    const expectedCanonicalSpace = canonicalTemplateSpaceId(runtime.env);
+    if ((variables.get("MLCLAW_CANONICAL_SPACE_ID")?.value ?? "") !== expectedCanonicalSpace) {
+      if (fix) {
+        await hub.addSpaceVariable(repoId, "MLCLAW_CANONICAL_SPACE_ID", expectedCanonicalSpace);
+        fixed.push("set MLCLAW_CANONICAL_SPACE_ID");
+      } else {
+        issues.push(`MLCLAW_CANONICAL_SPACE_ID is not ${expectedCanonicalSpace}`);
+      }
+    }
+    if (!variables.has("MLCLAW_TEMPLATE_REV") && !variables.has("OPENCLAW_HF_TEMPLATE_REV")) {
+      issues.push("MLCLAW_TEMPLATE_REV is missing; run `mlclaw update` to refresh the template Space");
+    }
+    if (!variables.has("MLCLAW_RUNTIME_IMAGE")) {
+      issues.push("MLCLAW_RUNTIME_IMAGE is missing; run `mlclaw update` to refresh the template Space");
+    }
+    const runtimeInfo = await hub.getSpaceRuntime(repoId);
+    runtime.stdout.log(`Space: ${repoId}`);
+    runtime.stdout.log("Mode: template");
+    runtime.stdout.log(`Stage: ${runtimeInfo.stage ?? "unknown"}`);
+    runtime.stdout.log(`Hardware: ${formatRuntimeValue(runtimeInfo.requested_hardware ?? runtimeInfo.hardware)}`);
+    if (typeof runtimeInfo.sleep_time === "number") {
+      runtime.stdout.log(`Sleep time: ${runtimeInfo.sleep_time}`);
+    }
+    if (fixed.length > 0) {
+      runtime.stdout.log(`Fixed: ${fixed.join(", ")}`);
+    }
+    if (issues.length === 0) {
+      runtime.stdout.log("Doctor: clean");
+    } else {
+      runtime.stdout.log("Doctor findings:");
+      for (const issue of issues) {
+        runtime.stdout.log(`- ${issue}`);
+      }
+    }
+    return;
+  }
 
   const bucket = variables.get("OPENCLAW_HF_STATE_BUCKET")?.value ?? opts.bucket;
   let signedInUser: string | undefined;
@@ -1571,6 +1618,14 @@ async function doctor(repoId: string, opts: DoctorOptions, hub: HubApi, runtime:
       runtime.stdout.log(`- ${issue}`);
     }
   }
+}
+
+function canonicalTemplateSpaceId(env: NodeJS.ProcessEnv): string {
+  return nonEmpty(env.MLCLAW_CANONICAL_SPACE_ID) ?? DEFAULT_CANONICAL_TEMPLATE_SPACE;
+}
+
+function isCanonicalTemplateSpace(repoId: string, env: NodeJS.ProcessEnv): boolean {
+  return repoId === canonicalTemplateSpaceId(env);
 }
 
 async function settings(repoId: string, opts: SettingsOptions, hub: HubApi, runtime: Required<CliRuntime>): Promise<void> {

@@ -22,6 +22,19 @@ on:
         options:
           - "true"
           - "false"
+      update_template_space:
+        description: "Also update the canonical Hugging Face template Space"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      template_space:
+        description: "Canonical Hugging Face template Space"
+        required: true
+        default: "osolmaz/mlclaw"
+        type: string
 
 permissions:
   contents: read
@@ -49,6 +62,15 @@ jobs:
       - run: npm test
       - run: npm run check:secrets
       - run: npm run pack:check
+      - name: Check Hugging Face token for template update
+        if: ${{ github.event_name == 'release' || inputs.update_template_space == 'true' }}
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "::error::HF_TOKEN secret is required when updating the canonical Hugging Face template Space."
+            exit 1
+          fi
       - run: npm publish --access public --provenance
         if: ${{ github.event_name == 'release' || inputs.publish_npm == 'true' }}
       - name: Log in to GHCR
@@ -68,3 +90,9 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/mlclaw-runtime:latest
             ghcr.io/${{ github.repository_owner }}/mlclaw-runtime:${{ steps.package-version.outputs.version }}
             ghcr.io/${{ github.repository_owner }}/mlclaw-runtime:v${{ steps.package-version.outputs.version }}
+      - name: Update canonical Hugging Face template Space
+        if: ${{ github.event_name == 'release' || inputs.update_template_space == 'true' }}
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          MLCLAW_CANONICAL_SPACE_ID: ${{ inputs.template_space || 'osolmaz/mlclaw' }}
+        run: node dist/mlclaw.mjs update "$MLCLAW_CANONICAL_SPACE_ID" --force
