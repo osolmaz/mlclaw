@@ -874,6 +874,45 @@ describe("mlclaw CLI", () => {
     });
   });
 
+  it("lets the user enter an alternative name when bootstrap resources already exist", async () => {
+    const hub = createFakeHub({
+      existingBuckets: ["alice/mlclaw-data"],
+      existingSpaces: ["alice/mlclaw"],
+    });
+    const { prompt, notes } = createPrompt(["mlclaw-fresh"]);
+    const runtime = await createRuntime(hub, prompt);
+
+    const code = await main([
+      "bootstrap",
+      "--name",
+      "mlclaw",
+    ], runtime);
+
+    expect(code).toBe(0);
+    expect(notes).toContainEqual(expect.objectContaining({
+      title: "Existing resources",
+      message: expect.stringContaining("Enter another name for a fresh deployment"),
+    }));
+    expect(notes).toContainEqual(expect.objectContaining({
+      title: "Bootstrap plan",
+      message: expect.stringContaining("Agent: mlclaw-fresh"),
+    }));
+    expect(hub.calls).toContainEqual({ name: "bucketExists", args: ["alice/mlclaw-data"] });
+    expect(hub.calls).toContainEqual({ name: "spaceExists", args: ["alice/mlclaw"] });
+    expect(hub.calls).toContainEqual({ name: "bucketExists", args: ["alice/mlclaw-fresh-data"] });
+    expect(hub.calls).toContainEqual({ name: "spaceExists", args: ["alice/mlclaw-fresh"] });
+    expect(hub.calls).toContainEqual({ name: "createBucket", args: ["alice/mlclaw-fresh-data", true] });
+    expect(hub.calls).toContainEqual({
+      name: "createDockerSpace",
+      args: ["alice/mlclaw-fresh", { private: true, hardware: "cpu-basic" }],
+    });
+    await expect(readManifest(runtime.configRoot, "mlclaw-fresh")).resolves.toMatchObject({
+      agent: "mlclaw-fresh",
+      bucket: "alice/mlclaw-fresh-data",
+      space: "alice/mlclaw-fresh",
+    });
+  });
+
   it("can create a public browser Space when requested", async () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt([], false);

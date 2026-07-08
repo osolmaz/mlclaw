@@ -15330,12 +15330,128 @@ async function bootstrap(opts, runtime) {
   const owner = opts.owner ?? me2.name;
   const telegramToken = await readOptionalTelegramToken(opts, runtime);
   const bot = telegramToken ? await runtime.getTelegramBot(telegramToken, opts.telegramApiRoot) : void 0;
-  const agentName = slugifyAgentName(opts.name ?? bot?.username ?? await promptAgentName(runtime));
+  let agentName = slugifyAgentName(opts.name ?? bot?.username ?? await promptAgentName(runtime));
   const telegramUserId = telegramToken ? opts.telegramUserId ?? runtime.env.TELEGRAM_ALLOWED_USERS ?? await promptRequired("Telegram allowed user ID", runtime) : void 0;
-  const names = namesFor(owner, agentName);
   const model = opts.model ?? DEFAULT_MODEL;
   const runtimeImage = resolveRuntimeImage(opts.runtimeImage, runtime.env);
   const templateRuntimeImage = resolveRuntimeImageOverride(opts.runtimeImage, runtime.env);
+  let plan;
+  for (; ; ) {
+    plan = await resolveBootstrapPlan({
+      opts,
+      owner,
+      agentName,
+      hfToken,
+      model,
+      runtimeImage,
+      hub,
+      runtime,
+      ...requestedGatewayLocation ? { requestedGatewayLocation } : {},
+      ...telegramToken ? { telegramToken } : {},
+      ...telegramUserId ? { telegramUserId } : {}
+    });
+    const alternative = await promptAlternativeBootstrapName({
+      plan,
+      explicitBucket: opts.bucket,
+      yes: Boolean(opts.yes),
+      runtime
+    });
+    if (!alternative) {
+      break;
+    }
+    agentName = alternative;
+  }
+  const { names, gatewayLocation, bucketPlan, bucket, spacePlan, manifest, secrets } = plan;
+  let deployedSpaceRuntime;
+  if (gatewayLocation === "space") {
+    if (!spacePlan) {
+      throw new Error("internal error: Space plan was not resolved");
+    }
+    const paidHardware = await resolveHardware({
+      requestedHardware: opts.hardware ?? (telegramToken ? TELEGRAM_HARDWARE : DEFAULT_HARDWARE),
+      ...typeof opts.sleepTime === "number" ? { requestedSleepTime: opts.sleepTime } : telegramToken ? { requestedSleepTime: TELEGRAM_SLEEP_TIME } : {},
+      requiresMessagingEgress: Boolean(telegramToken),
+      yes: Boolean(opts.yes),
+      runtime
+    });
+    await confirmBootstrapPlan({
+      manifest,
+      bucketPlan,
+      spacePlan,
+      hasExistingManifest: plan.hasExistingManifest,
+      hardware: paidHardware.hardware,
+      ...typeof paidHardware.sleepTime === "number" ? { sleepTime: paidHardware.sleepTime } : {},
+      yes: Boolean(opts.yes),
+      runtime
+    });
+    await createOrAdoptBucket({ hub, bucketPlan, runtime });
+    await assertNoLiveForeignLease({
+      hub,
+      bucket,
+      bucketPrefix: plan.bucketPrefix,
+      runtimeId: spaceRuntimeId(agentName),
+      takeover: Boolean(opts.takeover)
+    });
+    const deployed = await deploySpaceGateway({
+      hub,
+      runtime,
+      hfToken,
+      manifest,
+      secrets,
+      allowedUsers: me2.name,
+      hardware: paidHardware.hardware,
+      publicSpace: Boolean(opts.publicSpace),
+      ...typeof paidHardware.sleepTime === "number" ? { sleepTime: paidHardware.sleepTime } : {},
+      ...templateRuntimeImage ? { templateRuntimeImage } : {}
+    });
+    deployedSpaceRuntime = deployed.runtimeImage;
+    await writeLocalDeployment(runtime.configRoot, manifest, secrets);
+  } else {
+    await confirmBootstrapPlan({
+      manifest,
+      bucketPlan,
+      hasExistingManifest: plan.hasExistingManifest,
+      hardware: "local Docker",
+      yes: Boolean(opts.yes),
+      runtime
+    });
+    await createOrAdoptBucket({ hub, bucketPlan, runtime });
+    await assertNoLiveForeignLease({
+      hub,
+      bucket,
+      bucketPrefix: plan.bucketPrefix,
+      runtimeId: manifest.localRuntimeId,
+      takeover: Boolean(opts.takeover)
+    });
+    await writeLocalDeployment(runtime.configRoot, manifest, secrets);
+    await startLocalGateway({
+      manifest,
+      runtime,
+      pull: shouldPull(opts),
+      refresh: true
+    });
+  }
+  runtime.stdout.log("");
+  runtime.stdout.log(`Bucket: https://huggingface.co/buckets/${bucket}`);
+  if (gatewayLocation === "space") {
+    runtime.stdout.log(`Space:  https://huggingface.co/spaces/${names.space}`);
+  } else {
+    runtime.stdout.log(`Local:  ${containerNameFor(agentName)}`);
+  }
+  runtime.stdout.log(`Agent:  ${agentName}${bot ? ` (@${bot.username})` : ""}`);
+  runtime.stdout.log(`Gateway: ${gatewayLocation}`);
+  if (gatewayLocation === "local" && manifest.localGateway) {
+    runtime.stdout.log(`Docker:  ${manifest.localGateway.dockerContext}`);
+  }
+  runtime.stdout.log(`Runtime image: ${runtimeImage}`);
+  if (deployedSpaceRuntime) {
+    runtime.stdout.log(`Space runtime: ${deployedSpaceRuntime}`);
+  }
+  runtime.prompt.outro(gatewayLocation === "space" ? "Restart requested. Build logs may take a few minutes to appear." : "Local gateway start requested.");
+}
+async function resolveBootstrapPlan(params) {
+  const { opts, owner, agentName, requestedGatewayLocation, hfToken, telegramToken, telegramUserId, model, runtimeImage, hub, runtime } = params;
+  const names = namesFor(owner, agentName);
   const sessionSecret = randomBytes(48).toString("base64url");
   const now = runtime.now().toISOString();
   const existingManifest = await readManifest(runtime.configRoot, agentName).catch(() => null);
@@ -15394,90 +15510,18 @@ async function bootstrap(opts, runtime) {
     ...opts.telegramProxy ? { telegramProxy: opts.telegramProxy } : {},
     ...opts.telegramApiRoot ? { telegramApiRoot: opts.telegramApiRoot } : {}
   });
-  let deployedSpaceRuntime;
-  if (gatewayLocation === "space") {
-    if (!spacePlan) {
-      throw new Error("internal error: Space plan was not resolved");
-    }
-    const paidHardware = await resolveHardware({
-      requestedHardware: opts.hardware ?? (telegramToken ? TELEGRAM_HARDWARE : DEFAULT_HARDWARE),
-      ...typeof opts.sleepTime === "number" ? { requestedSleepTime: opts.sleepTime } : telegramToken ? { requestedSleepTime: TELEGRAM_SLEEP_TIME } : {},
-      requiresMessagingEgress: Boolean(telegramToken),
-      yes: Boolean(opts.yes),
-      runtime
-    });
-    await confirmBootstrapPlan({
-      manifest,
-      bucketPlan,
-      spacePlan,
-      hardware: paidHardware.hardware,
-      ...typeof paidHardware.sleepTime === "number" ? { sleepTime: paidHardware.sleepTime } : {},
-      yes: Boolean(opts.yes),
-      runtime
-    });
-    await createOrAdoptBucket({ hub, bucketPlan, runtime });
-    await assertNoLiveForeignLease({
-      hub,
-      bucket,
-      bucketPrefix,
-      runtimeId: spaceRuntimeId(agentName),
-      takeover: Boolean(opts.takeover)
-    });
-    const deployed = await deploySpaceGateway({
-      hub,
-      runtime,
-      hfToken,
-      manifest,
-      secrets,
-      allowedUsers: me2.name,
-      hardware: paidHardware.hardware,
-      publicSpace: Boolean(opts.publicSpace),
-      ...typeof paidHardware.sleepTime === "number" ? { sleepTime: paidHardware.sleepTime } : {},
-      ...templateRuntimeImage ? { templateRuntimeImage } : {}
-    });
-    deployedSpaceRuntime = deployed.runtimeImage;
-    await writeLocalDeployment(runtime.configRoot, manifest, secrets);
-  } else {
-    await confirmBootstrapPlan({
-      manifest,
-      bucketPlan,
-      hardware: "local Docker",
-      yes: Boolean(opts.yes),
-      runtime
-    });
-    await createOrAdoptBucket({ hub, bucketPlan, runtime });
-    await assertNoLiveForeignLease({
-      hub,
-      bucket,
-      bucketPrefix,
-      runtimeId: manifest.localRuntimeId,
-      takeover: Boolean(opts.takeover)
-    });
-    await writeLocalDeployment(runtime.configRoot, manifest, secrets);
-    await startLocalGateway({
-      manifest,
-      runtime,
-      pull: shouldPull(opts),
-      refresh: true
-    });
-  }
-  runtime.stdout.log("");
-  runtime.stdout.log(`Bucket: https://huggingface.co/buckets/${bucket}`);
-  if (gatewayLocation === "space") {
-    runtime.stdout.log(`Space:  https://huggingface.co/spaces/${names.space}`);
-  } else {
-    runtime.stdout.log(`Local:  ${containerNameFor(agentName)}`);
-  }
-  runtime.stdout.log(`Agent:  ${agentName}${bot ? ` (@${bot.username})` : ""}`);
-  runtime.stdout.log(`Gateway: ${gatewayLocation}`);
-  if (gatewayLocation === "local" && manifest.localGateway) {
-    runtime.stdout.log(`Docker:  ${manifest.localGateway.dockerContext}`);
-  }
-  runtime.stdout.log(`Runtime image: ${runtimeImage}`);
-  if (deployedSpaceRuntime) {
-    runtime.stdout.log(`Space runtime: ${deployedSpaceRuntime}`);
-  }
-  runtime.prompt.outro(gatewayLocation === "space" ? "Restart requested. Build logs may take a few minutes to appear." : "Local gateway start requested.");
+  return {
+    agentName,
+    names,
+    hasExistingManifest: Boolean(existingManifest),
+    gatewayLocation,
+    ...bucketPrefix ? { bucketPrefix } : {},
+    bucketPlan,
+    bucket,
+    ...spacePlan ? { spacePlan } : {},
+    manifest,
+    secrets
+  };
 }
 async function resolveBootstrapBucket(params) {
   const explicitBucket = params.explicitBucket ? parseBucketId(params.explicitBucket) : void 0;
@@ -15489,6 +15533,33 @@ async function resolveBootstrapBucket(params) {
     exists,
     objectCount: inspection.objectCount
   };
+}
+async function promptAlternativeBootstrapName(params) {
+  const existingDefaultBucket = !params.explicitBucket && params.plan.bucketPlan.exists;
+  const existingSpace = params.plan.spacePlan?.exists === true;
+  if (params.plan.hasExistingManifest || !existingDefaultBucket && !existingSpace || params.yes || !params.runtime.prompt.isInteractive()) {
+    return void 0;
+  }
+  const current = params.plan.agentName;
+  const suggestion = `${current}-2`;
+  params.runtime.prompt.note(
+    `The name ${current} maps to existing ML Claw resources. Enter another name for a fresh deployment, or leave this blank to update the existing one.`,
+    "Existing resources"
+  );
+  const value = await params.runtime.prompt.text({
+    message: "Alternative agent name",
+    placeholder: suggestion
+  });
+  if (q(value)) {
+    params.runtime.prompt.cancel("Cancelled");
+    throw new Error("cancelled");
+  }
+  const raw = value.trim();
+  if (!raw) {
+    return void 0;
+  }
+  const alternative = slugifyAgentName(raw);
+  return alternative === current ? void 0 : alternative;
 }
 async function confirmBootstrapPlan(params) {
   const lines = [
@@ -15505,7 +15576,7 @@ async function confirmBootstrapPlan(params) {
   } else {
     lines.push(`Local runtime: ${containerNameFor(params.manifest.agent)} (${params.hardware})`);
   }
-  if (params.bucketPlan.exists || params.spacePlan?.exists) {
+  if (!params.hasExistingManifest && (params.bucketPlan.exists || params.spacePlan?.exists)) {
     lines.push(`Fresh deployment: use a different name, for example --name ${params.manifest.agent}-2`);
   }
   lines.push(`Model: ${params.manifest.model}`);
