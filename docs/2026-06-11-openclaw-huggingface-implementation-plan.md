@@ -1,10 +1,10 @@
-# Hugging Claw Implementation Plan
+# ML Claw Implementation Plan
 
 ## Decision
 
-`osolmaz/huggingclaw` is the single source of truth for Hugging Claw.
+`osolmaz/mlclaw` is the single source of truth for ML Claw.
 
-Hugging Claw deploys a private OpenClaw agent backed by Hugging Face state. The
+ML Claw deploys a private OpenClaw agent backed by Hugging Face state. The
 gateway can run either locally or in a private Hugging Face Space. There is no
 maintained Hugging Face template Space required for normal operation.
 
@@ -13,36 +13,36 @@ Gateway location is now a first-class design decision. See
 for the plan to support local and Space gateway targets with the same runtime
 image and bucket state format.
 
-The local CLI is `hclaw`. It runs on the user's machine, uses the user's local
+The local CLI is `mlclaw`. It runs on the user's machine, uses the user's local
 Hugging Face token, generates the Space repository contents, uploads those
 files to the user's Space repo, sets variables/secrets, and restarts the Space.
 
 The canonical distribution is the npm package:
 
 ```bash
-npx huggingclaw bootstrap
+npx mlclaw bootstrap
 ```
 
-The npm package name is `huggingclaw`. It exposes both CLI binary names:
+The npm package name is `mlclaw`. It exposes both CLI binary names:
 
 ```text
-hclaw
-huggingclaw
+mlclaw
+mlclaw
 ```
 
 Users with Node installed can use npm directly:
 
 ```bash
-npx huggingclaw bootstrap
-npm install -g huggingclaw
-hclaw bootstrap
+npx mlclaw bootstrap
+npm install -g mlclaw
+mlclaw bootstrap
 ```
 
 Users without Node use the platform launcher. The launcher supplies a pinned
 Node runtime when needed, then runs the same npm-distributed CLI:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/osolmaz/huggingclaw/main/hclaw.sh) bootstrap
+bash <(curl -fsSL https://raw.githubusercontent.com/osolmaz/mlclaw/main/mlclaw.sh) bootstrap
 ```
 
 There is no supported Hugging Face bootstrap compatibility URL. The cutover is
@@ -54,10 +54,10 @@ Maintained by us:
 
 ```text
 1 GitHub source repo:
-  https://github.com/osolmaz/huggingclaw
+  https://github.com/osolmaz/mlclaw
 
 1 npm package:
-  huggingclaw
+  mlclaw
 
 No maintained Hugging Face bootstrap repo.
 ```
@@ -66,7 +66,7 @@ Optional/non-authoritative:
 
 ```text
 HF demo or test Spaces may exist, but they are generated outputs only.
-They are not the source of truth and are not required by hclaw.
+They are not the source of truth and are not required by mlclaw.
 ```
 
 Created per user:
@@ -96,8 +96,8 @@ changes it.
 Explicit adoption commands:
 
 ```bash
-hclaw bootstrap --name onurclaw --bucket osolmaz/onurclawtest-data
-hclaw state adopt onurclaw --bucket osolmaz/onurclawtest-data
+mlclaw bootstrap --name research --bucket alice/research-archive-data
+mlclaw state adopt research --bucket alice/research-archive-data
 ```
 
 Adoption means the deployment points at that bucket. It is not a copy/import.
@@ -111,14 +111,14 @@ for the full state bucket contract and migration checks.
 ```text
 README.md
 assets/
-  huggingclaw.svg             # shared GitHub and generated Space branding
+  mlclaw.svg             # shared GitHub and generated Space branding
 docs/
   2026-06-11-openclaw-huggingface-implementation-plan.md
   2026-06-16-gateway-location-implementation-plan.md
-hclaw.sh                     # Unix launcher; installs/uses pinned Node if needed
-hclaw.ps1                    # Windows launcher; installs/uses pinned Node if needed
+mlclaw.sh                     # Unix launcher; installs/uses pinned Node if needed
+mlclaw.ps1                    # Windows launcher; installs/uses pinned Node if needed
 src/
-  hclaw/                      # CLI: bootstrap | update | doctor
+  mlclaw/                      # CLI: bootstrap | update | doctor
   hf-bucket-client/           # typed Storage Bucket client
   hf-state-sync/              # runtime snapshot/restore supervisor
   vendor/hfjs-xet/            # vendored Xet upload path from huggingface.js
@@ -129,7 +129,7 @@ scripts/
   parity-probe.ts
 test/
 dist/
-  hclaw.mjs                   # npm-shipped one-file CLI bundle
+  mlclaw.mjs                   # npm-shipped one-file CLI bundle
 ```
 
 ## Distribution Contract
@@ -138,10 +138,10 @@ The npm package is the single canonical runnable artifact.
 
 ```json
 {
-  "name": "huggingclaw",
+  "name": "mlclaw",
   "bin": {
-    "hclaw": "dist/hclaw.mjs",
-    "huggingclaw": "dist/hclaw.mjs"
+    "mlclaw": "dist/mlclaw.mjs",
+    "mlclaw": "dist/mlclaw.mjs"
   }
 }
 ```
@@ -149,7 +149,7 @@ The npm package is the single canonical runnable artifact.
 Publishing rules:
 
 1. TypeScript source remains the maintained implementation.
-2. `dist/hclaw.mjs` is built before publish and included in the npm package.
+2. `dist/mlclaw.mjs` is built before publish and included in the npm package.
 3. Users are never asked to clone or build this repo.
 4. CI verifies build, typecheck, tests, secret scan, and package contents before
    publish.
@@ -158,12 +158,12 @@ Publishing rules:
 
 Launcher rules:
 
-1. `hclaw.sh` and `hclaw.ps1` are convenience launchers, not separate
+1. `mlclaw.sh` and `mlclaw.ps1` are convenience launchers, not separate
    implementations.
 2. If a compatible Node runtime is already installed, the launcher uses it.
 3. If Node is missing or too old, the launcher downloads a pinned official Node
-   runtime into the user's cache, for example `~/.cache/huggingclaw/node/...`.
-4. The launcher then runs the npm package `huggingclaw` with the user's
+   runtime into the user's cache, for example `~/.cache/mlclaw/node/...`.
+4. The launcher then runs the npm package `mlclaw` with the user's
    arguments.
 5. The launcher must not require Python, `git`, a source checkout, or a local
    build step.
@@ -173,15 +173,15 @@ Launcher rules:
 User-facing commands:
 
 ```bash
-npx huggingclaw bootstrap
-hclaw bootstrap
-bash <(curl -fsSL https://raw.githubusercontent.com/osolmaz/huggingclaw/main/hclaw.sh) bootstrap
+npx mlclaw bootstrap
+mlclaw bootstrap
+bash <(curl -fsSL https://raw.githubusercontent.com/osolmaz/mlclaw/main/mlclaw.sh) bootstrap
 ```
 
 Windows:
 
 ```powershell
-irm https://raw.githubusercontent.com/osolmaz/huggingclaw/main/hclaw.ps1 | iex
+irm https://raw.githubusercontent.com/osolmaz/mlclaw/main/mlclaw.ps1 | iex
 ```
 
 ## Runtime Contract
@@ -243,7 +243,7 @@ huggingface/Qwen/Qwen3-8B
 
 ## CLI Contract
 
-### `hclaw bootstrap`
+### `mlclaw bootstrap`
 
 Default command.
 
@@ -270,13 +270,13 @@ Default command.
 10. Upload/commit the generated files into the user's Space repo.
 11. Set variables/secrets.
 12. Restart the Space and print Space/bucket URLs.
-13. If the gateway token was generated by `hclaw`, print it once so the user
+13. If the gateway token was generated by `mlclaw`, print it once so the user
     can save it. If the user supplied a token, do not echo it back.
 
 Example:
 
 ```bash
-hclaw bootstrap \
+mlclaw bootstrap \
   --telegram-token-file ~/secrets/research_bot.env \
   --telegram-user-id 1234567890
 ```
@@ -284,9 +284,9 @@ hclaw bootstrap \
 Existing-state example:
 
 ```bash
-hclaw bootstrap \
+mlclaw bootstrap \
   --name research \
-  --bucket osolmaz/research-archive-data \
+  --bucket alice/research-archive-data \
   --telegram-token-file ~/secrets/research_bot.env \
   --telegram-user-id 1234567890
 ```
@@ -294,7 +294,7 @@ hclaw bootstrap \
 Automation example:
 
 ```bash
-hclaw bootstrap \
+mlclaw bootstrap \
   --telegram-token-file ~/secrets/research_bot.env \
   --telegram-user-id 1234567890 \
   --hardware cpu-upgrade \
@@ -302,9 +302,9 @@ hclaw bootstrap \
   --yes
 ```
 
-### `hclaw update <owner/space>`
+### `mlclaw update <owner/space>`
 
-1. Confirm the target looks like a Hugging Claw deployment, unless `--force`.
+1. Confirm the target looks like a ML Claw deployment, unless `--force`.
 2. Regenerate Space files from the current source repo.
 3. Force-push the generated files into the target Space repo.
 4. Re-stamp `OPENCLAW_HF_TEMPLATE_REV`.
@@ -313,12 +313,12 @@ hclaw bootstrap \
 
 The update command never writes to the state bucket.
 
-### `hclaw state adopt <agent>`
+### `mlclaw state adopt <agent>`
 
 Switch an existing deployment to an explicit durable state bucket:
 
 ```bash
-hclaw state adopt research --bucket osolmaz/research-archive-data
+mlclaw state adopt research --bucket alice/research-archive-data
 ```
 
 Behavior:
@@ -333,7 +333,7 @@ Behavior:
 7. Restart the configured gateway location.
 8. Verify restored identity/state files.
 
-### `hclaw doctor <owner/space>`
+### `mlclaw doctor <owner/space>`
 
 Report-only by default; `--fix` applies safe Space config repairs.
 
@@ -350,13 +350,13 @@ Checks:
 when `--bucket` is provided. It never reads secret values and never modifies
 bucket objects.
 
-### `hclaw settings <owner/space>`
+### `mlclaw settings <owner/space>`
 
 Update operational Space settings after bootstrap. The command should mirror
 Hugging Face CLI naming instead of inventing aliases:
 
 ```bash
-hclaw settings your-hf-username/research-agent --hardware cpu-upgrade --sleep-time -1
+mlclaw settings your-hf-username/research-agent --hardware cpu-upgrade --sleep-time -1
 ```
 
 - `--hardware <flavor>` requests a Hugging Face Space hardware flavor.
@@ -370,7 +370,7 @@ hclaw settings your-hf-username/research-agent --hardware cpu-upgrade --sleep-ti
 
 ## Security Defaults
 
-- The user runs `hclaw` locally; no hosted launcher asks for HF credentials.
+- The user runs `mlclaw` locally; no hosted launcher asks for HF credentials.
 - No credentials are committed to git.
 - User-supplied secret values are write-only and never printed.
 - A generated gateway token is printed once because Hugging Face stores Space
@@ -390,27 +390,27 @@ Local:
 4. `npm run check:secrets`
 5. Verify `npm pack --dry-run` includes the runnable bundle, launchers, README,
    license, generated Space sources, and excludes test/dev-only files.
-6. Verify the npm package exposes both `hclaw` and `huggingclaw` binaries.
-7. Verify `hclaw.sh` works on a machine with Node already installed.
-8. Verify `hclaw.sh` works on a clean machine without Node by installing the
+6. Verify the npm package exposes both `mlclaw` and `mlclaw` binaries.
+7. Verify `mlclaw.sh` works on a machine with Node already installed.
+8. Verify `mlclaw.sh` works on a clean machine without Node by installing the
    pinned cached runtime.
-9. Verify `hclaw.ps1` works on Windows with and without Node.
+9. Verify `mlclaw.ps1` works on Windows with and without Node.
 10. Bucket parity probe against a real test bucket:
    upload, list, download, missing object, delete.
 
 Live:
 
-1. Wipe old `osolmaz/onurclawtest` Space and `osolmaz/onurclawtest-data`
+1. Wipe old `alice/research-archive` Space and `alice/research-archive-data`
    bucket when explicitly authorized.
-2. Run `npx huggingclaw bootstrap` using the saved Telegram token file and
+2. Run `npx mlclaw bootstrap` using the saved Telegram token file and
    allowed user.
-3. Confirm the Space repo was generated from `huggingclaw`, not from a template
+3. Confirm the Space repo was generated from `mlclaw`, not from a template
    Space.
 4. Confirm Space builds.
 5. Confirm logs show `fresh start` or `restored snapshot`.
 6. Confirm logs show `snapshot ... uploaded`.
 7. Restart the Space and confirm restore from bucket.
-8. Run `hclaw doctor osolmaz/onurclawtest`.
+8. Run `mlclaw doctor alice/research-archive`.
 9. Induce one stale `/data` variable, then confirm `doctor --fix` removes it.
 
 ## Out of Scope
@@ -427,7 +427,7 @@ The generated Space configures Telegram long polling for private Spaces.
 Telegram deployments currently require upgraded paid Space hardware. Free
 `cpu-basic` Spaces are not expected to keep Telegram connections working.
 
-Before HuggingClaw requests upgraded hardware, it must warn the user that this
+Before ML Claw requests upgraded hardware, it must warn the user that this
 will bill their Hugging Face account and ask for explicit consent. If Hugging
 Face changes free Space egress behavior in the future, this requirement can be
 relaxed without changing the rest of the deployment model.
@@ -490,11 +490,11 @@ Content-Type: application/json
 }
 ```
 
-HuggingClaw should expose these settings without renaming them:
+ML Claw should expose these settings without renaming them:
 
 ```bash
-hclaw bootstrap --hardware cpu-upgrade --sleep-time -1 --yes
-hclaw settings your-hf-username/research-agent --hardware cpu-upgrade --sleep-time -1 --yes
+mlclaw bootstrap --hardware cpu-upgrade --sleep-time -1 --yes
+mlclaw settings your-hf-username/research-agent --hardware cpu-upgrade --sleep-time -1 --yes
 ```
 
 Without `--yes`, interactive commands should print a cost warning and prompt

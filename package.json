@@ -1,29 +1,30 @@
 {
-  "name": "huggingclaw",
+  "name": "mlclaw",
   "version": "0.2.0",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/osolmaz/huggingclaw"
+    "url": "https://github.com/osolmaz/mlclaw"
   },
-  "homepage": "https://github.com/osolmaz/huggingclaw#readme",
+  "homepage": "https://github.com/osolmaz/mlclaw#readme",
   "bugs": {
-    "url": "https://github.com/osolmaz/huggingclaw/issues"
+    "url": "https://github.com/osolmaz/mlclaw/issues"
   },
   "type": "module",
   "bin": {
-    "hclaw": "dist/hclaw.mjs",
-    "huggingclaw": "dist/hclaw.mjs"
+    "mlclaw": "dist/mlclaw.mjs"
   },
   "files": [
     ".agents/skills/",
     ".gitattributes",
     "assets/",
-    "dist/hclaw.mjs",
+    "dist/hf-state-sync.js",
+    "dist/mlclaw.mjs",
+    "dist/mlclaw-space-runtime.js",
     "Dockerfile",
     "entrypoint.sh",
-    "hclaw.ps1",
-    "hclaw.sh",
+    "mlclaw.ps1",
+    "mlclaw.sh",
     "LICENSE",
     "openclaw.default.json",
     "README.md",
@@ -37,9 +38,10 @@
     "tsconfig.json"
   ],
   "scripts": {
-    "build": "npm run build:state-sync && npm run build:hclaw",
+    "build": "npm run build:state-sync && npm run build:space-runtime && npm run build:mlclaw",
     "build:state-sync": "esbuild src/hf-state-sync/cli.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/hf-state-sync.js --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
-    "build:hclaw": "esbuild src/hclaw/cli.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/hclaw.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
+    "build:space-runtime": "esbuild src/mlclaw-space-runtime/cli.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/mlclaw-space-runtime.js --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
+    "build:mlclaw": "esbuild src/mlclaw/cli.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/mlclaw.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
     "build:probe": "esbuild scripts/parity-probe.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/parity-probe.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
     "pack:check": "node scripts/check-package.mjs",
     "prepack": "npm run build",

@@ -1,33 +1,42 @@
 ---
-title: Hugging Claw
+title: ML Claw
 emoji: 🦞
 colorFrom: yellow
 colorTo: red
 sdk: docker
 app_port: 7860
-suggested_hardware: cpu-upgrade
+hf_oauth: true
+hf_oauth_expiration_minutes: 43200
+pinned: false
 secrets:
-  - OPENCLAW_GATEWAY_TOKEN
   - HF_TOKEN
-  - TELEGRAM_BOT_TOKEN
-  - TELEGRAM_ALLOWED_USERS
-  - TELEGRAM_PROXY
-  - TELEGRAM_API_ROOT
+  - MLCLAW_SESSION_SECRET
+  - OPENAI_API_KEY
 ---
 
-# Hugging Claw
+# ML Claw
 
 <p align="center">
-  <img src="assets/huggingclaw.svg" alt="Hugging Claw" width="160">
+  <img src="assets/mlclaw.svg" alt="ML Claw" width="160">
 </p>
 
-This private Space runs your personal OpenClaw agent and connects it to
-Telegram by long polling. Durable state is stored in a private Hugging Face
-Storage Bucket configured by `OPENCLAW_HF_STATE_BUCKET`.
+ML Claw runs OpenClaw in a Hugging Face Space with a browser gateway protected
+by Hugging Face OAuth. Duplicate this Space or use `mlclaw bootstrap` to create
+your own deployment.
 
-OpenClaw runs on local Space disk. The bucket is never mounted as a live
-filesystem; `hf-state-sync` restores verified snapshots on boot and uploads new
-snapshots during runtime and shutdown.
+The public Space process is an ML Claw proxy. It authenticates the signed-in
+Hugging Face user, then forwards browser traffic to OpenClaw on loopback using
+OpenClaw trusted-proxy auth. The browser never receives an OpenClaw gateway
+token.
 
-Manage this deployment from your machine with `hclaw doctor` and
-`hclaw update`.
+Durable state lives in a private Hugging Face Storage Bucket configured by
+`OPENCLAW_HF_STATE_BUCKET`. The bucket is not mounted as a live filesystem;
+`hf-state-sync` restores verified snapshots on boot and uploads new snapshots
+during runtime and shutdown.
+
+Manage an existing deployment from your machine with:
+
+```bash
+mlclaw doctor <owner/space> --fix
+mlclaw update <owner/space>
+```

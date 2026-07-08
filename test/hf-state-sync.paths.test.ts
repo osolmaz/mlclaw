@@ -4,7 +4,7 @@ import { resolveSyncConfig } from "../src/hf-state-sync/paths.js";
 describe("resolveSyncConfig", () => {
   it("keeps stable runtime IDs separate from unique snapshot run IDs", () => {
     const config = resolveSyncConfig({
-      HUGGINGCLAW_RUNTIME_ID: "space-research",
+      MLCLAW_RUNTIME_ID: "space-research",
       OPENCLAW_AGENT_NAME: "research",
     });
 

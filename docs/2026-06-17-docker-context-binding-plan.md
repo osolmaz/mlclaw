@@ -61,13 +61,13 @@ created.
 Bootstrap should detect and pin the current Docker context by default:
 
 ```bash
-hclaw bootstrap --gateway local
+mlclaw bootstrap --gateway local
 ```
 
 Users can choose a context explicitly:
 
 ```bash
-hclaw bootstrap --gateway local --docker-context desktop-linux
+mlclaw bootstrap --gateway local --docker-context desktop-linux
 ```
 
 Status should show the pinned local engine clearly:
@@ -94,7 +94,7 @@ repair path:
 
 ```text
 Docker context desktop-linux is not available.
-Run `hclaw gateway rebind research --docker-context <context>` to move this
+Run `mlclaw gateway rebind research --docker-context <context>` to move this
 local gateway to another Docker engine.
 ```
 
@@ -105,7 +105,7 @@ Changing Docker contexts is a local runtime migration, not a string update.
 Add:
 
 ```bash
-hclaw gateway rebind <agent> --docker-context <context>
+mlclaw gateway rebind <agent> --docker-context <context>
 ```
 
 The rebind command must:
@@ -129,9 +129,9 @@ there is no process available to write a final snapshot.
 Add `--docker-context <name>` to local gateway entry points:
 
 ```bash
-hclaw bootstrap --gateway local --docker-context desktop-linux
-hclaw gateway start <agent> --docker-context desktop-linux
-hclaw gateway rebind <agent> --docker-context desktop-linux
+mlclaw bootstrap --gateway local --docker-context desktop-linux
+mlclaw gateway start <agent> --docker-context desktop-linux
+mlclaw gateway rebind <agent> --docker-context desktop-linux
 ```
 
 Rules:
@@ -201,7 +201,7 @@ Live test:
 1. Bootstrap a local test gateway with `--docker-context colima`.
 2. Confirm it is visible in Colima and not Docker Desktop.
 3. Send a Telegram message and wait for a snapshot.
-4. Run `hclaw gateway rebind <agent> --docker-context desktop-linux`.
+4. Run `mlclaw gateway rebind <agent> --docker-context desktop-linux`.
 5. Confirm Colima container is stopped.
 6. Confirm Docker Desktop container is healthy.
 7. Confirm the restored state includes the message sent before rebind.

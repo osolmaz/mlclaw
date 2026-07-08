@@ -273,7 +273,7 @@ other custom runtimes, not for the shared HF router.
 
 - Router compatibility is not the same as model quality. It only means the
   shared HF router currently accepts the model through `/v1/chat/completions`.
-- Router availability can change without a HuggingClaw release. Re-run the
+- Router availability can change without a ML Claw release. Re-run the
   probe before changing defaults or recommending paid usage.
 - Qwen thinking models may return `reasoning_content`, `content: null`, or
   `<think>` blocks depending on the router provider. OpenClaw integrations

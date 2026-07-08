@@ -6,7 +6,7 @@ Status: implemented in PR #5; final review and CI validation in progress
 
 Use **gateway location** as the user-facing concept.
 
-Hugging Claw always uses Hugging Face for durable state:
+ML Claw always uses Hugging Face for durable state:
 
 ```text
 private Storage Bucket
@@ -43,7 +43,7 @@ Use this naming consistently:
 | Prose | gateway location |
 | CLI option | `--gateway local` or `--gateway space` |
 | Config field | `gatewayLocation` |
-| Command group | `hclaw gateway ...` |
+| Command group | `mlclaw gateway ...` |
 
 Avoid these names:
 
@@ -72,8 +72,8 @@ exists, the local manifest pins the bucket. Bootstrap must reuse
 Explicit bucket adoption:
 
 ```bash
-hclaw bootstrap --name onurclaw --bucket osolmaz/onurclawtest-data
-hclaw state adopt onurclaw --bucket osolmaz/onurclawtest-data
+mlclaw bootstrap --name research --bucket alice/research-archive-data
+mlclaw state adopt research --bucket alice/research-archive-data
 ```
 
 Use `--bucket`, not `--from-bucket`. The command points the deployment at the
@@ -82,7 +82,7 @@ durable state bucket. It is not a copy/import operation.
 Rules:
 
 - If the bucket does not exist, create it private.
-- If the bucket exists and contains Hugging Claw/OpenClaw snapshots, treat it as
+- If the bucket exists and contains ML Claw/OpenClaw snapshots, treat it as
   adoption.
 - Verify the bucket manifest and newest snapshot before starting a gateway.
 - If a deployment manifest already exists and its bucket differs from
@@ -101,33 +101,33 @@ Rules:
 Bootstrap:
 
 ```bash
-hclaw bootstrap --gateway local
-hclaw bootstrap --gateway space
-hclaw bootstrap --gateway local --bucket <owner/bucket>
-hclaw bootstrap --gateway space --bucket <owner/bucket>
+mlclaw bootstrap --gateway local
+mlclaw bootstrap --gateway space
+mlclaw bootstrap --gateway local --bucket <owner/bucket>
+mlclaw bootstrap --gateway space --bucket <owner/bucket>
 ```
 
 Operational commands:
 
 ```bash
-hclaw state adopt <agent> --bucket <owner/bucket>
-hclaw gateway start <agent>
-hclaw gateway stop <agent>
-hclaw gateway restart <agent>
-hclaw gateway status <agent>
-hclaw gateway logs <agent>
-hclaw gateway migrate <agent> --to local
-hclaw gateway migrate <agent> --to space
+mlclaw state adopt <agent> --bucket <owner/bucket>
+mlclaw gateway start <agent>
+mlclaw gateway stop <agent>
+mlclaw gateway restart <agent>
+mlclaw gateway status <agent>
+mlclaw gateway logs <agent>
+mlclaw gateway migrate <agent> --to local
+mlclaw gateway migrate <agent> --to space
 ```
 
 Settings:
 
 ```bash
-hclaw settings <owner/space> --hardware cpu-upgrade --sleep-time -1
+mlclaw settings <owner/space> --hardware cpu-upgrade --sleep-time -1
 ```
 
 Do not use settings as a shortcut for gateway location changes. Gateway moves
-must go through `hclaw gateway migrate` so the old runtime uploads a final
+must go through `mlclaw gateway migrate` so the old runtime uploads a final
 snapshot and stops before the new runtime starts.
 
 The initial interactive prompt should be:
@@ -148,10 +148,10 @@ Default to `local`.
 
 ## Runtime Image
 
-Publish a reusable Hugging Claw runtime image:
+Publish a reusable ML Claw runtime image:
 
 ```text
-ghcr.io/osolmaz/huggingclaw-runtime:<version>
+ghcr.io/osolmaz/mlclaw-runtime:<version>
 ```
 
 The image contains:
@@ -191,12 +191,12 @@ Docker command shape:
 
 ```bash
 docker run -d \
-  --name huggingclaw-<agent> \
+  --name mlclaw-<agent> \
   --restart unless-stopped \
-  --env-file ~/.config/huggingclaw/secrets/<agent>.env \
-  -e OPENCLAW_LIVE_DIR=/tmp/huggingclaw-local/openclaw-live \
-  -v huggingclaw-<agent>-live:/tmp/huggingclaw-local \
-  ghcr.io/osolmaz/huggingclaw-runtime:<version>
+  --env-file ~/.config/mlclaw/secrets/<agent>.env \
+  -e OPENCLAW_LIVE_DIR=/tmp/mlclaw-local/openclaw-live \
+  -v mlclaw-<agent>-live:/tmp/mlclaw-local \
+  ghcr.io/osolmaz/mlclaw-runtime:<version>
 ```
 
 The volume is mounted at the parent directory, not directly at
@@ -240,7 +240,7 @@ paid Space hardware when Telegram/Discord is enabled
 Generated Space files should be minimal:
 
 ```dockerfile
-FROM ghcr.io/osolmaz/huggingclaw-runtime:<version>
+FROM ghcr.io/osolmaz/mlclaw-runtime:<version>
 ```
 
 Space mode must warn before paid hardware:
@@ -258,7 +258,7 @@ Automation requires `--yes`.
 Maintain a local manifest per agent:
 
 ```text
-~/.config/huggingclaw/deployments/<agent>.json
+~/.config/mlclaw/deployments/<agent>.json
 ```
 
 Example:
@@ -268,11 +268,11 @@ Example:
   "version": 1,
   "agent": "research",
   "owner": "osolmaz",
-  "bucket": "osolmaz/research-data",
-  "space": "osolmaz/research",
+  "bucket": "alice/research-data",
+  "space": "alice/research",
   "gatewayLocation": "local",
   "model": "huggingface/google/gemma-4-26B-A4B-it",
-  "runtimeImage": "ghcr.io/osolmaz/huggingclaw-runtime:0.2.0",
+  "runtimeImage": "ghcr.io/osolmaz/mlclaw-runtime:0.2.0",
   "createdAt": "2026-06-16T00:00:00.000Z",
   "updatedAt": "2026-06-16T00:00:00.000Z"
 }
@@ -304,7 +304,7 @@ Detailed behavior:
 2. If a gateway is running, stop it through the normal gateway stop path and
    wait for its final snapshot.
 3. Validate that `--bucket` is reachable and private to the user.
-4. If the bucket is non-empty, require a recognizable Hugging Claw snapshot
+4. If the bucket is non-empty, require a recognizable ML Claw snapshot
    manifest or OpenClaw state layout.
 5. If the bucket has a current runtime lease from another runtime, require
    `--takeover`.
@@ -334,7 +334,7 @@ Example:
   "agent": "research",
   "runtimeId": "local-macbook-abc123",
   "gatewayLocation": "local",
-  "runtimeImage": "ghcr.io/osolmaz/huggingclaw-runtime:0.2.0",
+  "runtimeImage": "ghcr.io/osolmaz/mlclaw-runtime:0.2.0",
   "startedAt": "2026-06-16T00:00:00.000Z",
   "lastHeartbeatAt": "2026-06-16T00:05:00.000Z",
   "lastSnapshotId": "snapshots/2026-06-16T00-05-00.000Z.tar.zst"
@@ -344,7 +344,7 @@ Example:
 Behavior:
 
 - Gateway writes heartbeat periodically.
-- `hclaw gateway status` reads the lease and local/Space runtime status.
+- `mlclaw gateway status` reads the lease and local/Space runtime status.
 - Starting a gateway refuses if another live lease exists.
 - `--takeover` can replace a stale or intentionally abandoned lease.
 
@@ -380,12 +380,12 @@ write new runtime lease
 
 ### Space To Local
 
-1. Set `HUGGINGCLAW_GATEWAY_DISABLED=1` on the Space, or prepare to pause/stop
+1. Set `MLCLAW_GATEWAY_DISABLED=1` on the Space, or prepare to pause/stop
    the Space.
 2. Restart or stop the currently running Space. The current supervisor receives
    shutdown, waits for the child gateway to exit, and uploads a final snapshot.
    If the Space restarts, the replacement boot sees
-   `HUGGINGCLAW_GATEWAY_DISABLED=1` and exits without polling Telegram.
+   `MLCLAW_GATEWAY_DISABLED=1` and exits without polling Telegram.
 3. If the Space has no live runtime lease, skip waiting for a handoff ack; no
    process is available to write it, so the latest bucket snapshot is the only
    recoverable state.
@@ -402,8 +402,8 @@ The old target must not keep polling Telegram after migration.
 Add a gateway-disable guard:
 
 ```bash
-if [ "${HUGGINGCLAW_GATEWAY_DISABLED:-0}" = "1" ]; then
-  echo "[huggingclaw] gateway disabled"
+if [ "${MLCLAW_GATEWAY_DISABLED:-0}" = "1" ]; then
+  echo "[mlclaw] gateway disabled"
   exit 0
 fi
 ```
@@ -431,7 +431,7 @@ Implement the feature as one coherent cutover:
    - existing manifest bucket pinning;
    - target bucket validation;
    - non-empty bucket adoption confirmation;
-   - `hclaw state adopt <agent> --bucket <owner/bucket>`;
+   - `mlclaw state adopt <agent> --bucket <owner/bucket>`;
    - local Docker live volume reset after bucket changes.
 5. Add Docker adapter:
    - detect Docker;
@@ -444,7 +444,7 @@ Implement the feature as one coherent cutover:
 8. Make interactive bootstrap default to `local`.
 9. Keep Space paid-hardware confirmation only for `--gateway space`.
 10. Generate minimal Space files from the shared runtime image.
-11. Add `hclaw gateway` command group.
+11. Add `mlclaw gateway` command group.
 12. Add migration commands with stop/snapshot/start checks.
 13. Add runtime lease read/write/heartbeat support.
 14. Update `doctor` to understand both local and Space gateway locations.
@@ -473,7 +473,7 @@ Integration tests with fakes:
 - local bootstrap creates bucket and local manifest, but no Space;
 - Space bootstrap creates bucket and Space and confirms paid hardware;
 - bootstrap with `--bucket` points the deployment at the adopted bucket;
-- `hclaw state adopt` stops the current gateway, updates manifest/env/Space
+- `mlclaw state adopt` stops the current gateway, updates manifest/env/Space
   variables, resets local volume, and restarts from the adopted bucket;
 - non-empty bucket mismatch requires confirmation;
 - live foreign lease requires `--takeover`;
@@ -494,13 +494,13 @@ Live test:
 
 Live migration round trip:
 
-1. Start with `hclaw bootstrap --gateway local` using a real test bot and test
+1. Start with `mlclaw bootstrap --gateway local` using a real test bot and test
    bucket.
 2. Send a Telegram message that creates recognizable state, for example:
    `remember migration-check local-before-space`.
 3. Confirm the local gateway replies.
 4. Force or wait for a snapshot upload.
-5. Run `hclaw gateway migrate <agent> --to space`.
+5. Run `mlclaw gateway migrate <agent> --to space`.
 6. Confirm the local Docker container is stopped.
 7. Confirm the Space starts, restores the latest verified snapshot, and writes
    a `space` runtime lease.
@@ -509,7 +509,7 @@ Live migration round trip:
 9. Send another Telegram message that creates new Space-side state, for
    example: `remember migration-check space-before-local`.
 10. Force or wait for a snapshot upload.
-11. Run `hclaw gateway migrate <agent> --to local`.
+11. Run `mlclaw gateway migrate <agent> --to local`.
 12. Confirm the Space gateway is disabled, paused, or otherwise not polling.
 13. Confirm the local Docker container starts, restores the latest verified
     snapshot, and writes a `local` runtime lease.

@@ -4,8 +4,7 @@ import fs from "node:fs";
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
 
 const expectedBins = {
-  hclaw: "dist/hclaw.mjs",
-  huggingclaw: "dist/hclaw.mjs",
+  mlclaw: "dist/mlclaw.mjs",
 };
 for (const [name, target] of Object.entries(expectedBins)) {
   if (pkg.bin?.[name] !== target) {
@@ -13,7 +12,7 @@ for (const [name, target] of Object.entries(expectedBins)) {
   }
 }
 if (pkg.private) {
-  throw new Error("package.json must not be private; huggingclaw is published to npm");
+  throw new Error("package.json must not be private; mlclaw is published to npm");
 }
 
 const raw = execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
@@ -24,21 +23,22 @@ const [pack] = JSON.parse(raw);
 const files = new Set(pack.files.map((file) => file.path));
 
 const required = [
-  ".agents/skills/huggingclaw/SKILL.md",
-  ".agents/skills/huggingclaw/agents/openai.yaml",
+  ".agents/skills/mlclaw/SKILL.md",
+  ".agents/skills/mlclaw/agents/openai.yaml",
   "LICENSE",
   "README.md",
   "package.json",
-  "dist/hclaw.mjs",
-  "hclaw.sh",
-  "hclaw.ps1",
+  "dist/hf-state-sync.js",
+  "dist/mlclaw.mjs",
+  "dist/mlclaw-space-runtime.js",
+  "mlclaw.sh",
+  "mlclaw.ps1",
   "Dockerfile",
   "entrypoint.sh",
   "openclaw.default.json",
   "tsconfig.json",
-  "assets/huggingclaw.svg",
+  "assets/mlclaw.svg",
   "space/README.md",
-  "space/package-lock.json",
   "scripts/configure-telegram.mjs",
   "scripts/configure-huggingface-model.mjs",
   "scripts/report-telegram-probe.mjs",
@@ -57,7 +57,8 @@ for (const file of files) {
   if (
     file.startsWith("test/") ||
     file.startsWith("docs/") ||
-    file.startsWith("src/hclaw/") ||
+    file.startsWith("src/mlclaw/") ||
+    file.startsWith("src/mlclaw-space-runtime/") ||
     file === "scripts/parity-probe.ts" ||
     file === "dist/parity-probe.mjs"
   ) {

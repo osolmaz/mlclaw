@@ -1,8 +1,8 @@
-# Hugging Claw Costs
+# ML Claw Costs
 
 Last checked: 2026-06-16
 
-This document is for estimating the cost of a Hugging Claw deployment. Prices
+This document is for estimating the cost of a ML Claw deployment. Prices
 change, so treat the numbers here as a current baseline and verify the linked
 pricing pages before promising a user a specific monthly bill.
 
@@ -47,7 +47,7 @@ Every deployment can have up to four independent cost meters:
 | Dedicated endpoint | Applies if the user creates a separate HF Inference Endpoint | Per minute/hour per endpoint replica |
 | Storage | Applies when stored Hub/Bucket data exceeds included capacity | Per TB-month |
 
-The default Hugging Claw design does not run the model inside the Space. The
+The default ML Claw design does not run the model inside the Space. The
 Space runs the OpenClaw gateway and Telegram polling process; model calls go to
 the Hugging Face router.
 
@@ -62,7 +62,7 @@ but can be configured to sleep; sleeping or paused time is not billed.
 
 Use 730 hours for a rough average month.
 
-| Space hardware | Hourly | Always-on monthly | Use for Hugging Claw |
+| Space hardware | Hourly | Always-on monthly | Use for ML Claw |
 | --- | ---: | ---: | --- |
 | CPU Basic | Free | Free | Build checks, demos, non-bot experiments only |
 | CPU Upgrade | $0.03 | $21.90 | Recommended default for Telegram |
@@ -84,7 +84,7 @@ hundreds-of-dollars/month always-on model server.
 For Telegram, default to always-on:
 
 ```bash
-hclaw settings <owner>/<space> --hardware cpu-upgrade --sleep-time -1
+mlclaw settings <owner>/<space> --hardware cpu-upgrade --sleep-time -1
 ```
 
 Cost examples for `cpu-upgrade`:
@@ -140,7 +140,7 @@ model-specific monthly estimate.
 
 ## Dedicated Hugging Face Inference Endpoints
 
-A dedicated endpoint is separate from the Hugging Claw Space. Use it only when:
+A dedicated endpoint is separate from the ML Claw Space. Use it only when:
 
 - the router does not serve the model you need;
 - you need a dedicated, isolated endpoint;
@@ -167,7 +167,7 @@ Dedicated Inference Endpoints support scale-to-zero after idle periods, which
 can reduce cost. The tradeoff is cold starts; during initialization, the server
 can return `502 Bad Gateway`, so clients need retry/queue behavior.
 
-For Hugging Claw, a dedicated endpoint is not the default. It is a production
+For ML Claw, a dedicated endpoint is not the default. It is a production
 escape hatch.
 
 ## Running The Model Inside The Space
@@ -192,7 +192,7 @@ weights, or very high usage where fixed GPU cost beats per-token pricing.
 
 ## Storage Bucket
 
-Hugging Claw stores state snapshots in a private Hugging Face Storage Bucket.
+ML Claw stores state snapshots in a private Hugging Face Storage Bucket.
 For normal personal usage, this should be small compared with compute and model
 inference.
 
@@ -214,14 +214,14 @@ large files into its workspace or retains many large snapshots.
 
 ## Hugging Face PRO
 
-PRO is not required for Hugging Claw.
+PRO is not required for ML Claw.
 
 It costs $9/month and currently includes:
 
 - 20x included Inference Providers credits compared with a free account;
 - 10x private storage capacity;
 - higher ZeroGPU quota and priority;
-- other Hub features unrelated to the core Hugging Claw deployment.
+- other Hub features unrelated to the core ML Claw deployment.
 
 For a typical Telegram deployment, PRO does not replace paid Space hardware. It
 can reduce small model-inference bills by increasing included credits, but the
@@ -239,7 +239,7 @@ can reduce small model-inference bills by increasing included credits, but the
 | Router unavailable, dedicated T4 endpoint | CPU Upgrade + T4 endpoint | Dedicated endpoint | $386.90 | Usually none beyond endpoint |
 | Fully self-hosted local model | T4 small Space | In-Space GPU | $292.00 | None from router |
 
-## What Hugging Claw Should Default To
+## What ML Claw Should Default To
 
 Default:
 

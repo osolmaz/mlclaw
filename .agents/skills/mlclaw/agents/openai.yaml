@@ -1,0 +1,4 @@
+interface:
+  display_name: "ML Claw"
+  short_description: "Set up OpenClaw on Hugging Face"
+  default_prompt: "Use $mlclaw to set up an OpenClaw deployment on Hugging Face with mlclaw."

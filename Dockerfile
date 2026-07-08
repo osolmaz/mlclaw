@@ -7,6 +7,9 @@ RUN npm ci --no-audit --no-fund && npm run build
 
 FROM ghcr.io/openclaw/openclaw:latest
 
+LABEL org.opencontainers.image.source="https://github.com/osolmaz/mlclaw"
+LABEL org.opencontainers.image.description="ML Claw runtime for OpenClaw on Hugging Face"
+
 USER root
 # zstd: snapshot archives. gosu: drop privileges after preparing mounted volumes.
 RUN apt-get update \
@@ -14,25 +17,29 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=sync-build /build/dist/hf-state-sync.js /app/hf-state-sync.js
+COPY --from=sync-build /build/dist/mlclaw-space-runtime.js /app/mlclaw-space-runtime.js
 COPY --chown=node:node openclaw.default.json /app/openclaw.default.json
 COPY --chown=node:node entrypoint.sh /app/entrypoint.sh
+COPY --chown=node:node assets/ /app/assets/
 COPY --chown=node:node scripts/ /app/scripts/
 RUN chmod +x /app/entrypoint.sh
 
 USER root
 
 # Live state on local disk; the bucket is reached only through the TS client.
-ENV OPENCLAW_GATEWAY_PORT=7860
+ENV PORT=7860
+ENV MLCLAW_OPENCLAW_PORT=7861
+ENV OPENCLAW_GATEWAY_PORT=7861
 ENV OPENCLAW_LIVE_DIR=/tmp/openclaw-live
 ENV OPENCLAW_STATE_DIR=/tmp/openclaw-live/.openclaw
 ENV OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-live/workspace
 ENV OPENCLAW_CONFIG_PATH=/tmp/openclaw-live/.openclaw/openclaw.json
 ENV OPENCLAW_DISABLE_BONJOUR=1
-ARG HUGGINGCLAW_RUNTIME_IMAGE=ghcr.io/osolmaz/huggingclaw-runtime:latest
-ENV HUGGINGCLAW_RUNTIME_IMAGE=$HUGGINGCLAW_RUNTIME_IMAGE
+ARG MLCLAW_RUNTIME_IMAGE=ghcr.io/osolmaz/mlclaw-runtime:latest
+ENV MLCLAW_RUNTIME_IMAGE=$MLCLAW_RUNTIME_IMAGE
 
 EXPOSE 7860
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 CMD node -e "const port=process.env.OPENCLAW_GATEWAY_PORT||'7860'; fetch('http://127.0.0.1:'+port+'/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 CMD node -e "const port=process.env.PORT||'7860'; fetch('http://127.0.0.1:'+port+'/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 ENTRYPOINT ["/app/entrypoint.sh"]

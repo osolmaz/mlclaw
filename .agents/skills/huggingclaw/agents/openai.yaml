@@ -1,4 +1,0 @@
-interface:
-  display_name: "HuggingClaw"
-  short_description: "Set up OpenClaw on Hugging Face"
-  default_prompt: "Use $huggingclaw to set up an OpenClaw deployment on Hugging Face with hclaw."

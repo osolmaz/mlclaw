@@ -4826,7 +4826,7 @@ function positiveIntFromEnv(value, fallback) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 function resolveSyncConfig(env = process.env) {
-  const runId = env.HUGGINGCLAW_RUN_ID?.trim() || randomUUID();
+  const runId = env.MLCLAW_RUN_ID?.trim() || randomUUID();
   return {
     liveDir: env.OPENCLAW_LIVE_DIR?.trim() || DEFAULT_LIVE_DIR,
     bucket: env.OPENCLAW_HF_STATE_BUCKET?.trim() || null,
@@ -4835,10 +4835,10 @@ function resolveSyncConfig(env = process.env) {
     handoffPollSeconds: positiveIntFromEnv(env.HF_STATE_SYNC_HANDOFF_POLL_SECONDS, DEFAULT_HANDOFF_POLL_SECONDS),
     keepSnapshots: positiveIntFromEnv(env.HF_STATE_SYNC_KEEP, DEFAULT_KEEP),
     runId,
-    runtimeId: env.HUGGINGCLAW_RUNTIME_ID?.trim() || runId,
+    runtimeId: env.MLCLAW_RUNTIME_ID?.trim() || runId,
     agentName: env.OPENCLAW_AGENT_NAME?.trim() || "openclaw",
-    gatewayLocation: env.HUGGINGCLAW_GATEWAY_LOCATION === "local" || env.HUGGINGCLAW_GATEWAY_LOCATION === "space" ? env.HUGGINGCLAW_GATEWAY_LOCATION : "unknown",
-    runtimeImage: env.HUGGINGCLAW_RUNTIME_IMAGE?.trim() || "unknown"
+    gatewayLocation: env.MLCLAW_GATEWAY_LOCATION === "local" || env.MLCLAW_GATEWAY_LOCATION === "space" ? env.MLCLAW_GATEWAY_LOCATION : "unknown",
+    runtimeImage: env.MLCLAW_RUNTIME_IMAGE?.trim() || "unknown"
   };
 }
 function remotePath(config, name) {

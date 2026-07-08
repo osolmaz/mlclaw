@@ -8,13 +8,19 @@
   },
   "gateway": {
     "mode": "local",
-    "bind": "lan",
-    "port": 7860,
+    "bind": "loopback",
+    "port": 7861,
     "auth": {
-      "token": "${OPENCLAW_GATEWAY_TOKEN}"
+      "mode": "trusted-proxy",
+      "trustedProxy": {
+        "userHeader": "x-forwarded-user",
+        "requiredHeaders": ["x-forwarded-proto", "x-forwarded-host"],
+        "allowLoopback": true
+      }
     },
+    "trustedProxies": ["127.0.0.1", "::1"],
     "controlUi": {
-      "allowedOrigins": ["*"]
+      "allowedOrigins": ["${MLCLAW_PUBLIC_URL}"]
     }
   },
   "channels": {

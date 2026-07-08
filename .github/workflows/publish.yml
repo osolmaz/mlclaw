@@ -6,6 +6,14 @@ on:
       - published
   workflow_dispatch:
     inputs:
+      publish_npm:
+        description: "Publish the npm package"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "true"
+          - "false"
       publish_image:
         description: "Also build and push the runtime image"
         required: true
@@ -42,6 +50,7 @@ jobs:
       - run: npm run check:secrets
       - run: npm run pack:check
       - run: npm publish --access public --provenance
+        if: ${{ github.event_name == 'release' || inputs.publish_npm == 'true' }}
       - name: Log in to GHCR
         if: ${{ github.event_name == 'release' || inputs.publish_image == 'true' }}
         uses: docker/login-action@v3
@@ -56,6 +65,6 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/huggingclaw-runtime:latest
-            ghcr.io/${{ github.repository_owner }}/huggingclaw-runtime:${{ steps.package-version.outputs.version }}
-            ghcr.io/${{ github.repository_owner }}/huggingclaw-runtime:v${{ steps.package-version.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/mlclaw-runtime:latest
+            ghcr.io/${{ github.repository_owner }}/mlclaw-runtime:${{ steps.package-version.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/mlclaw-runtime:v${{ steps.package-version.outputs.version }}
