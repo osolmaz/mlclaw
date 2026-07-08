@@ -68,11 +68,13 @@ export async function generateSpaceRepo(
   const copies: Array<[string, string]> = [
     [".gitattributes", ".gitattributes"],
     ["assets/mlclaw.svg", "assets/mlclaw.svg"],
+    ["assets/hf-tooling", "assets/hf-tooling"],
     ["space/README.md", "README.md"],
   ];
   if (!options.runtimeImage) {
     copies.push(
       ["dist/hf-state-sync.js", "runtime/hf-state-sync.js"],
+      ["dist/hf-tooling-seed.js", "runtime/hf-tooling-seed.js"],
       ["dist/mlclaw-space-runtime.js", "runtime/mlclaw-space-runtime.js"],
       ["entrypoint.sh", "runtime/entrypoint.sh"],
       ["openclaw.default.json", "runtime/openclaw.default.json"],
@@ -103,10 +105,23 @@ LABEL org.opencontainers.image.description="ML Claw runtime for OpenClaw on Hugg
 
 USER root
 RUN apt-get update \\
-  && apt-get install -y --no-install-recommends gosu zstd \\
+  && apt-get install -y --no-install-recommends gosu python3 python3-pip python3-venv zstd \\
   && rm -rf /var/lib/apt/lists/*
+RUN python3 -m pip install --break-system-packages --no-cache-dir \\
+  "huggingface_hub==1.19.0" \\
+  "datasets==5.0.0" \\
+  "safetensors==0.8.0" \\
+  "fastapi==0.137.1" \\
+  "pydantic==2.13.4" \\
+  "rich==15.0.0" \\
+  "starlette==1.3.1" \\
+  "typer==0.25.1" \\
+  "uvicorn==0.49.0" \\
+  "uv==0.11.28" \\
+  "hf-discover==1.3.7"
 
 COPY --chown=node:node runtime/hf-state-sync.js /app/hf-state-sync.js
+COPY --chown=node:node runtime/hf-tooling-seed.js /app/hf-tooling-seed.js
 COPY --chown=node:node runtime/mlclaw-space-runtime.js /app/mlclaw-space-runtime.js
 COPY --chown=node:node runtime/openclaw.default.json /app/openclaw.default.json
 COPY --chown=node:node runtime/entrypoint.sh /app/entrypoint.sh

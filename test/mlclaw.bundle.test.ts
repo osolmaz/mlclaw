@@ -27,6 +27,25 @@ describe("mlclaw bundle", () => {
     expect(actual).toBe(expected);
   });
 
+  it("matches the committed HF tooling seed build", async () => {
+    const tmp = path.join(await fs.mkdtemp(path.join(os.tmpdir(), "mlclaw-hf-tooling-bundle-")), "hf-tooling-seed.js");
+    await execFileAsync("npx", [
+      "esbuild",
+      "src/hf-tooling/cli.ts",
+      "--bundle",
+      "--platform=node",
+      "--target=node22",
+      "--format=esm",
+      `--outfile=${tmp}`,
+      "--banner:js=import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
+    ]);
+    const [expected, actual] = await Promise.all([
+      fs.readFile(tmp, "utf8"),
+      fs.readFile("dist/hf-tooling-seed.js", "utf8"),
+    ]);
+    expect(actual).toBe(expected);
+  });
+
   it("exposes the bundled ML Claw skill", async () => {
     const list = await execFileAsync("node", ["dist/mlclaw.mjs", "--skill", "list"]);
     expect(list.stdout).toContain("mlclaw\t");

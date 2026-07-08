@@ -83,5 +83,9 @@ if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ "${OPENCLAW_TELEGRAM_CONNECTIVITY_PROBE
   fi
 fi
 
+echo "[hf-tooling] seeding baseline Hugging Face tooling"
+node /app/hf-tooling-seed.js
+echo "[hf-tooling] baseline Hugging Face tooling ready"
+
 chown -R node:node "$LIVE_DIR"
 exec gosu node node /app/hf-state-sync.js supervise -- node /app/mlclaw-space-runtime.js

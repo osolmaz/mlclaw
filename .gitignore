@@ -1,5 +1,6 @@
 node_modules/
 dist/*
 !dist/hf-state-sync.js
+!dist/hf-tooling-seed.js
 !dist/mlclaw-space-runtime.js
 !dist/mlclaw.mjs

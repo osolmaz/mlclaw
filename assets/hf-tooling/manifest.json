@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "skills": "https://github.com/huggingface/skills",
+    "revision": "89d91fd4d0e6d4330471ba35f1c388489e94b496"
+  },
+  "tools": {
+    "hf": {
+      "package": "huggingface_hub",
+      "version": "1.19.0"
+    },
+    "hfDiscover": {
+      "package": "hf-discover",
+      "version": "1.3.7",
+      "source": "https://github.com/huggingface/hf-discover",
+      "revision": "1.3.7"
+    },
+    "uv": {
+      "package": "uv",
+      "version": "0.11.28"
+    }
+  },
+  "python": {
+    "packages": {
+      "huggingface_hub": "1.19.0",
+      "datasets": "5.0.0",
+      "safetensors": "0.8.0"
+    }
+  },
+  "skills": {
+    "source": "https://github.com/huggingface/skills",
+    "revision": "89d91fd4d0e6d4330471ba35f1c388489e94b496",
+    "installed": [
+      "hf-cli",
+      "huggingface-spaces",
+      "huggingface-datasets",
+      "huggingface-local-models",
+      "huggingface-best",
+      "hf-mem",
+      "huggingface-tool-builder",
+      "huggingface-papers",
+      "huggingface-gradio",
+      "huggingface-zerogpu"
+    ]
+  },
+  "templates": {
+    "mcpConfig": "workspace/.agents/mcp/huggingface.json",
+    "examples": "workspace/examples/huggingface"
+  }
+}

@@ -19,6 +19,7 @@
     ".gitattributes",
     "assets/",
     "dist/hf-state-sync.js",
+    "dist/hf-tooling-seed.js",
     "dist/mlclaw.mjs",
     "dist/mlclaw-space-runtime.js",
     "Dockerfile",
@@ -38,8 +39,9 @@
     "tsconfig.json"
   ],
   "scripts": {
-    "build": "npm run build:state-sync && npm run build:space-runtime && npm run build:mlclaw",
+    "build": "npm run build:state-sync && npm run build:hf-tooling && npm run build:space-runtime && npm run build:mlclaw",
     "build:state-sync": "esbuild src/hf-state-sync/cli.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/hf-state-sync.js --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
+    "build:hf-tooling": "esbuild src/hf-tooling/cli.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/hf-tooling-seed.js --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
     "build:space-runtime": "esbuild src/mlclaw-space-runtime/cli.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/mlclaw-space-runtime.js --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
     "build:mlclaw": "esbuild src/mlclaw/cli.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/mlclaw.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
     "build:probe": "esbuild scripts/parity-probe.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/parity-probe.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
