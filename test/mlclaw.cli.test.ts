@@ -794,6 +794,10 @@ describe("mlclaw CLI", () => {
       name: "addSpaceVariable",
       args: ["alice/research", "MLCLAW_ALLOWED_USERS", "alice"],
     });
+    expect(hub.calls).toContainEqual({
+      name: "addSpaceVariable",
+      args: ["alice/research", "MLCLAW_ADMINS", "alice"],
+    });
     expect(hub.calls.some((call) => call.name === "addSpaceSecret" && call.args[1] === "TELEGRAM_BOT_TOKEN")).toBe(false);
   });
 
@@ -835,6 +839,10 @@ describe("mlclaw CLI", () => {
     expect(hub.calls).toContainEqual({
       name: "addSpaceVariable",
       args: ["research-org/research", "MLCLAW_ALLOWED_USERS", "alice"],
+    });
+    expect(hub.calls).toContainEqual({
+      name: "addSpaceVariable",
+      args: ["research-org/research", "MLCLAW_ADMINS", "alice"],
     });
   });
 
@@ -911,9 +919,16 @@ describe("mlclaw CLI", () => {
       call.args[0] === "alice/research" &&
       call.args[1] === "MLCLAW_ALLOWED_USERS"
     );
+    const adminsIndex = hub.calls.findIndex((call) =>
+      call.name === "addSpaceVariable" &&
+      call.args[0] === "alice/research" &&
+      call.args[1] === "MLCLAW_ADMINS"
+    );
     const restartIndex = hub.calls.findIndex((call) => call.name === "restartSpace");
     expect(allowedUsersIndex).toBeGreaterThanOrEqual(0);
+    expect(adminsIndex).toBeGreaterThanOrEqual(0);
     expect(restartIndex).toBeGreaterThan(allowedUsersIndex);
+    expect(restartIndex).toBeGreaterThan(adminsIndex);
   });
 
   it("honors an explicit runtime image override during update", async () => {

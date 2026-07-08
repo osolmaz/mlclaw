@@ -19,7 +19,7 @@ gateway mode.
 An ML Claw deployment has:
 
 - a private Hugging Face Storage Bucket for durable OpenClaw state snapshots;
-- a public Hugging Face Docker Space for the default browser gateway;
+- a private Hugging Face Docker Space for the default browser gateway;
 - Hugging Face OAuth enabled on the Space;
 - a local deployment manifest under `~/.config/mlclaw/deployments/`;
 - local secrets under `~/.config/mlclaw/secrets/`;
@@ -39,7 +39,7 @@ Collect or confirm:
 - Agent name, unless a Telegram bot token is supplied and the user wants the
   name derived from the bot username.
 - Gateway mode:
-  - `space`: default browser gateway, public Space, HF OAuth protected.
+  - `space`: default browser gateway, private Space, HF OAuth protected.
   - `local`: Docker gateway on the user's machine.
 - Optional model override.
 - Optional Docker context for local mode.
@@ -99,6 +99,13 @@ After the Space builds, open it in the browser and sign in with the user's
 Hugging Face account. The Space server proxies authenticated browser traffic to
 OpenClaw on loopback using trusted-proxy auth. Do not ask the user for an
 OpenClaw gateway token for the browser Space path.
+
+Create a public Space only when the user explicitly asks for a public demo or
+template-style deployment:
+
+```bash
+npx mlclaw bootstrap --name research --public-space
+```
 
 ## Optional Telegram
 

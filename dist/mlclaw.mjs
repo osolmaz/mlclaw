@@ -15646,6 +15646,7 @@ async function deploySpaceGateway(params) {
     MLCLAW_RUNTIME_IMAGE: spaceRuntimeRef,
     MLCLAW_RUNTIME_ID: spaceRuntimeId(manifest.agent),
     MLCLAW_ALLOWED_USERS: params.allowedUsers,
+    MLCLAW_ADMINS: params.allowedUsers,
     MLCLAW_CANONICAL_SPACE_ID: "osolmaz/mlclaw",
     MLCLAW_OPENCLAW_PORT: String(DEFAULT_SPACE_OPENCLAW_PORT),
     OPENCLAW_GATEWAY_PORT: String(DEFAULT_SPACE_OPENCLAW_PORT)
@@ -16203,6 +16204,11 @@ async function doctor(repoId, opts, hub, runtime) {
   const issues = [];
   const fixed = [];
   const bucket = variables.get("OPENCLAW_HF_STATE_BUCKET")?.value ?? opts.bucket;
+  let signedInUser;
+  const currentUsername = async () => {
+    signedInUser ??= (await hub.whoami()).name;
+    return signedInUser;
+  };
   if (!bucket) {
     issues.push("OPENCLAW_HF_STATE_BUCKET is missing");
   } else if (!variables.has("OPENCLAW_HF_STATE_BUCKET") && fix) {
@@ -16253,11 +16259,18 @@ async function doctor(repoId, opts, hub, runtime) {
   }
   if (!variables.has("MLCLAW_ALLOWED_USERS")) {
     if (fix) {
-      const me2 = await hub.whoami();
-      await hub.addSpaceVariable(repoId, "MLCLAW_ALLOWED_USERS", me2.name);
+      await hub.addSpaceVariable(repoId, "MLCLAW_ALLOWED_USERS", await currentUsername());
       fixed.push("set MLCLAW_ALLOWED_USERS");
     } else {
       issues.push("MLCLAW_ALLOWED_USERS is missing");
+    }
+  }
+  if (!variables.has("MLCLAW_ADMINS")) {
+    if (fix) {
+      await hub.addSpaceVariable(repoId, "MLCLAW_ADMINS", await currentUsername());
+      fixed.push("set MLCLAW_ADMINS");
+    } else {
+      issues.push("MLCLAW_ADMINS is missing");
     }
   }
   if (bucket) {

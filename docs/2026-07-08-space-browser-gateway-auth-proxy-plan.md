@@ -66,9 +66,10 @@ x-forwarded-host: <space host>
 x-openclaw-scopes: operator.admin,operator.read,operator.write,operator.approvals,operator.pairing
 ```
 
-The full scope set is injected only for ML Claw admin users. The duplicated
-Space owner is the default admin, and `MLCLAW_ADMINS` can override that list.
-Other allowed signed-in users receive
+The full scope set is injected only for ML Claw admin users. CLI-created
+Spaces set `MLCLAW_ADMINS` to the bootstrapping Hugging Face user so
+organization-owned Spaces do not accidentally make the organization slug the
+only admin. Other allowed signed-in users receive
 `operator.read,operator.write,operator.approvals`.
 
 ## HF OAuth Contract
@@ -99,6 +100,7 @@ Required Space variables:
 MLCLAW_CANONICAL_SPACE_ID=osolmaz/mlclaw
 MLCLAW_CANONICAL_CREATOR_USER_ID=<known creator id when available>
 MLCLAW_ALLOWED_USERS=<optional comma-separated usernames>
+MLCLAW_ADMINS=<optional comma-separated admin usernames>
 SPACE_HOST=<provided by HF or set by CLI when needed>
 ```
 
