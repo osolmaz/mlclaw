@@ -7,7 +7,7 @@
   "tools": {
     "hf": {
       "package": "huggingface_hub",
-      "version": "1.19.0"
+      "version": "1.22.0"
     },
     "hfDiscover": {
       "package": "hf-discover",
@@ -22,7 +22,7 @@
   },
   "python": {
     "packages": {
-      "huggingface_hub": "1.19.0",
+      "huggingface_hub": "1.22.0",
       "datasets": "5.0.0",
       "safetensors": "0.8.0"
     }

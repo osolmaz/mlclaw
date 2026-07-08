@@ -14885,11 +14885,18 @@ RUN apt-get update \\
   && apt-get install -y --no-install-recommends gosu python3 python3-pip python3-venv zstd \\
   && rm -rf /var/lib/apt/lists/*
 RUN python3 -m pip install --break-system-packages --no-cache-dir \\
-  "huggingface_hub==1.19.0" \\
+  "huggingface_hub==1.22.0" \\
   "datasets==5.0.0" \\
   "safetensors==0.8.0" \\
-  "hf-discover==1.3.7" \\
+  "fastapi==0.137.1" \\
+  "pydantic==2.13.4" \\
+  "rich==15.0.0" \\
+  "starlette==1.3.1" \\
+  "typer==0.25.1" \\
+  "uvicorn==0.49.0" \\
   "uv==0.11.28"
+RUN python3 -m pip install --break-system-packages --no-cache-dir --no-deps \\
+  "hf-discover==1.3.7"
 
 COPY --chown=node:node runtime/hf-state-sync.js /app/hf-state-sync.js
 COPY --chown=node:node runtime/hf-tooling-seed.js /app/hf-tooling-seed.js

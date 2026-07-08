@@ -14,10 +14,11 @@ describe("runtime image Dockerfile", () => {
     expect(dockerfile).toContain("process.env.PORT");
     expect(dockerfile).toContain("/health");
     expect(dockerfile).toContain("python3 -m pip install --break-system-packages --no-cache-dir");
-    expect(dockerfile).toContain("\"huggingface_hub==1.19.0\"");
+    expect(dockerfile).toContain("\"huggingface_hub==1.22.0\"");
     expect(dockerfile).toContain("\"datasets==5.0.0\"");
     expect(dockerfile).toContain("\"safetensors==0.8.0\"");
     expect(dockerfile).toContain("\"hf-discover==1.3.7\"");
+    expect(dockerfile).toContain("--no-deps");
     expect(dockerfile).toContain("\"uv==0.11.28\"");
     expect(dockerfile).toContain("COPY --from=sync-build /build/dist/hf-tooling-seed.js /app/hf-tooling-seed.js");
     expect(dockerfile).not.toContain("18789/healthz");
