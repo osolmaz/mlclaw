@@ -84,14 +84,16 @@ install_node() {
 run_with_node() {
   local node_bin="$1"
   shift
-  local npm_cli node_path
+  local npm_cli node_path exec_prefix
   node_path="$(dirname "$node_bin")"
   npm_cli="$(dirname "$node_bin")/../lib/node_modules/npm/bin/npm-cli.js"
+  exec_prefix="$CACHE_ROOT/npm-exec"
+  mkdir -p "$exec_prefix"
   if [ -f "$npm_cli" ]; then
-    PATH="$node_path:$PATH" exec "$node_bin" "$npm_cli" exec --yes --package "$PACKAGE_SPEC" -- mlclaw "$@"
+    PATH="$node_path:$PATH" exec "$node_bin" "$npm_cli" exec --yes --prefix "$exec_prefix" --package "$PACKAGE_SPEC" -- mlclaw "$@"
   fi
   if command -v npm >/dev/null 2>&1; then
-    PATH="$node_path:$PATH" exec npm exec --yes --package "$PACKAGE_SPEC" -- mlclaw "$@"
+    PATH="$node_path:$PATH" exec npm exec --yes --prefix "$exec_prefix" --package "$PACKAGE_SPEC" -- mlclaw "$@"
   fi
   die "npm was not found for Node runtime $node_bin"
 }

@@ -36,4 +36,33 @@ describe("mlclaw bundle", () => {
     expect(show.stdout).toContain("# ML Claw");
     expect(show.stdout).toContain("npx mlclaw bootstrap");
   });
+
+  it("runs the shell launcher from inside the repository checkout", async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mlclaw-launcher-"));
+    const pack = await execFileAsync("npm", [
+      "pack",
+      "--json",
+      "--ignore-scripts",
+      "--pack-destination",
+      tmp,
+    ]);
+    const packed = JSON.parse(pack.stdout) as Array<{ filename: string }>;
+    const filename = packed[0]?.filename;
+    if (!filename) {
+      throw new Error("npm pack did not report a package filename");
+    }
+    const packageSpec = `file:${path.join(tmp, filename)}`;
+
+    const result = await execFileAsync("bash", ["./mlclaw.sh", "--help"], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        MLCLAW_CACHE_DIR: path.join(tmp, "cache"),
+        MLCLAW_NPM_SPEC: packageSpec,
+      },
+      timeout: 120_000,
+    });
+
+    expect(result.stdout).toContain("Deploy OpenClaw to a Hugging Face Space and private bucket");
+  });
 });

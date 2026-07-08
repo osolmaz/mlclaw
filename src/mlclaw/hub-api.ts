@@ -51,6 +51,18 @@ export class HubApi {
     }
   }
 
+  async bucketExists(bucketId: string): Promise<boolean> {
+    try {
+      await this.bucket(bucketId).assertBucketAccessible();
+      return true;
+    } catch (err) {
+      if (err instanceof BucketHttpError && err.status === 404) {
+        return false;
+      }
+      throw err;
+    }
+  }
+
   async createDockerSpace(
     repoId: string,
     options?: { private?: boolean; hardware?: string; sleepTimeSeconds?: number },
@@ -79,6 +91,18 @@ export class HubApi {
     } catch (err) {
       if (err instanceof HubApiError && err.status === 409) {
         return;
+      }
+      throw err;
+    }
+  }
+
+  async spaceExists(repoId: string): Promise<boolean> {
+    try {
+      await this.requestJson(`/api/spaces/${repoId}`);
+      return true;
+    } catch (err) {
+      if (err instanceof HubApiError && err.status === 404) {
+        return false;
       }
       throw err;
     }

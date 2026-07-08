@@ -24,7 +24,7 @@ function createPrompt(answers: PromptAnswer[], interactive = true) {
       },
       text: async () => String(answers.shift() ?? ""),
       password: async () => String(answers.shift() ?? ""),
-      confirm: async () => Boolean(answers.shift()),
+      confirm: async () => answers.length === 0 ? true : Boolean(answers.shift()),
       cancel: () => undefined,
     },
   };
@@ -35,11 +35,15 @@ function createFakeHub(opts: {
   ackCompletedAt?: string;
   downloadFileError?: Error;
   spaceRuntime?: SpaceRuntime;
+  existingBuckets?: string[];
+  existingSpaces?: string[];
 } = {}) {
   const calls: Array<{ name: string; args: unknown[] }> = [];
   const variables = new Map<string, { value?: string }>();
   const secrets = new Map<string, { key: string }>();
   const bucketObjects = new Map<string, string>();
+  const existingBuckets = new Set(opts.existingBuckets ?? []);
+  const existingSpaces = new Set(opts.existingSpaces ?? []);
   const bucketClient = {
     async uploadFiles(files: Array<{ path: string; content: Blob }>) {
       calls.push({ name: "bucket.uploadFiles", args: [files.map((file) => file.path)] });
@@ -86,8 +90,8 @@ function createFakeHub(opts: {
   const hub = {
     calls,
     bucketObjects,
-    bucket() {
-      calls.push({ name: "bucket", args: [] });
+    bucket(bucket: string) {
+      calls.push({ name: "bucket", args: [bucket] });
       return bucketClient;
     },
     async whoami() {
@@ -96,9 +100,19 @@ function createFakeHub(opts: {
     },
     async createBucket(...args: unknown[]) {
       calls.push({ name: "createBucket", args });
+      existingBuckets.add(String(args[0]));
     },
     async createDockerSpace(...args: unknown[]) {
       calls.push({ name: "createDockerSpace", args });
+      existingSpaces.add(String(args[0]));
+    },
+    async bucketExists(bucket: string) {
+      calls.push({ name: "bucketExists", args: [bucket] });
+      return existingBuckets.has(bucket);
+    },
+    async spaceExists(repoId: string) {
+      calls.push({ name: "spaceExists", args: [repoId] });
+      return existingSpaces.has(repoId);
     },
     async addSpaceVariable(repoId: string, key: string, value: string) {
       calls.push({ name: "addSpaceVariable", args: [repoId, key, value] });
@@ -269,7 +283,12 @@ describe("mlclaw CLI", () => {
     const code = await main(["--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--no-pull"], runtime);
 
     expect(code).toBe(0);
-    expect(notes).toEqual([]);
+    expect(notes).toEqual([
+      expect.objectContaining({
+        title: "Bootstrap plan",
+        message: expect.stringContaining("Bucket: alice/research-data (will be created as private)"),
+      }),
+    ]);
     expect(hub.calls).toContainEqual({ name: "createBucket", args: ["alice/research-data", true] });
     expect(hub.calls.some((call) => call.name === "createDockerSpace")).toBe(false);
     expect(runtime.dockerRunner.calls).toContainEqual({
@@ -544,7 +563,7 @@ describe("mlclaw CLI", () => {
     ], runtime);
 
     expect(code).toBe(1);
-    expect(stderr.join("\n")).toContain("Pass --yes to confirm");
+    expect(stderr.join("\n")).toContain("bootstrap confirmation required. Pass --yes to continue non-interactively.");
     await expect(readManifest(runtime.configRoot, "research")).resolves.toEqual(original);
     expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(false);
   });
@@ -698,6 +717,10 @@ describe("mlclaw CLI", () => {
         title: "Cost warning",
         message: expect.stringContaining("cpu-upgrade at $0.03/hour"),
       }),
+      expect.objectContaining({
+        title: "Bootstrap plan",
+        message: expect.stringContaining("Space: alice/research (will be created as private)"),
+      }),
     ]);
     expect(hub.calls).toContainEqual({ name: "createBucket", args: ["alice/research-data", true] });
     expect(hub.calls).toContainEqual({
@@ -782,6 +805,7 @@ describe("mlclaw CLI", () => {
       "bootstrap",
       "--name",
       "research",
+      "--yes",
     ], await createRuntime(hub, prompt, stderr));
 
     expect(code).toBe(0);
@@ -801,6 +825,51 @@ describe("mlclaw CLI", () => {
     expect(hub.calls.some((call) => call.name === "addSpaceSecret" && call.args[1] === "TELEGRAM_BOT_TOKEN")).toBe(false);
   });
 
+  it("shows existing bucket and Space actions before bootstrap updates resources", async () => {
+    const hub = createFakeHub({
+      existingBuckets: ["alice/mlclaw-data"],
+      existingSpaces: ["alice/mlclaw"],
+    });
+    hub.bucketObjects.set("openclaw-state/runtime/status.json", JSON.stringify({
+      schemaVersion: 1,
+      agent: "mlclaw",
+      runtimeId: "space-mlclaw",
+      gatewayLocation: "space",
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      startedAt: "2026-06-16T00:00:00.000Z",
+      lastHeartbeatAt: "2026-06-16T00:00:01.000Z",
+    }) + "\n");
+    const { prompt, notes } = createPrompt([]);
+    const stdout: string[] = [];
+
+    const code = await main([
+      "bootstrap",
+      "--name",
+      "mlclaw",
+    ], {
+      ...await createRuntime(hub, prompt),
+      stdout: { log: (message: unknown) => stdout.push(String(message)) },
+    });
+
+    expect(code).toBe(0);
+    expect(notes).toContainEqual(expect.objectContaining({
+      title: "Bootstrap plan",
+      message: expect.stringContaining("Bucket: alice/mlclaw-data (exists; keeping 1 object(s))"),
+    }));
+    expect(notes).toContainEqual(expect.objectContaining({
+      title: "Bootstrap plan",
+      message: expect.stringContaining("Space: alice/mlclaw (exists; files, variables, secrets, and runtime will be updated)"),
+    }));
+    expect(stdout.join("\n")).toContain("Using existing private bucket alice/mlclaw-data");
+    expect(hub.calls).toContainEqual({ name: "bucketExists", args: ["alice/mlclaw-data"] });
+    expect(hub.calls).toContainEqual({ name: "spaceExists", args: ["alice/mlclaw"] });
+    expect(hub.calls).not.toContainEqual({ name: "createBucket", args: ["alice/mlclaw-data", true] });
+    expect(hub.calls).toContainEqual({
+      name: "createDockerSpace",
+      args: ["alice/mlclaw", { private: true, hardware: "cpu-basic" }],
+    });
+  });
+
   it("can create a public browser Space when requested", async () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt([], false);
@@ -810,6 +879,7 @@ describe("mlclaw CLI", () => {
       "--name",
       "research",
       "--public-space",
+      "--yes",
     ], await createRuntime(hub, prompt));
 
     expect(code).toBe(0);
@@ -829,6 +899,7 @@ describe("mlclaw CLI", () => {
       "research",
       "--owner",
       "research-org",
+      "--yes",
     ], await createRuntime(hub, prompt));
 
     expect(code).toBe(0);

@@ -71,16 +71,18 @@ function Install-CachedNode {
 function Invoke-MLClaw($NodeBin, [string[]]$CliArgs) {
   $nodeDir = Split-Path $NodeBin -Parent
   $env:PATH = "$nodeDir;$env:PATH"
+  $execPrefix = Join-Path $CacheRoot "npm-exec"
+  New-Item -ItemType Directory -Force -Path $execPrefix | Out-Null
   $npmCli = Join-Path $nodeDir "node_modules\npm\bin\npm-cli.js"
   if (-not (Test-Path $npmCli)) {
     $npmCommand = Get-Command npm -ErrorAction SilentlyContinue
     if (-not $npmCommand) {
       throw "npm was not found for Node runtime $NodeBin"
     }
-    & $npmCommand.Source exec --yes --package $PackageSpec -- mlclaw @CliArgs
+    & $npmCommand.Source exec --yes --prefix $execPrefix --package $PackageSpec -- mlclaw @CliArgs
     exit $LASTEXITCODE
   }
-  & $NodeBin $npmCli exec --yes --package $PackageSpec -- mlclaw @CliArgs
+  & $NodeBin $npmCli exec --yes --prefix $execPrefix --package $PackageSpec -- mlclaw @CliArgs
   exit $LASTEXITCODE
 }
 

@@ -125,6 +125,18 @@ type BucketStateInspection = {
   objectCount: number;
 };
 
+type BootstrapBucketPlan = {
+  bucket: string;
+  exists: boolean;
+  objectCount: number;
+};
+
+type BootstrapSpacePlan = {
+  space: string;
+  exists: boolean;
+  visibility: "private" | "public";
+};
+
 type CliRuntime = {
   env?: NodeJS.ProcessEnv;
   stdout?: Pick<typeof console, "log">;
@@ -394,15 +406,21 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
       persist: false,
     })
     : existingManifest?.localGateway;
-  const bucket = await resolveBootstrapBucket({
+  const bucketPlan = await resolveBootstrapBucket({
     explicitBucket: opts.bucket,
     defaultBucket: names.bucket,
     existingManifest,
     bucketPrefix,
     hub,
-    yes: Boolean(opts.yes),
-    runtime,
   });
+  const bucket = bucketPlan.bucket;
+  const spacePlan = gatewayLocation === "space"
+    ? {
+      space: names.space,
+      exists: await hub.spaceExists(names.space),
+      visibility: opts.publicSpace ? "public" as const : "private" as const,
+    }
+    : undefined;
 
   const manifest: DeploymentManifest = {
     version: 1,
@@ -435,13 +453,9 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
   });
   let deployedSpaceRuntime: string | undefined;
   if (gatewayLocation === "space") {
-    await assertNoLiveForeignLease({
-      hub,
-      bucket,
-      bucketPrefix,
-      runtimeId: spaceRuntimeId(agentName),
-      takeover: Boolean(opts.takeover),
-    });
+    if (!spacePlan) {
+      throw new Error("internal error: Space plan was not resolved");
+    }
     const paidHardware = await resolveHardware({
       requestedHardware: opts.hardware ?? (telegramToken ? TELEGRAM_HARDWARE : DEFAULT_HARDWARE),
       ...(typeof opts.sleepTime === "number"
@@ -450,6 +464,23 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
       requiresMessagingEgress: Boolean(telegramToken),
       yes: Boolean(opts.yes),
       runtime,
+    });
+    await confirmBootstrapPlan({
+      manifest,
+      bucketPlan,
+      spacePlan,
+      hardware: paidHardware.hardware,
+      ...(typeof paidHardware.sleepTime === "number" ? { sleepTime: paidHardware.sleepTime } : {}),
+      yes: Boolean(opts.yes),
+      runtime,
+    });
+    await createOrAdoptBucket({ hub, bucketPlan, runtime });
+    await assertNoLiveForeignLease({
+      hub,
+      bucket,
+      bucketPrefix,
+      runtimeId: spaceRuntimeId(agentName),
+      takeover: Boolean(opts.takeover),
     });
     const deployed = await deploySpaceGateway({
       hub,
@@ -466,6 +497,14 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
     deployedSpaceRuntime = deployed.runtimeImage;
     await writeLocalDeployment(runtime.configRoot, manifest, secrets);
   } else {
+    await confirmBootstrapPlan({
+      manifest,
+      bucketPlan,
+      hardware: "local Docker",
+      yes: Boolean(opts.yes),
+      runtime,
+    });
+    await createOrAdoptBucket({ hub, bucketPlan, runtime });
     await assertNoLiveForeignLease({
       hub,
       bucket,
@@ -509,30 +548,76 @@ async function resolveBootstrapBucket(params: {
   existingManifest: DeploymentManifest | null;
   bucketPrefix?: string | undefined;
   hub: HubApi;
-  yes: boolean;
-  runtime: Required<CliRuntime>;
-}): Promise<string> {
+}): Promise<BootstrapBucketPlan> {
   const explicitBucket = params.explicitBucket ? parseBucketId(params.explicitBucket) : undefined;
   const bucket = explicitBucket ?? params.existingManifest?.bucket ?? params.defaultBucket;
-  params.runtime.stdout.log(`Creating or adopting private bucket ${bucket}`);
-  await params.hub.createBucket(bucket, true);
-  const inspection = await inspectStateBucket(params.hub, bucket, params.bucketPrefix);
+  const exists = await params.hub.bucketExists(bucket);
+  const inspection = exists
+    ? await inspectStateBucket(params.hub, bucket, params.bucketPrefix)
+    : { objectCount: 0 };
 
-  const existingBucket = params.existingManifest?.bucket;
-  if (explicitBucket && existingBucket && existingBucket !== explicitBucket) {
-    await confirmBucketChange({
-      message: `Change ${params.existingManifest?.agent ?? "deployment"} state bucket from ${existingBucket} to ${explicitBucket}?`,
-      yes: params.yes,
-      runtime: params.runtime,
-    });
-  } else if (explicitBucket && !existingBucket && inspection.objectCount > 0) {
-    await confirmBucketChange({
-      message: `Adopt existing state bucket ${explicitBucket} with ${inspection.objectCount} object(s)?`,
-      yes: params.yes,
-      runtime: params.runtime,
-    });
+  return {
+    bucket,
+    exists,
+    objectCount: inspection.objectCount,
+  };
+}
+
+async function confirmBootstrapPlan(params: {
+  manifest: DeploymentManifest;
+  bucketPlan: BootstrapBucketPlan;
+  spacePlan?: BootstrapSpacePlan;
+  hardware: string;
+  sleepTime?: number;
+  yes: boolean;
+  runtime: Required<CliRuntime>;
+}): Promise<void> {
+  const lines = [
+    `Agent: ${params.manifest.agent}`,
+    `Gateway: ${params.manifest.gatewayLocation}`,
+    `Bucket: ${params.bucketPlan.bucket} (${params.bucketPlan.exists
+      ? `exists; keeping ${params.bucketPlan.objectCount} object(s)`
+      : "will be created as private"})`,
+  ];
+  if (params.spacePlan) {
+    lines.push(`Space: ${params.spacePlan.space} (${params.spacePlan.exists
+      ? "exists; files, variables, secrets, and runtime will be updated"
+      : `will be created as ${params.spacePlan.visibility}`})`);
+    lines.push(`Hardware: ${params.hardware}`);
+    if (typeof params.sleepTime === "number") {
+      lines.push(`Sleep time: ${params.sleepTime}`);
+    }
+  } else {
+    lines.push(`Local runtime: ${containerNameFor(params.manifest.agent)} (${params.hardware})`);
   }
-  return bucket;
+  lines.push(`Model: ${params.manifest.model}`);
+  lines.push(`Runtime image: ${params.manifest.runtimeImage}`);
+
+  params.runtime.prompt.note(lines.join("\n"), "Bootstrap plan");
+  if (params.yes) {
+    return;
+  }
+  if (!params.runtime.prompt.isInteractive()) {
+    throw new Error("bootstrap confirmation required. Pass --yes to continue non-interactively.");
+  }
+  const ok = await promptConfirm("Continue with this bootstrap plan?", false, params.runtime);
+  if (!ok) {
+    throw new Error("bootstrap was not confirmed");
+  }
+}
+
+async function createOrAdoptBucket(params: {
+  hub: HubApi;
+  bucketPlan: BootstrapBucketPlan;
+  runtime: Required<CliRuntime>;
+}): Promise<void> {
+  if (params.bucketPlan.exists) {
+    params.runtime.stdout.log(`Using existing private bucket ${params.bucketPlan.bucket}`);
+    return;
+  } else {
+    params.runtime.stdout.log(`Creating private bucket ${params.bucketPlan.bucket}`);
+  }
+  await params.hub.createBucket(params.bucketPlan.bucket, true);
 }
 
 async function stateAdopt(agent: string, opts: StateAdoptOptions, runtime: Required<CliRuntime>): Promise<void> {
