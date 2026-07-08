@@ -711,7 +711,7 @@ async function confirmBootstrapPlan(params: {
   if (!params.runtime.prompt.isInteractive()) {
     throw new Error("bootstrap confirmation required. Pass --yes to continue non-interactively.");
   }
-  const ok = await promptConfirm("Continue with this bootstrap plan?", false, params.runtime);
+  const ok = await promptConfirm("Continue with this bootstrap plan?", true, params.runtime);
   if (!ok) {
     throw new Error("bootstrap was not confirmed");
   }
