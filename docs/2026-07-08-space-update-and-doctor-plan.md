@@ -23,7 +23,8 @@ Update must:
 - preserve `OPENCLAW_HF_STATE_PREFIX`;
 - preserve model/agent variables unless explicitly overridden;
 - update `MLCLAW_TEMPLATE_REV`;
-- update `MLCLAW_RUNTIME_IMAGE`;
+- update `MLCLAW_RUNTIME_IMAGE` to either the explicit image override or the
+  bundled runtime reference;
 - update `MLCLAW_RUNTIME_ID`;
 - update the browser gateway internal port variables;
 - update the generated Space README and Dockerfile;
@@ -46,7 +47,7 @@ recognized as ML Claw if it has at least one of:
 - required secrets by key presence only;
 - bucket accessibility;
 - source/app mode variables;
-- runtime image variable;
+- runtime reference variable;
 - stale path variables that should not be set;
 - whether run logs show restore/fresh-start and snapshot outcomes;
 - whether browser gateway status endpoint is reachable when the Space URL is
@@ -79,14 +80,25 @@ All generated Space files should be treated as owned by ML Claw. Updating an
 existing Space should delete generated files that are no longer used. User
 state belongs in the bucket, not in the Space repo.
 
-The generated Space repository should remain minimal:
+The generated Space repository should remain minimal and artifact-only. The
+default path does not depend on a separate ML Claw container image; the
+generated Space carries the bundled runtime JS needed to start from the public
+OpenClaw base image.
 
 ```text
 README.md
 Dockerfile
 .gitattributes
 assets/mlclaw.svg
+runtime/entrypoint.sh
+runtime/hf-state-sync.js
+runtime/mlclaw-space-runtime.js
+runtime/openclaw.default.json
+runtime/scripts/*.mjs
 ```
+
+If `--runtime-image` is supplied, `mlclaw update` may instead generate the
+explicit one-line image Dockerfile for advanced deployments.
 
 ## Test Plan
 

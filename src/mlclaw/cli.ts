@@ -35,7 +35,7 @@ import {
   writeSecretEnv,
 } from "./local-config.js";
 import { namesFor, slugifyAgentName } from "./naming.js";
-import { resolveRuntimeImage } from "./runtime-image.js";
+import { bundledSpaceRuntimeRef, resolveRuntimeImage, resolveRuntimeImageOverride } from "./runtime-image.js";
 import { getTelegramBot, type TelegramBot } from "./telegram.js";
 
 export const DEFAULT_MODEL = "huggingface/google/gemma-4-26B-A4B-it";
@@ -370,6 +370,7 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
   const names = namesFor(owner, agentName);
   const model = opts.model ?? DEFAULT_MODEL;
   const runtimeImage = resolveRuntimeImage(opts.runtimeImage, runtime.env);
+  const templateRuntimeImage = resolveRuntimeImageOverride(opts.runtimeImage, runtime.env);
   const sessionSecret = randomBytes(48).toString("base64url");
   const now = runtime.now().toISOString();
   const existingManifest = await readManifest(runtime.configRoot, agentName).catch(() => null);
@@ -453,6 +454,7 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
       allowedUsers: me.name,
       hardware: paidHardware.hardware,
       ...(typeof paidHardware.sleepTime === "number" ? { sleepTime: paidHardware.sleepTime } : {}),
+      ...(templateRuntimeImage ? { templateRuntimeImage } : {}),
     });
     await writeLocalDeployment(runtime.configRoot, manifest, secrets);
   } else {
@@ -752,6 +754,7 @@ async function deploySpaceGateway(params: {
   allowedUsers: string;
   hardware: string;
   sleepTime?: number;
+  templateRuntimeImage?: string;
 }): Promise<void> {
   const { hub, runtime, hfToken, manifest, secrets } = params;
   runtime.stdout.log(`Creating public Space ${manifest.space}`);
@@ -761,12 +764,15 @@ async function deploySpaceGateway(params: {
     ...(typeof params.sleepTime === "number" ? { sleepTimeSeconds: params.sleepTime } : {}),
   });
   await hub.requestSpaceHardware(manifest.space, params.hardware, params.sleepTime);
-  runtime.stdout.log("Generating Space files from mlclaw runtime image");
+  runtime.stdout.log(params.templateRuntimeImage
+    ? "Generating Space files from explicit runtime image"
+    : "Generating bundled Space runtime files");
   const { templateRev } = await runtime.pushTemplateToSpace({
     targetRepo: manifest.space,
     token: hfToken,
-    runtimeImage: manifest.runtimeImage,
+    ...(params.templateRuntimeImage ? { runtimeImage: params.templateRuntimeImage } : {}),
   });
+  const spaceRuntimeRef = params.templateRuntimeImage ?? bundledSpaceRuntimeRef(templateRev);
 
   await setDeploymentVariables(hub, manifest.space, {
     OPENCLAW_HF_STATE_BUCKET: manifest.bucket,
@@ -775,7 +781,7 @@ async function deploySpaceGateway(params: {
     OPENCLAW_MODEL: manifest.model,
     OPENCLAW_AGENT_NAME: manifest.agent,
     MLCLAW_GATEWAY_LOCATION: "space",
-    MLCLAW_RUNTIME_IMAGE: manifest.runtimeImage,
+    MLCLAW_RUNTIME_IMAGE: spaceRuntimeRef,
     MLCLAW_RUNTIME_ID: spaceRuntimeId(manifest.agent),
     MLCLAW_ALLOWED_USERS: params.allowedUsers,
     MLCLAW_CANONICAL_SPACE_ID: "osolmaz/mlclaw",
@@ -975,6 +981,7 @@ async function gatewayMigrate(agent: string, opts: GatewayCommandOptions, runtim
     });
     await handoffAndStopLocalGateway({ manifest: current, hub, runtime, bucketPrefix });
     const me = await hub.whoami();
+    const templateRuntimeImage = resolveRuntimeImageOverride(opts.runtimeImage, runtime.env);
     await deploySpaceGateway({
       hub,
       runtime,
@@ -988,6 +995,7 @@ async function gatewayMigrate(agent: string, opts: GatewayCommandOptions, runtim
       allowedUsers: me.name,
       hardware: paidHardware.hardware,
       ...(typeof paidHardware.sleepTime === "number" ? { sleepTime: paidHardware.sleepTime } : {}),
+      ...(templateRuntimeImage ? { templateRuntimeImage } : {}),
     });
     await writeSecretEnv(runtime.configRoot, agent, {
       ...secrets,
@@ -1405,16 +1413,16 @@ async function update(
   if (!variables.has("MLCLAW_TEMPLATE_REV") && !variables.has("OPENCLAW_HF_TEMPLATE_REV") && !opts.force) {
     throw new Error(`${repoId} does not look like a ML Claw deployment; pass --force to update anyway`);
   }
-  const runtimeImage = resolveRuntimeImage(opts.runtimeImage, runtime.env);
+  const runtimeImage = resolveRuntimeImageOverride(opts.runtimeImage, runtime.env);
   const agentName = variables.get("OPENCLAW_AGENT_NAME")?.value?.trim() || repoId.split("/")[1] || "openclaw";
   runtime.stdout.log(`Generating current Space files into ${repoId}`);
   const { templateRev } = await runtime.pushTemplateToSpace({
     targetRepo: repoId,
     token: hfToken,
-    runtimeImage,
+    ...(runtimeImage ? { runtimeImage } : {}),
   });
   await hub.addSpaceVariable(repoId, "MLCLAW_TEMPLATE_REV", templateRev);
-  await hub.addSpaceVariable(repoId, "MLCLAW_RUNTIME_IMAGE", runtimeImage);
+  await hub.addSpaceVariable(repoId, "MLCLAW_RUNTIME_IMAGE", runtimeImage ?? bundledSpaceRuntimeRef(templateRev));
   await hub.addSpaceVariable(repoId, "MLCLAW_GATEWAY_LOCATION", "space");
   await hub.addSpaceVariable(repoId, "MLCLAW_RUNTIME_ID", spaceRuntimeId(agentName));
   await hub.addSpaceVariable(repoId, "MLCLAW_OPENCLAW_PORT", String(DEFAULT_SPACE_OPENCLAW_PORT));

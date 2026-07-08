@@ -30,7 +30,8 @@ Use these names consistently:
 | GitHub repository | `mlclaw` |
 | npm package | `mlclaw` |
 | CLI binary | `mlclaw` |
-| Runtime image | `ghcr.io/osolmaz/mlclaw-runtime:<version>` |
+| Local runtime image | `ghcr.io/osolmaz/mlclaw-runtime:<version>` |
+| Default Space runtime | bundled runtime artifact committed by `mlclaw update` |
 | Config directory | `~/.config/mlclaw` |
 | Docker container prefix | `mlclaw-<agent>` |
 | Docker volume prefix | `mlclaw-<agent>-live` |
@@ -49,10 +50,13 @@ The cutover is:
 
 1. Rename the repository from `mlclaw` to `mlclaw`.
 2. Publish a new npm package named `mlclaw`.
-3. Publish a new runtime image named `ghcr.io/osolmaz/mlclaw-runtime`.
-4. Update documentation, examples, launchers, skills, and runtime defaults to
+3. Make generated Spaces self-contained by default, using bundled ML Claw
+   runtime files copied from the npm package or source checkout.
+4. Keep `ghcr.io/osolmaz/mlclaw-runtime:<version>` as the local-gateway image
+   and as an explicit advanced Space override.
+5. Update documentation, examples, launchers, skills, and runtime defaults to
    use only `mlclaw`.
-5. Deprecate the old `mlclaw` npm package metadata with a pointer to
+6. Deprecate the old `mlclaw` npm package metadata with a pointer to
    `mlclaw`.
 
 Do not implement a legacy bridge.
@@ -304,7 +308,8 @@ The old skill name `mlclaw` should not be used for new releases.
 
 New runtime defaults:
 
-- runtime image: `ghcr.io/osolmaz/mlclaw-runtime:<version>`;
+- Space runtime: bundled artifact files committed into each generated Space;
+- local runtime image: `ghcr.io/osolmaz/mlclaw-runtime:<version>`;
 - state bucket env var: `OPENCLAW_HF_STATE_BUCKET`;
 - ML Claw-specific env vars: `MLCLAW_*`;
 - config directory: `~/.config/mlclaw`;
@@ -371,12 +376,14 @@ The README should not include the full implementation plan. It should present:
 5. Add Space mode detection and template/app UI split.
 6. Add HF OAuth session flow for the browser gateway.
 7. Make the duplicated Space browser gateway the default user path.
-8. Publish `ghcr.io/osolmaz/mlclaw-runtime:<version>`.
-9. Publish `mlclaw` to npm.
-10. Deprecate `mlclaw` on npm with a pointer to `mlclaw`; do not publish a
+8. Package `dist/hf-state-sync.js` and `dist/mlclaw-space-runtime.js` so npm
+   installs can generate self-contained Spaces.
+9. Publish `ghcr.io/osolmaz/mlclaw-runtime:<version>` for local gateway mode.
+10. Publish `mlclaw` to npm.
+11. Deprecate `mlclaw` on npm with a pointer to `mlclaw`; do not publish a
    wrapper release.
-11. Rename or recreate the canonical Space as `osolmaz/mlclaw`.
-12. Run an end-to-end duplicate test:
+12. Rename or recreate the canonical Space as `osolmaz/mlclaw`.
+13. Run an end-to-end duplicate test:
     - source Space shows template page;
     - duplicate Space shows app page;
     - duplicate Space requires Hugging Face sign-in;

@@ -10,6 +10,14 @@ export function resolveRuntimeImage(value?: string, env: NodeJS.ProcessEnv = pro
   return value?.trim() || env.MLCLAW_RUNTIME_IMAGE?.trim() || DEFAULT_RUNTIME_IMAGE;
 }
 
+export function resolveRuntimeImageOverride(value?: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return value?.trim() || env.MLCLAW_RUNTIME_IMAGE?.trim() || undefined;
+}
+
+export function bundledSpaceRuntimeRef(templateRev: string): string {
+  return `bundled:${templateRev}`;
+}
+
 function readPackageVersion(): string {
   let dir = path.dirname(fileURLToPath(import.meta.url));
   while (true) {

@@ -28,6 +28,7 @@ const required = [
   "LICENSE",
   "README.md",
   "package.json",
+  "dist/hf-state-sync.js",
   "dist/mlclaw.mjs",
   "dist/mlclaw-space-runtime.js",
   "mlclaw.sh",

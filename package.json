@@ -18,6 +18,7 @@
     ".agents/skills/",
     ".gitattributes",
     "assets/",
+    "dist/hf-state-sync.js",
     "dist/mlclaw.mjs",
     "dist/mlclaw-space-runtime.js",
     "Dockerfile",

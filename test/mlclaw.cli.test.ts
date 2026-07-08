@@ -857,7 +857,7 @@ describe("mlclaw CLI", () => {
     expect(stderr.join("\n")).toContain("gateway location changes must use `mlclaw gateway migrate`");
   });
 
-  it("uses the current runtime image during update by default", async () => {
+  it("bundles the current Space runtime during update by default", async () => {
     const hub = createFakeHub();
     await hub.addSpaceVariable("alice/research", "OPENCLAW_HF_TEMPLATE_REV", "old-template");
     await hub.addSpaceVariable("alice/research", "MLCLAW_RUNTIME_IMAGE", "registry.example/mlclaw:test");
@@ -875,10 +875,10 @@ describe("mlclaw CLI", () => {
     const code = await main(["update", "alice/research"], runtime);
 
     expect(code).toBe(0);
-    expect(pushed).toEqual([{ runtimeImage: DEFAULT_RUNTIME_IMAGE }]);
+    expect(pushed).toEqual([{ runtimeImage: undefined }]);
     expect(hub.calls).toContainEqual({
       name: "addSpaceVariable",
-      args: ["alice/research", "MLCLAW_RUNTIME_IMAGE", DEFAULT_RUNTIME_IMAGE],
+      args: ["alice/research", "MLCLAW_RUNTIME_IMAGE", "bundled:test-template"],
     });
     expect(hub.calls).toContainEqual({
       name: "addSpaceVariable",

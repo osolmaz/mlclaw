@@ -5,7 +5,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { HubApi } from "./hub-api.js";
-import { DEFAULT_RUNTIME_IMAGE } from "./runtime-image.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -71,14 +70,65 @@ export async function generateSpaceRepo(
     ["assets/mlclaw.svg", "assets/mlclaw.svg"],
     ["space/README.md", "README.md"],
   ];
+  if (!options.runtimeImage) {
+    copies.push(
+      ["dist/hf-state-sync.js", "runtime/hf-state-sync.js"],
+      ["dist/mlclaw-space-runtime.js", "runtime/mlclaw-space-runtime.js"],
+      ["entrypoint.sh", "runtime/entrypoint.sh"],
+      ["openclaw.default.json", "runtime/openclaw.default.json"],
+      ["scripts/configure-huggingface-model.mjs", "runtime/scripts/configure-huggingface-model.mjs"],
+      ["scripts/configure-telegram.mjs", "runtime/scripts/configure-telegram.mjs"],
+      ["scripts/report-telegram-probe.mjs", "runtime/scripts/report-telegram-probe.mjs"],
+    );
+  }
   for (const [from, to] of copies) {
     await copyExisting(path.join(sourceDir, from), path.join(outDir, to));
   }
   await fs.writeFile(
     path.join(outDir, "Dockerfile"),
-    `FROM ${options.runtimeImage ?? DEFAULT_RUNTIME_IMAGE}\n`,
+    options.runtimeImage ? imageDockerfile(options.runtimeImage) : bundledDockerfile(),
     "utf8",
   );
+}
+
+function imageDockerfile(runtimeImage: string): string {
+  return `FROM ${runtimeImage}\n`;
+}
+
+function bundledDockerfile(): string {
+  return `FROM ghcr.io/openclaw/openclaw:latest
+
+LABEL org.opencontainers.image.source="https://github.com/osolmaz/mlclaw"
+LABEL org.opencontainers.image.description="ML Claw runtime for OpenClaw on Hugging Face"
+
+USER root
+RUN apt-get update \\
+  && apt-get install -y --no-install-recommends gosu zstd \\
+  && rm -rf /var/lib/apt/lists/*
+
+COPY --chown=node:node runtime/hf-state-sync.js /app/hf-state-sync.js
+COPY --chown=node:node runtime/mlclaw-space-runtime.js /app/mlclaw-space-runtime.js
+COPY --chown=node:node runtime/openclaw.default.json /app/openclaw.default.json
+COPY --chown=node:node runtime/entrypoint.sh /app/entrypoint.sh
+COPY --chown=node:node runtime/scripts/ /app/scripts/
+COPY --chown=node:node assets/ /app/assets/
+RUN chmod +x /app/entrypoint.sh
+
+ENV PORT=7860
+ENV MLCLAW_OPENCLAW_PORT=7861
+ENV OPENCLAW_GATEWAY_PORT=7861
+ENV OPENCLAW_LIVE_DIR=/tmp/openclaw-live
+ENV OPENCLAW_STATE_DIR=/tmp/openclaw-live/.openclaw
+ENV OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-live/workspace
+ENV OPENCLAW_CONFIG_PATH=/tmp/openclaw-live/.openclaw/openclaw.json
+ENV OPENCLAW_DISABLE_BONJOUR=1
+
+EXPOSE 7860
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 CMD node -e "const port=process.env.PORT||'7860'; fetch('http://127.0.0.1:'+port+'/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+ENTRYPOINT ["/app/entrypoint.sh"]
+`;
 }
 
 async function findPackagedSourceRoot(): Promise<string> {

@@ -9756,10 +9756,10 @@ function parseGatewayLocation(value) {
 
 // src/mlclaw/git.ts
 import { execFile as execFile2 } from "node:child_process";
-import fs12 from "node:fs/promises";
+import fs11 from "node:fs/promises";
 import os4 from "node:os";
-import path13 from "node:path";
-import { fileURLToPath as fileURLToPath3 } from "node:url";
+import path12 from "node:path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
 import { promisify as promisify2 } from "node:util";
 
 // src/vendor/hfjs-xet/error.ts
@@ -14778,49 +14778,15 @@ function sseDataToText(raw) {
   return lines.join("");
 }
 
-// src/mlclaw/runtime-image.ts
-import fs11 from "node:fs";
-import path12 from "node:path";
-import { fileURLToPath as fileURLToPath2 } from "node:url";
-var RUNTIME_IMAGE_REPOSITORY = "ghcr.io/osolmaz/mlclaw-runtime";
-var DEFAULT_RUNTIME_IMAGE = `${RUNTIME_IMAGE_REPOSITORY}:${readPackageVersion()}`;
-function resolveRuntimeImage(value, env = process.env) {
-  return value?.trim() || env.MLCLAW_RUNTIME_IMAGE?.trim() || DEFAULT_RUNTIME_IMAGE;
-}
-function readPackageVersion() {
-  let dir = path12.dirname(fileURLToPath2(import.meta.url));
-  while (true) {
-    const candidate = path12.join(dir, "package.json");
-    try {
-      const parsed = JSON.parse(fs11.readFileSync(candidate, "utf8"));
-      if (typeof parsed.version === "string" && parsed.version.trim()) {
-        return parsed.version.trim();
-      }
-    } catch (err) {
-      if (!isMissingFileError(err)) {
-        throw err;
-      }
-    }
-    const parent = path12.dirname(dir);
-    if (parent === dir) {
-      throw new Error("could not find package.json while resolving default runtime image");
-    }
-    dir = parent;
-  }
-}
-function isMissingFileError(err) {
-  return err instanceof Error && "code" in err && err.code === "ENOENT";
-}
-
 // src/mlclaw/git.ts
 var execFileAsync2 = promisify2(execFile2);
 async function pushTemplateToSpace(params) {
-  const tempRoot = await fs12.mkdtemp(path13.join(os4.tmpdir(), "mlclaw-space-"));
+  const tempRoot = await fs11.mkdtemp(path12.join(os4.tmpdir(), "mlclaw-space-"));
   try {
     const sourceDir = params.sourceDir ?? process.env.MLCLAW_SOURCE_DIR ?? await findPackagedSourceRoot();
     const templateRev = await currentTemplateRev(sourceDir);
-    const outDir = path13.join(tempRoot, "space");
-    await fs12.mkdir(outDir, { recursive: true });
+    const outDir = path12.join(tempRoot, "space");
+    await fs11.mkdir(outDir, { recursive: true });
     await generateSpaceRepo(sourceDir, outDir, {
       ...params.runtimeImage ? { runtimeImage: params.runtimeImage } : {}
     });
@@ -14838,7 +14804,7 @@ async function pushTemplateToSpace(params) {
     });
     return { templateRev };
   } finally {
-    await fs12.rm(tempRoot, { recursive: true, force: true });
+    await fs11.rm(tempRoot, { recursive: true, force: true });
   }
 }
 async function currentTemplateRev(sourceDir) {
@@ -14851,7 +14817,7 @@ async function currentTemplateRev(sourceDir) {
     }
   } catch {
   }
-  const pkg = JSON.parse(await fs12.readFile(path13.join(sourceDir, "package.json"), "utf8"));
+  const pkg = JSON.parse(await fs11.readFile(path12.join(sourceDir, "package.json"), "utf8"));
   return `npm:${pkg.name ?? "mlclaw"}@${pkg.version ?? "unknown"}`;
 }
 async function generateSpaceRepo(sourceDir, outDir, options = {}) {
@@ -14860,24 +14826,73 @@ async function generateSpaceRepo(sourceDir, outDir, options = {}) {
     ["assets/mlclaw.svg", "assets/mlclaw.svg"],
     ["space/README.md", "README.md"]
   ];
-  for (const [from, to] of copies) {
-    await copyExisting(path13.join(sourceDir, from), path13.join(outDir, to));
+  if (!options.runtimeImage) {
+    copies.push(
+      ["dist/hf-state-sync.js", "runtime/hf-state-sync.js"],
+      ["dist/mlclaw-space-runtime.js", "runtime/mlclaw-space-runtime.js"],
+      ["entrypoint.sh", "runtime/entrypoint.sh"],
+      ["openclaw.default.json", "runtime/openclaw.default.json"],
+      ["scripts/configure-huggingface-model.mjs", "runtime/scripts/configure-huggingface-model.mjs"],
+      ["scripts/configure-telegram.mjs", "runtime/scripts/configure-telegram.mjs"],
+      ["scripts/report-telegram-probe.mjs", "runtime/scripts/report-telegram-probe.mjs"]
+    );
   }
-  await fs12.writeFile(
-    path13.join(outDir, "Dockerfile"),
-    `FROM ${options.runtimeImage ?? DEFAULT_RUNTIME_IMAGE}
-`,
+  for (const [from, to] of copies) {
+    await copyExisting(path12.join(sourceDir, from), path12.join(outDir, to));
+  }
+  await fs11.writeFile(
+    path12.join(outDir, "Dockerfile"),
+    options.runtimeImage ? imageDockerfile(options.runtimeImage) : bundledDockerfile(),
     "utf8"
   );
 }
+function imageDockerfile(runtimeImage) {
+  return `FROM ${runtimeImage}
+`;
+}
+function bundledDockerfile() {
+  return `FROM ghcr.io/openclaw/openclaw:latest
+
+LABEL org.opencontainers.image.source="https://github.com/osolmaz/mlclaw"
+LABEL org.opencontainers.image.description="ML Claw runtime for OpenClaw on Hugging Face"
+
+USER root
+RUN apt-get update \\
+  && apt-get install -y --no-install-recommends gosu zstd \\
+  && rm -rf /var/lib/apt/lists/*
+
+COPY --chown=node:node runtime/hf-state-sync.js /app/hf-state-sync.js
+COPY --chown=node:node runtime/mlclaw-space-runtime.js /app/mlclaw-space-runtime.js
+COPY --chown=node:node runtime/openclaw.default.json /app/openclaw.default.json
+COPY --chown=node:node runtime/entrypoint.sh /app/entrypoint.sh
+COPY --chown=node:node runtime/scripts/ /app/scripts/
+COPY --chown=node:node assets/ /app/assets/
+RUN chmod +x /app/entrypoint.sh
+
+ENV PORT=7860
+ENV MLCLAW_OPENCLAW_PORT=7861
+ENV OPENCLAW_GATEWAY_PORT=7861
+ENV OPENCLAW_LIVE_DIR=/tmp/openclaw-live
+ENV OPENCLAW_STATE_DIR=/tmp/openclaw-live/.openclaw
+ENV OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-live/workspace
+ENV OPENCLAW_CONFIG_PATH=/tmp/openclaw-live/.openclaw/openclaw.json
+ENV OPENCLAW_DISABLE_BONJOUR=1
+
+EXPOSE 7860
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 CMD node -e "const port=process.env.PORT||'7860'; fetch('http://127.0.0.1:'+port+'/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+ENTRYPOINT ["/app/entrypoint.sh"]
+`;
+}
 async function findPackagedSourceRoot() {
-  const start = path13.dirname(fileURLToPath3(import.meta.url));
+  const start = path12.dirname(fileURLToPath2(import.meta.url));
   let dir = start;
   while (true) {
     if (await hasPackagedSourceFiles(dir)) {
       return dir;
     }
-    const parent = path13.dirname(dir);
+    const parent = path12.dirname(dir);
     if (parent === dir) {
       throw new Error("Could not find packaged ML Claw source files. Reinstall the mlclaw npm package.");
     }
@@ -14894,20 +14909,20 @@ async function hasPackagedSourceFiles(dir) {
     "src/hf-bucket-client/client.ts"
   ];
   try {
-    await Promise.all(required.map((file) => fs12.access(path13.join(dir, file))));
+    await Promise.all(required.map((file) => fs11.access(path12.join(dir, file))));
     return true;
   } catch {
     return false;
   }
 }
 async function copyExisting(from, to) {
-  const stat = await fs12.stat(from);
-  await fs12.mkdir(path13.dirname(to), { recursive: true });
+  const stat = await fs11.stat(from);
+  await fs11.mkdir(path12.dirname(to), { recursive: true });
   if (stat.isDirectory()) {
-    await fs12.cp(from, to, { recursive: true });
+    await fs11.cp(from, to, { recursive: true });
   } else {
-    await fs12.copyFile(from, to);
-    await fs12.chmod(to, stat.mode);
+    await fs11.copyFile(from, to);
+    await fs11.chmod(to, stat.mode);
   }
 }
 async function readFilesForCommit(root) {
@@ -14915,24 +14930,24 @@ async function readFilesForCommit(root) {
   for (const relativePath of await listFiles(root)) {
     files.push({
       path: relativePath,
-      content: await fs12.readFile(path13.join(root, relativePath))
+      content: await fs11.readFile(path12.join(root, relativePath))
     });
   }
   return files;
 }
 async function listFiles(root, dir = "") {
-  const absoluteDir = path13.join(root, dir);
-  const entries = await fs12.readdir(absoluteDir, { withFileTypes: true });
+  const absoluteDir = path12.join(root, dir);
+  const entries = await fs11.readdir(absoluteDir, { withFileTypes: true });
   const files = [];
   for (const entry of entries) {
-    const relativePath = path13.posix.join(dir.split(path13.sep).join(path13.posix.sep), entry.name);
-    const absolutePath = path13.join(root, relativePath);
+    const relativePath = path12.posix.join(dir.split(path12.sep).join(path12.posix.sep), entry.name);
+    const absolutePath = path12.join(root, relativePath);
     if (entry.isDirectory()) {
       files.push(...await listFiles(root, relativePath));
     } else if (entry.isFile()) {
       files.push(relativePath);
     } else {
-      const stat = await fs12.stat(absolutePath);
+      const stat = await fs11.stat(absolutePath);
       if (stat.isFile()) {
         files.push(relativePath);
       }
@@ -14999,9 +15014,9 @@ async function assertNoLiveForeignLease(params) {
 }
 
 // src/mlclaw/local-config.ts
-import fs13 from "node:fs/promises";
+import fs12 from "node:fs/promises";
 import os5 from "node:os";
-import path14 from "node:path";
+import path13 from "node:path";
 function defaultConfigRoot(env = process.env) {
   const explicit = env.MLCLAW_CONFIG_HOME?.trim();
   if (explicit) {
@@ -15009,32 +15024,32 @@ function defaultConfigRoot(env = process.env) {
   }
   const xdg = env.XDG_CONFIG_HOME?.trim();
   if (xdg) {
-    return path14.join(xdg, "mlclaw");
+    return path13.join(xdg, "mlclaw");
   }
-  return path14.join(os5.homedir(), ".config", "mlclaw");
+  return path13.join(os5.homedir(), ".config", "mlclaw");
 }
 function localConfigPaths(root) {
   return {
     root,
-    deploymentsDir: path14.join(root, "deployments"),
-    secretsDir: path14.join(root, "secrets")
+    deploymentsDir: path13.join(root, "deployments"),
+    secretsDir: path13.join(root, "secrets")
   };
 }
 function manifestPath(root, agent) {
-  return path14.join(localConfigPaths(root).deploymentsDir, `${agent}.json`);
+  return path13.join(localConfigPaths(root).deploymentsDir, `${agent}.json`);
 }
 function secretEnvPath(root, agent) {
-  return path14.join(localConfigPaths(root).secretsDir, `${agent}.env`);
+  return path13.join(localConfigPaths(root).secretsDir, `${agent}.env`);
 }
 async function writeManifest(root, manifest) {
   const file = manifestPath(root, manifest.agent);
-  await fs13.mkdir(path14.dirname(file), { recursive: true });
-  await fs13.writeFile(file, `${JSON.stringify(manifest, null, 2)}
+  await fs12.mkdir(path13.dirname(file), { recursive: true });
+  await fs12.writeFile(file, `${JSON.stringify(manifest, null, 2)}
 `, "utf8");
 }
 async function readManifest(root, agent) {
   const file = manifestPath(root, agent);
-  const parsed = JSON.parse(await fs13.readFile(file, "utf8"));
+  const parsed = JSON.parse(await fs12.readFile(file, "utf8"));
   if (parsed.version !== 1) {
     throw new Error(`unsupported deployment manifest version in ${file}`);
   }
@@ -15042,7 +15057,7 @@ async function readManifest(root, agent) {
 }
 async function manifestExists(root, agent) {
   try {
-    await fs13.access(manifestPath(root, agent));
+    await fs12.access(manifestPath(root, agent));
     return true;
   } catch {
     return false;
@@ -15054,12 +15069,12 @@ function renderSecretEnv(values) {
 }
 async function writeSecretEnv(root, agent, values) {
   const file = secretEnvPath(root, agent);
-  await fs13.mkdir(path14.dirname(file), { recursive: true, mode: 448 });
-  await fs13.writeFile(file, renderSecretEnv(values), { encoding: "utf8", mode: 384 });
-  await fs13.chmod(file, 384);
+  await fs12.mkdir(path13.dirname(file), { recursive: true, mode: 448 });
+  await fs12.writeFile(file, renderSecretEnv(values), { encoding: "utf8", mode: 384 });
+  await fs12.chmod(file, 384);
 }
 async function readSecretEnv(root, agent) {
-  return parseSecretEnv(await fs13.readFile(secretEnvPath(root, agent), "utf8"));
+  return parseSecretEnv(await fs12.readFile(secretEnvPath(root, agent), "utf8"));
 }
 function parseSecretEnv(raw) {
   const out = {};
@@ -15099,6 +15114,46 @@ function namesFor(owner, agentName) {
     space: `${owner}/${agentName}`,
     bucket: `${owner}/${agentName}-data`
   };
+}
+
+// src/mlclaw/runtime-image.ts
+import fs13 from "node:fs";
+import path14 from "node:path";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
+var RUNTIME_IMAGE_REPOSITORY = "ghcr.io/osolmaz/mlclaw-runtime";
+var DEFAULT_RUNTIME_IMAGE = `${RUNTIME_IMAGE_REPOSITORY}:${readPackageVersion()}`;
+function resolveRuntimeImage(value, env = process.env) {
+  return value?.trim() || env.MLCLAW_RUNTIME_IMAGE?.trim() || DEFAULT_RUNTIME_IMAGE;
+}
+function resolveRuntimeImageOverride(value, env = process.env) {
+  return value?.trim() || env.MLCLAW_RUNTIME_IMAGE?.trim() || void 0;
+}
+function bundledSpaceRuntimeRef(templateRev) {
+  return `bundled:${templateRev}`;
+}
+function readPackageVersion() {
+  let dir = path14.dirname(fileURLToPath3(import.meta.url));
+  while (true) {
+    const candidate = path14.join(dir, "package.json");
+    try {
+      const parsed = JSON.parse(fs13.readFileSync(candidate, "utf8"));
+      if (typeof parsed.version === "string" && parsed.version.trim()) {
+        return parsed.version.trim();
+      }
+    } catch (err) {
+      if (!isMissingFileError(err)) {
+        throw err;
+      }
+    }
+    const parent = path14.dirname(dir);
+    if (parent === dir) {
+      throw new Error("could not find package.json while resolving default runtime image");
+    }
+    dir = parent;
+  }
+}
+function isMissingFileError(err) {
+  return err instanceof Error && "code" in err && err.code === "ENOENT";
 }
 
 // src/mlclaw/telegram.ts
@@ -15257,6 +15312,7 @@ async function bootstrap(opts, runtime) {
   const names = namesFor(owner, agentName);
   const model = opts.model ?? DEFAULT_MODEL;
   const runtimeImage = resolveRuntimeImage(opts.runtimeImage, runtime.env);
+  const templateRuntimeImage = resolveRuntimeImageOverride(opts.runtimeImage, runtime.env);
   const sessionSecret = randomBytes(48).toString("base64url");
   const now = runtime.now().toISOString();
   const existingManifest = await readManifest(runtime.configRoot, agentName).catch(() => null);
@@ -15334,7 +15390,8 @@ async function bootstrap(opts, runtime) {
       secrets,
       allowedUsers: me2.name,
       hardware: paidHardware.hardware,
-      ...typeof paidHardware.sleepTime === "number" ? { sleepTime: paidHardware.sleepTime } : {}
+      ...typeof paidHardware.sleepTime === "number" ? { sleepTime: paidHardware.sleepTime } : {},
+      ...templateRuntimeImage ? { templateRuntimeImage } : {}
     });
     await writeLocalDeployment(runtime.configRoot, manifest, secrets);
   } else {
@@ -15566,12 +15623,13 @@ async function deploySpaceGateway(params) {
     ...typeof params.sleepTime === "number" ? { sleepTimeSeconds: params.sleepTime } : {}
   });
   await hub.requestSpaceHardware(manifest.space, params.hardware, params.sleepTime);
-  runtime.stdout.log("Generating Space files from mlclaw runtime image");
+  runtime.stdout.log(params.templateRuntimeImage ? "Generating Space files from explicit runtime image" : "Generating bundled Space runtime files");
   const { templateRev } = await runtime.pushTemplateToSpace({
     targetRepo: manifest.space,
     token: hfToken,
-    runtimeImage: manifest.runtimeImage
+    ...params.templateRuntimeImage ? { runtimeImage: params.templateRuntimeImage } : {}
   });
+  const spaceRuntimeRef = params.templateRuntimeImage ?? bundledSpaceRuntimeRef(templateRev);
   await setDeploymentVariables(hub, manifest.space, {
     OPENCLAW_HF_STATE_BUCKET: manifest.bucket,
     ...secrets.OPENCLAW_HF_STATE_PREFIX ? { OPENCLAW_HF_STATE_PREFIX: secrets.OPENCLAW_HF_STATE_PREFIX } : {},
@@ -15579,7 +15637,7 @@ async function deploySpaceGateway(params) {
     OPENCLAW_MODEL: manifest.model,
     OPENCLAW_AGENT_NAME: manifest.agent,
     MLCLAW_GATEWAY_LOCATION: "space",
-    MLCLAW_RUNTIME_IMAGE: manifest.runtimeImage,
+    MLCLAW_RUNTIME_IMAGE: spaceRuntimeRef,
     MLCLAW_RUNTIME_ID: spaceRuntimeId(manifest.agent),
     MLCLAW_ALLOWED_USERS: params.allowedUsers,
     MLCLAW_CANONICAL_SPACE_ID: "osolmaz/mlclaw",
@@ -15764,6 +15822,7 @@ async function gatewayMigrate(agent, opts, runtime) {
     });
     await handoffAndStopLocalGateway({ manifest: current, hub, runtime, bucketPrefix });
     const me2 = await hub.whoami();
+    const templateRuntimeImage = resolveRuntimeImageOverride(opts.runtimeImage, runtime.env);
     await deploySpaceGateway({
       hub,
       runtime,
@@ -15776,7 +15835,8 @@ async function gatewayMigrate(agent, opts, runtime) {
       },
       allowedUsers: me2.name,
       hardware: paidHardware.hardware,
-      ...typeof paidHardware.sleepTime === "number" ? { sleepTime: paidHardware.sleepTime } : {}
+      ...typeof paidHardware.sleepTime === "number" ? { sleepTime: paidHardware.sleepTime } : {},
+      ...templateRuntimeImage ? { templateRuntimeImage } : {}
     });
     await writeSecretEnv(runtime.configRoot, agent, {
       ...secrets,
@@ -16107,16 +16167,16 @@ async function update(repoId, opts, hub, hfToken, runtime) {
   if (!variables.has("MLCLAW_TEMPLATE_REV") && !variables.has("OPENCLAW_HF_TEMPLATE_REV") && !opts.force) {
     throw new Error(`${repoId} does not look like a ML Claw deployment; pass --force to update anyway`);
   }
-  const runtimeImage = resolveRuntimeImage(opts.runtimeImage, runtime.env);
+  const runtimeImage = resolveRuntimeImageOverride(opts.runtimeImage, runtime.env);
   const agentName = variables.get("OPENCLAW_AGENT_NAME")?.value?.trim() || repoId.split("/")[1] || "openclaw";
   runtime.stdout.log(`Generating current Space files into ${repoId}`);
   const { templateRev } = await runtime.pushTemplateToSpace({
     targetRepo: repoId,
     token: hfToken,
-    runtimeImage
+    ...runtimeImage ? { runtimeImage } : {}
   });
   await hub.addSpaceVariable(repoId, "MLCLAW_TEMPLATE_REV", templateRev);
-  await hub.addSpaceVariable(repoId, "MLCLAW_RUNTIME_IMAGE", runtimeImage);
+  await hub.addSpaceVariable(repoId, "MLCLAW_RUNTIME_IMAGE", runtimeImage ?? bundledSpaceRuntimeRef(templateRev));
   await hub.addSpaceVariable(repoId, "MLCLAW_GATEWAY_LOCATION", "space");
   await hub.addSpaceVariable(repoId, "MLCLAW_RUNTIME_ID", spaceRuntimeId(agentName));
   await hub.addSpaceVariable(repoId, "MLCLAW_OPENCLAW_PORT", String(DEFAULT_SPACE_OPENCLAW_PORT));
