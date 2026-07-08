@@ -795,16 +795,27 @@ describe("mlclaw CLI", () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt([], false);
     const stderr: string[] = [];
+    const output: string[] = [];
+    const runtime = {
+      ...await createRuntime(hub, prompt, stderr),
+      stdout: { log: (message: unknown) => output.push(String(message)) },
+      prompt: {
+        ...prompt,
+        outro: (message: string) => output.push(message),
+      },
+    };
 
     const code = await main([
       "bootstrap",
       "--name",
       "research",
       "--yes",
-    ], await createRuntime(hub, prompt, stderr));
+    ], runtime);
 
     expect(code).toBe(0);
     expect(stderr.join("\n")).toBe("");
+    expect(output.join("\n")).toContain("Agent URL: https://alice-research.hf.space");
+    expect(output.join("\n")).toContain("Your agent will soon be available at https://alice-research.hf.space.");
     expect(hub.calls).toContainEqual({
       name: "createDockerSpace",
       args: ["alice/research", { private: true, hardware: "cpu-basic" }],

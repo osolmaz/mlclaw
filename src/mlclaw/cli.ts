@@ -506,6 +506,7 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
   runtime.stdout.log(`Bucket: https://huggingface.co/buckets/${bucket}`);
   if (gatewayLocation === "space") {
     runtime.stdout.log(`Space:  https://huggingface.co/spaces/${names.space}`);
+    runtime.stdout.log(`Agent URL: ${spacePublicUrl(names.space)}`);
   } else {
     runtime.stdout.log(`Local:  ${containerNameFor(agentName)}`);
   }
@@ -519,8 +520,12 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
     runtime.stdout.log(`Space runtime: ${deployedSpaceRuntime}`);
   }
   runtime.prompt.outro(gatewayLocation === "space"
-    ? "Restart requested. Build logs may take a few minutes to appear."
+    ? `Restart requested. Your agent will soon be available at ${spacePublicUrl(names.space)}.`
     : "Local gateway start requested.");
+}
+
+function spacePublicUrl(repoId: string): string {
+  return `https://${repoId.replace("/", "-")}.hf.space`;
 }
 
 async function resolveBootstrapPlan(params: {
