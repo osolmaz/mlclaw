@@ -6777,7 +6777,13 @@ function createSpaceRuntimeApp(config2, controls) {
     }
     await setCurrentSpaceVariable(config2, "OPENCLAW_MODEL", model);
     controls.setModel(model);
-    const restartPending = await restartCurrentSpace(config2);
+    let restartPending = false;
+    try {
+      restartPending = await restartCurrentSpace(config2);
+    } catch (err) {
+      process.stderr.write(`[mlclaw] failed to restart Space after model update: ${formatError(err)}
+`);
+    }
     return c.json({ ok: true, model, restartPending });
   });
   app.post("/mlclaw/api/credentials/openai", async (c) => {
@@ -7133,6 +7139,10 @@ var HOP_BY_HOP_HEADERS = /* @__PURE__ */ new Set([
 async function proxyHttp(req, res, config2, identity) {
   const headers = sanitizeHeaders(req.headers);
   headers.host = `${config2.openclawHost}:${config2.openclawPort}`;
+  if (isHtmlNavigation(req)) {
+    delete headers["accept-encoding"];
+    delete headers["Accept-Encoding"];
+  }
   addTrustedProxyHeaders(headers, config2, identity);
   const upstream = http.request({
     host: config2.openclawHost,
@@ -7257,6 +7267,9 @@ function headerValue(value) {
   }
   return value;
 }
+function isHtmlNavigation(req) {
+  return (req.method === "GET" || req.method === "HEAD") && String(req.headers.accept ?? "").includes("text/html");
+}
 
 // src/mlclaw-space-runtime/server.ts
 var SpaceRuntimeServer = class {
@@ -7349,6 +7362,10 @@ var SpaceRuntimeServer = class {
   }
   async handle(req, res) {
     const url = new URL(req.url ?? "/", this.config.publicUrl);
+    if (this.config.mode === "template" && !isTemplateRuntimePath(url.pathname)) {
+      this.sendHtml(res, templatePage(this.config));
+      return;
+    }
     if (this.shouldRouteToMlClaw(url.pathname)) {
       const response = await this.app.fetch(nodeRequestToWebRequest(req, this.config.publicUrl));
       if (!response.headers.has("x-mlclaw-fallback")) {
@@ -7368,7 +7385,7 @@ var SpaceRuntimeServer = class {
     await proxyHttp(req, res, this.config, { username: session.username });
   }
   shouldRouteToMlClaw(pathname) {
-    return this.config.mode === "template" || pathname === "/health" || pathname === "/healthz" || pathname === "/assets/mlclaw.svg" || pathname === "/login" || pathname === "/logout" || pathname.startsWith("/oauth/") || pathname === "/mlclaw" || pathname.startsWith("/mlclaw/");
+    return pathname === "/health" || pathname === "/healthz" || pathname === "/assets/mlclaw.svg" || pathname === "/login" || pathname === "/logout" || pathname.startsWith("/oauth/") || pathname === "/mlclaw" || pathname.startsWith("/mlclaw/");
   }
   async startOpenClaw(extraEnv = {}) {
     if (this.openclawStarting || this.openclaw && !this.openclaw.killed) {
@@ -7493,6 +7510,9 @@ function isBrowserNavigation2(req) {
 }
 function isApiPath(pathname) {
   return pathname.startsWith("/mlclaw/api/");
+}
+function isTemplateRuntimePath(pathname) {
+  return pathname === "/health" || pathname === "/healthz" || pathname === "/assets/mlclaw.svg";
 }
 function formatError2(err) {
   return err instanceof Error ? err.stack ?? err.message : String(err);

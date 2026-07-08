@@ -105,7 +105,12 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
     }
     await setCurrentSpaceVariable(config, "OPENCLAW_MODEL", model);
     controls.setModel(model);
-    const restartPending = await restartCurrentSpace(config);
+    let restartPending = false;
+    try {
+      restartPending = await restartCurrentSpace(config);
+    } catch (err) {
+      process.stderr.write(`[mlclaw] failed to restart Space after model update: ${formatError(err)}\n`);
+    }
     return c.json({ ok: true, model, restartPending });
   });
 

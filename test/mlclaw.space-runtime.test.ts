@@ -374,9 +374,69 @@ describe("ML Claw Space runtime", () => {
     ]);
   });
 
+  it("reports a saved model when the restart request fails", async () => {
+    const captured: Array<{ path: string; body: unknown }> = [];
+    const hubPort = await freePort();
+    const hub = http.createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += String(chunk);
+      });
+      req.on("end", () => {
+        captured.push({
+          path: req.url ?? "",
+          body: body ? JSON.parse(body) : undefined,
+        });
+        if (req.url?.endsWith("/restart")) {
+          res.writeHead(500, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: "restart failed" }));
+          return;
+        }
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end("{}");
+      });
+    });
+    await listen(hub, hubPort);
+    cleanups.push(() => closeServer(hub));
+
+    const config = await testConfig({
+      hfToken: "hf_test",
+      hubUrl: `http://127.0.0.1:${hubPort}`,
+      spaceId: "alice/research",
+    });
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(() => closeServer(server), () => runtime.stop());
+    const cookie = sessionCookie(config, "alice");
+    const csrf = await csrfToken(config, cookie);
+
+    const response = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/settings/model`, {
+      method: "POST",
+      headers: {
+        cookie,
+        "content-type": "application/json",
+        "x-mlclaw-csrf": csrf,
+      },
+      body: JSON.stringify({ model: "huggingface/Qwen/Qwen3-8B" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      model: "huggingface/Qwen/Qwen3-8B",
+      restartPending: false,
+    });
+    expect(captured.map((item) => item.path)).toEqual([
+      "/api/spaces/alice/research/variables",
+      "/api/spaces/alice/research/restart",
+    ]);
+  });
+
   it("injects a small ML Claw shell into authenticated OpenClaw HTML", async () => {
     const openclawPort = await freePort();
+    let capturedHeaders: http.IncomingHttpHeaders | undefined;
     const upstream = http.createServer((req, res) => {
+      capturedHeaders = req.headers;
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end("<!doctype html><html><body><main>OpenClaw</main></body></html>");
     });
@@ -392,6 +452,7 @@ describe("ML Claw Space runtime", () => {
       headers: {
         cookie: sessionCookie(config, "alice"),
         accept: "text/html",
+        "accept-encoding": "gzip, br",
       },
     });
 
@@ -399,6 +460,7 @@ describe("ML Claw Space runtime", () => {
     const body = await response.text();
     expect(body).toContain("data-mlclaw-shell");
     expect(body).toContain("/mlclaw/settings");
+    expect(capturedHeaders?.["accept-encoding"]).toBeUndefined();
   });
 
   it("does not inject the ML Claw shell into proxied JSON", async () => {
@@ -551,6 +613,29 @@ describe("ML Claw Space runtime", () => {
     });
 
     expect(config.mode).toBe("app");
+  });
+
+  it("serves the template landing page on template-mode app paths", async () => {
+    const config = await testConfig({
+      mode: "template",
+      spaceId: "osolmaz/mlclaw",
+    });
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(() => closeServer(server), () => runtime.stop());
+
+    for (const pathname of ["/", "/login", "/oauth/login", "/mlclaw", "/mlclaw/settings"]) {
+      const response = await fetch(`http://127.0.0.1:${config.port}${pathname}`, {
+        headers: { accept: "text/html" },
+        redirect: "manual",
+      });
+      expect(response.status).toBe(200);
+      const body = await response.text();
+      expect(body).toContain("Do not set this up by only clicking Duplicate");
+    }
+
+    const health = await fetch(`http://127.0.0.1:${config.port}/health`);
+    expect(health.status).toBe(200);
   });
 });
 

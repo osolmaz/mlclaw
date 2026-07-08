@@ -40,6 +40,10 @@ export async function proxyHttp(
 ): Promise<void> {
   const headers = sanitizeHeaders(req.headers);
   headers.host = `${config.openclawHost}:${config.openclawPort}`;
+  if (isHtmlNavigation(req)) {
+    delete headers["accept-encoding"];
+    delete headers["Accept-Encoding"];
+  }
   addTrustedProxyHeaders(headers, config, identity);
 
   const upstream = http.request({
@@ -187,4 +191,9 @@ function headerValue(value: string | string[] | number | undefined): string | un
     return String(value);
   }
   return value;
+}
+
+function isHtmlNavigation(req: http.IncomingMessage): boolean {
+  return (req.method === "GET" || req.method === "HEAD") &&
+    String(req.headers.accept ?? "").includes("text/html");
 }

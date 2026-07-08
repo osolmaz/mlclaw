@@ -7,7 +7,7 @@ import { createSpaceRuntimeApp } from "./app.js";
 import type { SpaceRuntimeConfig } from "./config.js";
 import { configureOpenClawGateway } from "./openclaw-config.js";
 import { loadOpenAiCredentialFile, openAiConfigured } from "./openai-credentials.js";
-import { loginPage, unauthorizedPage } from "./pages.js";
+import { loginPage, templatePage, unauthorizedPage } from "./pages.js";
 import { proxyHttp, proxyWebSocket, rejectWebSocket } from "./proxy.js";
 import { normalizeNext, readSession } from "./session.js";
 
@@ -108,6 +108,10 @@ export class SpaceRuntimeServer {
 
   private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const url = new URL(req.url ?? "/", this.config.publicUrl);
+    if (this.config.mode === "template" && !isTemplateRuntimePath(url.pathname)) {
+      this.sendHtml(res, templatePage(this.config));
+      return;
+    }
     if (this.shouldRouteToMlClaw(url.pathname)) {
       const response = await this.app.fetch(nodeRequestToWebRequest(req, this.config.publicUrl));
       if (!response.headers.has("x-mlclaw-fallback")) {
@@ -129,8 +133,7 @@ export class SpaceRuntimeServer {
   }
 
   private shouldRouteToMlClaw(pathname: string): boolean {
-    return this.config.mode === "template" ||
-      pathname === "/health" ||
+    return pathname === "/health" ||
       pathname === "/healthz" ||
       pathname === "/assets/mlclaw.svg" ||
       pathname === "/login" ||
@@ -271,6 +274,12 @@ function isBrowserNavigation(req: http.IncomingMessage): boolean {
 
 function isApiPath(pathname: string): boolean {
   return pathname.startsWith("/mlclaw/api/");
+}
+
+function isTemplateRuntimePath(pathname: string): boolean {
+  return pathname === "/health" ||
+    pathname === "/healthz" ||
+    pathname === "/assets/mlclaw.svg";
 }
 
 function formatError(err: unknown): string {
