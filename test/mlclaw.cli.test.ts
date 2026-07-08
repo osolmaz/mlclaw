@@ -1718,6 +1718,55 @@ describe("mlclaw CLI", () => {
     expect(pauseIndex).toBeGreaterThan(disableIndex);
   });
 
+  it("waits for a final Space snapshot before migrating a running Space without a lease", async () => {
+    const hub = createFakeHub({
+      spaceRuntime: { stage: "RUNNING", hardware: "cpu-upgrade", requested_hardware: "cpu-upgrade", sleep_time: -1 },
+    });
+    const { prompt } = createPrompt([]);
+    const runtime = await createRuntime(hub, prompt);
+    await writeManifest(runtime.configRoot, {
+      version: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-existing",
+      gatewayLocation: "space",
+      model: "test-model",
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      createdAt: "2026-06-16T00:00:00.000Z",
+      updatedAt: "2026-06-16T00:00:00.000Z",
+    });
+    await writeSecretEnv(runtime.configRoot, "research", {
+      HF_TOKEN: "hf-token",
+      OPENCLAW_HF_STATE_BUCKET: "alice/research-data",
+      OPENCLAW_AGENT_NAME: "research",
+      OPENCLAW_MODEL: "test-model",
+      MLCLAW_GATEWAY_LOCATION: "space",
+      MLCLAW_RUNTIME_ID: "space-research",
+      MLCLAW_RUNTIME_IMAGE: DEFAULT_RUNTIME_IMAGE,
+      MLCLAW_SESSION_SECRET: "session-secret",
+    });
+
+    await expect(main(["gateway", "migrate", "research", "--to", "local", "--no-pull"], runtime)).resolves.toBe(0);
+
+    const handoffIndex = hub.calls.findIndex((call) =>
+      call.name === "bucket.uploadFiles" &&
+      Array.isArray(call.args[0]) &&
+      call.args[0].includes("openclaw-state/runtime/handoff-request.json")
+    );
+    const disableIndex = hub.calls.findIndex((call) =>
+      call.name === "addSpaceVariable" &&
+      call.args[1] === "MLCLAW_GATEWAY_DISABLED"
+    );
+    const pauseIndex = hub.calls.findIndex((call) => call.name === "pauseSpace");
+    const startIndex = runtime.dockerRunner.calls.findIndex((call) => call.name === "run");
+    expect(handoffIndex).toBeGreaterThanOrEqual(0);
+    expect(disableIndex).toBeGreaterThan(handoffIndex);
+    expect(pauseIndex).toBeGreaterThan(disableIndex);
+    expect(startIndex).toBeGreaterThanOrEqual(0);
+  });
+
   it("does not pause a Space gateway when the runtime lease is unreadable", async () => {
     const hub = createFakeHub({ downloadFileError: new Error("bucket read failed") });
     const { prompt } = createPrompt([]);

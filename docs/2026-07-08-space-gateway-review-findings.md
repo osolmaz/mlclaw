@@ -37,6 +37,12 @@ the fixes that should land before the browser gateway is treated as deployable.
 8. WebSocket proxy socket lifecycle should close both sides.
    Client-side socket errors or closes should tear down the upstream socket too.
 
+9. Space-to-local migration can pause a running Space without a final snapshot
+   when the runtime lease is missing or stale.
+   A running Space may still receive `SIGTERM` and upload its final snapshot
+   after the local gateway has already restored from the bucket, which can lose
+   recent state.
+
 ## Fix Plan
 
 - Make cookie parsing skip malformed percent-encoded values.
@@ -49,5 +55,8 @@ the fixes that should land before the browser gateway is treated as deployable.
 - Use generic `500` and `502` client responses while logging details server-side.
 - Support both `/logout` and `/mlclaw/logout`.
 - Tighten WebSocket proxy cleanup.
+- Require a handoff wait whenever the Space runtime may still be running,
+  even if the runtime lease is missing or stale. Only already non-running Space
+  states may skip the final-snapshot wait.
 - Add regression tests for the crash, admin resolution, API `401`, preserved
-  `next`, and generic upstream errors.
+  `next`, generic upstream errors, and Space migration without a current lease.

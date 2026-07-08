@@ -1302,7 +1302,7 @@ async function disableAndPauseSpaceGateway(params: {
 }): Promise<void> {
   const handoffStartedAt = params.runtime.now();
   const requestId = randomBytes(16).toString("hex");
-  const shouldWaitForHandoff = await spaceGatewayCanAcknowledgeHandoff(params);
+  const shouldWaitForHandoff = await spaceGatewayShouldWaitForHandoff(params);
   if (!shouldWaitForHandoff) {
     await params.hub.addSpaceVariable(params.manifest.space, "MLCLAW_GATEWAY_DISABLED", "1");
     await clearRuntimeHandoffRequest(params.hub, params.manifest.bucket, params.bucketPrefix).catch(() => undefined);
@@ -1335,7 +1335,7 @@ async function disableAndPauseSpaceGateway(params: {
   params.runtime.stdout.log(`Space pause requested: ${params.manifest.space}`);
 }
 
-async function spaceGatewayCanAcknowledgeHandoff(params: {
+async function spaceGatewayShouldWaitForHandoff(params: {
   manifest: DeploymentManifest;
   hub: HubApi;
   runtime: Required<CliRuntime>;
@@ -1353,7 +1353,15 @@ async function spaceGatewayCanAcknowledgeHandoff(params: {
     lease.gatewayLocation === "space" &&
     runtimeLeaseIsLive(lease, params.runtime.now());
 
-  if (stageCanRunGateway && leaseIsCurrentSpace) {
+  if (stageCanRunGateway || leaseIsCurrentSpace) {
+    if (stageCanRunGateway && !leaseIsCurrentSpace) {
+      const leaseDetail = lease
+        ? `last lease is ${lease.gatewayLocation}/${lease.runtimeId} at ${lease.lastHeartbeatAt}`
+        : "no runtime lease found";
+      params.runtime.stdout.log(
+        `Space may still be running (${stage || "unknown"}; ${leaseDetail}); waiting for final snapshot handoff.`,
+      );
+    }
     return true;
   }
 

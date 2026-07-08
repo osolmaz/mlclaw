@@ -16086,7 +16086,7 @@ async function handoffAndStopLocalGateway(params) {
 async function disableAndPauseSpaceGateway(params) {
   const handoffStartedAt = params.runtime.now();
   const requestId = randomBytes(16).toString("hex");
-  const shouldWaitForHandoff = await spaceGatewayCanAcknowledgeHandoff(params);
+  const shouldWaitForHandoff = await spaceGatewayShouldWaitForHandoff(params);
   if (!shouldWaitForHandoff) {
     await params.hub.addSpaceVariable(params.manifest.space, "MLCLAW_GATEWAY_DISABLED", "1");
     await clearRuntimeHandoffRequest(params.hub, params.manifest.bucket, params.bucketPrefix).catch(() => void 0);
@@ -16118,7 +16118,7 @@ async function disableAndPauseSpaceGateway(params) {
   await params.hub.pauseSpace(params.manifest.space);
   params.runtime.stdout.log(`Space pause requested: ${params.manifest.space}`);
 }
-async function spaceGatewayCanAcknowledgeHandoff(params) {
+async function spaceGatewayShouldWaitForHandoff(params) {
   const expectedRuntimeId = spaceRuntimeId(params.manifest.agent);
   const [runtimeInfo, lease] = await Promise.all([
     params.hub.getSpaceRuntime(params.manifest.space).catch(() => null),
@@ -16127,7 +16127,13 @@ async function spaceGatewayCanAcknowledgeHandoff(params) {
   const stage = typeof runtimeInfo?.stage === "string" ? runtimeInfo.stage.toUpperCase() : "";
   const stageCanRunGateway = !stage || stage === "RUNNING" || stage === "RUNNING_BUILDING";
   const leaseIsCurrentSpace = lease?.runtimeId === expectedRuntimeId && lease.gatewayLocation === "space" && runtimeLeaseIsLive(lease, params.runtime.now());
-  if (stageCanRunGateway && leaseIsCurrentSpace) {
+  if (stageCanRunGateway || leaseIsCurrentSpace) {
+    if (stageCanRunGateway && !leaseIsCurrentSpace) {
+      const leaseDetail2 = lease ? `last lease is ${lease.gatewayLocation}/${lease.runtimeId} at ${lease.lastHeartbeatAt}` : "no runtime lease found";
+      params.runtime.stdout.log(
+        `Space may still be running (${stage || "unknown"}; ${leaseDetail2}); waiting for final snapshot handoff.`
+      );
+    }
     return true;
   }
   const stageDetail = stage ? `Space stage: ${stage}. ` : "";
