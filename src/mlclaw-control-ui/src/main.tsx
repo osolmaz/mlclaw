@@ -374,9 +374,9 @@ function SettingsPage(props: {
   };
 
   return (
-    <>
+    <div className="settingsView">
       <Header title="Settings" subtitle="Runtime configuration for this Space" />
-      <section className="panel">
+      <section className="panel settingsPanel">
         <h2>Models</h2>
         <p className="muted">Current value: <code>{props.settings.model}</code></p>
         <div className="modelToolbar">
@@ -444,7 +444,7 @@ function SettingsPage(props: {
           </button>
         </div>
       </section>
-    </>
+    </div>
   );
 }
 
