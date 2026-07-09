@@ -7,12 +7,12 @@ describe("runtime image Dockerfile", () => {
     const dockerfile = await fs.readFile("Dockerfile", "utf8");
 
     expect(dockerfile).toContain(`ARG OPENCLAW_VERSION=${OPENCLAW_VERSION}`);
-    expect(OPENCLAW_BASE_IMAGE).toBe("ghcr.io/openclaw/openclaw:2026.6.11");
+    expect(OPENCLAW_BASE_IMAGE).toBe(`ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}`);
     expect(dockerfile).toContain("ARG OPENCLAW_BASE_IMAGE=ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}");
     expect(dockerfile).toContain(`ARG MLCLAW_RUNTIME_IMAGE=${DEFAULT_RUNTIME_IMAGE}`);
     expect(dockerfile).toContain("FROM ${OPENCLAW_BASE_IMAGE}");
     expect(dockerfile).not.toContain("ghcr.io/osolmaz/mlclaw-runtime");
-    expect(DEFAULT_RUNTIME_IMAGE).toBe(`ghcr.io/osolmaz/mlclaw:${PACKAGE_VERSION}-openclaw-2026.6.11`);
+    expect(DEFAULT_RUNTIME_IMAGE).toBe(`ghcr.io/osolmaz/mlclaw:${PACKAGE_VERSION}-openclaw-${OPENCLAW_VERSION}`);
     expect(dockerfile).toContain("ENV PORT=7860");
     expect(dockerfile).toContain("ENV OPENCLAW_GATEWAY_PORT=7861");
     expect(dockerfile).toContain("EXPOSE 7860");

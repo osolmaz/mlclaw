@@ -1,6 +1,6 @@
-ARG OPENCLAW_VERSION=2026.6.11
+ARG OPENCLAW_VERSION=2026.7.1-beta.2
 ARG OPENCLAW_BASE_IMAGE=ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}
-ARG MLCLAW_RUNTIME_IMAGE=ghcr.io/osolmaz/mlclaw:0.2.1-openclaw-2026.6.11
+ARG MLCLAW_RUNTIME_IMAGE=ghcr.io/osolmaz/mlclaw:0.2.2-openclaw-2026.7.1-beta.2
 
 # Stage 1: build the state-sync bundle so the runtime image needs no dev deps.
 FROM node:24-bookworm-slim AS sync-build

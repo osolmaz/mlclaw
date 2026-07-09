@@ -14,19 +14,17 @@ ML Claw should publish and use one prebuilt Docker image:
 ghcr.io/osolmaz/mlclaw:<mlclaw-version>-openclaw-<openclaw-version>
 ```
 
-For version `0.1.0`, the default image is:
+For version `0.2.2`, the default image is:
 
 ```text
-ghcr.io/osolmaz/mlclaw:0.1.0-openclaw-2026.6.11
+ghcr.io/osolmaz/mlclaw:0.2.2-openclaw-2026.7.1-beta.2
 ```
 
-The OpenClaw base image is pinned to the stable release:
+The OpenClaw base image is pinned to the current beta release:
 
 ```text
-ghcr.io/openclaw/openclaw:2026.6.11
+ghcr.io/openclaw/openclaw:2026.7.1-beta.2
 ```
-
-Do not use the `2026.7` beta line for the default runtime yet.
 
 ## Why
 
@@ -49,7 +47,7 @@ Runtime image naming lives in `package.json`:
 ```json
 {
   "config": {
-    "openclawVersion": "2026.6.11",
+    "openclawVersion": "2026.7.1-beta.2",
     "runtimeImageRepository": "ghcr.io/osolmaz/mlclaw"
   }
 }
@@ -70,7 +68,7 @@ By default, `mlclaw bootstrap`, `mlclaw update`, and
 `mlclaw gateway migrate --to space` generate a Space Dockerfile with one line:
 
 ```dockerfile
-FROM ghcr.io/osolmaz/mlclaw:0.1.0-openclaw-2026.6.11
+FROM ghcr.io/osolmaz/mlclaw:0.2.2-openclaw-2026.7.1-beta.2
 ```
 
 The Space variable `MLCLAW_RUNTIME_IMAGE` must match that image tag.
@@ -93,7 +91,7 @@ mlclaw update <owner/space> --bundled-runtime
 
 Use this only for development or emergency fallback when GHCR is unavailable.
 The bundled path uploads the runtime JavaScript, scripts, and default config
-into the Space repository and builds from `ghcr.io/openclaw/openclaw:2026.6.11`.
+into the Space repository and builds from `ghcr.io/openclaw/openclaw:2026.7.1-beta.2`.
 
 `--bundled-runtime` must not be combined with `--runtime-image` or
 `MLCLAW_RUNTIME_IMAGE`.
@@ -147,20 +145,20 @@ node dist/mlclaw.mjs update osolmaz/mlclaw-test --force
 The generated Space Dockerfile should contain:
 
 ```dockerfile
-FROM ghcr.io/osolmaz/mlclaw:0.1.0-openclaw-2026.6.11
+FROM ghcr.io/osolmaz/mlclaw:0.2.2-openclaw-2026.7.1-beta.2
 ```
 
 Runtime validation:
 
 ```bash
 docker build -t mlclaw:test .
-docker run --rm --entrypoint sh mlclaw:test -lc 'openclaw --version && test "$MLCLAW_RUNTIME_IMAGE" = "ghcr.io/osolmaz/mlclaw:0.1.0-openclaw-2026.6.11"'
+docker run --rm --entrypoint sh mlclaw:test -lc 'openclaw --version && test "$MLCLAW_RUNTIME_IMAGE" = "ghcr.io/osolmaz/mlclaw:0.2.2-openclaw-2026.7.1-beta.2"'
 ```
 
 Live validation after publish:
 
 ```bash
-docker buildx imagetools inspect ghcr.io/osolmaz/mlclaw:0.1.0-openclaw-2026.6.11
+docker buildx imagetools inspect ghcr.io/osolmaz/mlclaw:0.2.2-openclaw-2026.7.1-beta.2
 node dist/mlclaw.mjs doctor osolmaz/mlclaw
 node dist/mlclaw.mjs doctor osolmaz/mlclaw-test
 ```

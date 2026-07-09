@@ -3,7 +3,7 @@
 Status: implemented in PR #5; final review and CI validation in progress
 
 Superseded runtime decision: the default runtime image is now
-`ghcr.io/osolmaz/mlclaw:<package-version>-openclaw-2026.6.11`, not the older
+`ghcr.io/osolmaz/mlclaw:<package-version>-openclaw-<openclaw-version>`, not the older
 `mlclaw-runtime` package name. See
 [`2026-07-09-prebuilt-mlclaw-image-plan.md`](2026-07-09-prebuilt-mlclaw-image-plan.md).
 

@@ -3,7 +3,7 @@
 Status: proposed
 
 Superseded runtime decision: the default runtime image is now
-`ghcr.io/osolmaz/mlclaw:<package-version>-openclaw-2026.6.11`, and generated
+`ghcr.io/osolmaz/mlclaw:<package-version>-openclaw-<openclaw-version>`, and generated
 Spaces use that prebuilt image by default. See
 [`2026-07-09-prebuilt-mlclaw-image-plan.md`](2026-07-09-prebuilt-mlclaw-image-plan.md).
 

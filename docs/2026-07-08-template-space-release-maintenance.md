@@ -65,7 +65,7 @@ setting the `template_space` input. The default remains `osolmaz/mlclaw`.
 The default Space Dockerfile should be:
 
 ```dockerfile
-FROM ghcr.io/osolmaz/mlclaw:<package-version>-openclaw-2026.6.11
+FROM ghcr.io/osolmaz/mlclaw:<package-version>-openclaw-<openclaw-version>
 ```
 
 The GHCR package must be public. Hugging Face Spaces pull the image without a

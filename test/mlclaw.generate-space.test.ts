@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { generateSpaceRepo } from "../src/mlclaw/git.js";
+import { OPENCLAW_BASE_IMAGE } from "../src/mlclaw/runtime-image.js";
 
 async function listFiles(root: string): Promise<string[]> {
   const entries = await fs.readdir(root, { recursive: true, withFileTypes: true });
@@ -94,7 +95,7 @@ describe("generated Space repository", () => {
     expect(files).not.toContain("scripts/parity-probe.ts");
 
     const dockerfile = await fs.readFile(path.join(outDir, "Dockerfile"), "utf8");
-    expect(dockerfile).toContain("FROM ghcr.io/openclaw/openclaw:2026.6.11");
+    expect(dockerfile).toContain(`FROM ${OPENCLAW_BASE_IMAGE}`);
     expect(dockerfile).toContain("COPY --chown=node:node runtime/hf-state-sync.js /app/hf-state-sync.js");
     expect(dockerfile).toContain("COPY --chown=node:node runtime/hf-tooling-seed.js /app/hf-tooling-seed.js");
     expect(dockerfile).toContain("\"hf-discover==1.3.7\"");
