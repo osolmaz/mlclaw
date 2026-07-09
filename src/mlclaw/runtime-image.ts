@@ -9,13 +9,9 @@ const PACKAGE_METADATA = readPackageMetadata();
 
 export const PACKAGE_VERSION = packageString("version", "unknown");
 export const OPENCLAW_VERSION = packageConfigString("openclawVersion", DEFAULT_OPENCLAW_VERSION);
-export const OPENCLAW_BASE_IMAGE = packageConfigString(
-  "openclawBaseImage",
-  `ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}`,
-);
-export const OPENCLAW_BUILD_ID = packageConfigString("openclawBuildId", "");
+export const OPENCLAW_BASE_IMAGE = `ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}`;
 export const RUNTIME_IMAGE_REPOSITORY = packageConfigString("runtimeImageRepository", DEFAULT_RUNTIME_IMAGE_REPOSITORY);
-export const DEFAULT_RUNTIME_IMAGE_TAG = `${PACKAGE_VERSION}-openclaw-${OPENCLAW_VERSION}${OPENCLAW_BUILD_ID ? `-${OPENCLAW_BUILD_ID}` : ""}`;
+export const DEFAULT_RUNTIME_IMAGE_TAG = `${PACKAGE_VERSION}-openclaw-${OPENCLAW_VERSION}`;
 export const DEFAULT_RUNTIME_IMAGE = `${RUNTIME_IMAGE_REPOSITORY}:${DEFAULT_RUNTIME_IMAGE_TAG}`;
 
 export function resolveRuntimeImage(value?: string, env: NodeJS.ProcessEnv = process.env): string {

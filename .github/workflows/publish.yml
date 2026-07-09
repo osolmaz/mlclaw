@@ -56,18 +56,11 @@ jobs:
         run: |
           version="$(node -p 'require("./package.json").version')"
           openclaw_version="$(node -p 'require("./package.json").config.openclawVersion')"
-          openclaw_base_image="$(node -p 'require("./package.json").config.openclawBaseImage || `ghcr.io/openclaw/openclaw:${require("./package.json").config.openclawVersion}`')"
-          openclaw_build_id="$(node -p 'require("./package.json").config.openclawBuildId || ""')"
           runtime_image="$(node -p 'require("./package.json").config.runtimeImageRepository')"
-          runtime_tag="${version}-openclaw-${openclaw_version}"
-          if [ -n "$openclaw_build_id" ]; then
-            runtime_tag="${runtime_tag}-${openclaw_build_id}"
-          fi
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "openclaw_version=${openclaw_version}" >> "$GITHUB_OUTPUT"
-          echo "openclaw_base_image=${openclaw_base_image}" >> "$GITHUB_OUTPUT"
           echo "runtime_image=${runtime_image}" >> "$GITHUB_OUTPUT"
-          echo "runtime_tag=${runtime_tag}" >> "$GITHUB_OUTPUT"
+          echo "runtime_tag=${version}-openclaw-${openclaw_version}" >> "$GITHUB_OUTPUT"
       - run: npm ci
       - run: npm run build
       - run: npm run typecheck
@@ -107,7 +100,7 @@ jobs:
           push: true
           build-args: |
             OPENCLAW_VERSION=${{ steps.runtime-config.outputs.openclaw_version }}
-            OPENCLAW_BASE_IMAGE=${{ steps.runtime-config.outputs.openclaw_base_image }}
+            OPENCLAW_BASE_IMAGE=ghcr.io/openclaw/openclaw:${{ steps.runtime-config.outputs.openclaw_version }}
             MLCLAW_RUNTIME_IMAGE=${{ steps.runtime-config.outputs.runtime_image }}:${{ steps.runtime-config.outputs.runtime_tag }}
           tags: |
             ${{ steps.runtime-config.outputs.runtime_image }}:${{ steps.runtime-config.outputs.runtime_tag }}

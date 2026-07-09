@@ -4,8 +4,6 @@
   "license": "MIT",
   "config": {
     "openclawVersion": "2026.7.1-beta.2",
-    "openclawBaseImage": "ghcr.io/osolmaz/openclaw:f8c76fd0595",
-    "openclawBuildId": "f8c76fd0595",
     "runtimeImageRepository": "ghcr.io/osolmaz/mlclaw"
   },
   "repository": {
