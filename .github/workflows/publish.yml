@@ -113,9 +113,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
         run: |
-          gh api --method PATCH /user/packages/container/mlclaw/visibility -f visibility=public || {
-            echo "::warning::Could not make ghcr.io/osolmaz/mlclaw public automatically. Hugging Face Spaces need the image package to be public."
-          }
+          gh api --method PATCH /user/packages/container/mlclaw/visibility -f visibility=public
+      - name: Verify anonymous GHCR image pull
+        if: ${{ github.event_name == 'release' || inputs.update_template_space == 'true' }}
+        env:
+          MLCLAW_PUBLISHED_IMAGE: ${{ steps.runtime-config.outputs.runtime_image }}:${{ steps.runtime-config.outputs.runtime_tag }}
+        run: |
+          tmp_docker_config="$(mktemp -d)"
+          trap 'rm -rf "$tmp_docker_config"' EXIT
+          DOCKER_CONFIG="$tmp_docker_config" docker buildx imagetools inspect "$MLCLAW_PUBLISHED_IMAGE"
       - name: Update canonical Hugging Face template Space
         if: ${{ github.event_name == 'release' || inputs.update_template_space == 'true' }}
         env:

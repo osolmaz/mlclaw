@@ -121,6 +121,11 @@ ghcr.io/osolmaz/mlclaw:latest
 The GHCR image package must be public. Hugging Face Spaces pull the image
 without GitHub credentials.
 
+The publish workflow must verify anonymous pull access to the exact image tag
+before updating any Hugging Face template Space. If the package cannot be made
+public or the anonymous manifest check fails, the workflow should fail before
+rewriting the Space Dockerfile.
+
 ## Validation
 
 Local validation:
