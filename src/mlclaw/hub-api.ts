@@ -30,6 +30,9 @@ export type SpaceRuntime = {
   sleep_time?: number;
   volumes?: SpaceVolume[] | null;
 };
+type SpaceInfo = {
+  runtime?: SpaceRuntime | null;
+};
 export type HubCommitFile = { path: string; content: Uint8Array | Buffer };
 
 export class HubApi {
@@ -208,7 +211,20 @@ export class HubApi {
   }
 
   async getSpaceRuntime(repoId: string): Promise<SpaceRuntime> {
-    return await this.requestJson<SpaceRuntime>(`/api/spaces/${repoId}/runtime`);
+    const runtime = await this.requestJson<SpaceRuntime>(`/api/spaces/${repoId}/runtime`);
+    if (Array.isArray(runtime.volumes)) {
+      return runtime;
+    }
+    try {
+      const info = await this.requestJson<SpaceInfo>(`/api/spaces/${repoId}`);
+      if (Array.isArray(info.runtime?.volumes)) {
+        return { ...runtime, volumes: info.runtime.volumes };
+      }
+    } catch {
+      // The runtime endpoint is still authoritative for status. Callers
+      // fail closed if volume metadata is unavailable from either endpoint.
+    }
+    return runtime;
   }
 
   async setSpaceVolumes(repoId: string, volumes: SpaceVolume[]): Promise<void> {

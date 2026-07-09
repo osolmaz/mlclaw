@@ -168,4 +168,57 @@ describe("HubApi Space commits", () => {
     });
     expect(JSON.parse(String(request.init.body))).toEqual({ seconds: -1 });
   });
+
+  it("reads Space volumes from Space info when the runtime endpoint omits them", async () => {
+    const requests: string[] = [];
+    const hub = new HubApi({
+      token: "hf_test_token",
+      fetch: async (url) => {
+        const textUrl = String(url);
+        requests.push(textUrl);
+        if (textUrl.endsWith("/api/spaces/alice/research/runtime")) {
+          return new Response(JSON.stringify({ stage: "RUNNING" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (textUrl.endsWith("/api/spaces/alice/research")) {
+          return new Response(JSON.stringify({
+            runtime: {
+              volumes: [
+                {
+                  type: "bucket",
+                  source: "alice/research-data",
+                  mountPath: "/data/mlclaw-state",
+                  readOnly: false,
+                },
+              ],
+            },
+          }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+
+    const runtime = await hub.getSpaceRuntime("alice/research");
+
+    expect(requests).toEqual([
+      "https://huggingface.co/api/spaces/alice/research/runtime",
+      "https://huggingface.co/api/spaces/alice/research",
+    ]);
+    expect(runtime).toEqual({
+      stage: "RUNNING",
+      volumes: [
+        {
+          type: "bucket",
+          source: "alice/research-data",
+          mountPath: "/data/mlclaw-state",
+          readOnly: false,
+        },
+      ],
+    });
+  });
 });

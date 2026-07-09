@@ -14674,7 +14674,18 @@ var HubApi = class {
     });
   }
   async getSpaceRuntime(repoId) {
-    return await this.requestJson(`/api/spaces/${repoId}/runtime`);
+    const runtime = await this.requestJson(`/api/spaces/${repoId}/runtime`);
+    if (Array.isArray(runtime.volumes)) {
+      return runtime;
+    }
+    try {
+      const info = await this.requestJson(`/api/spaces/${repoId}`);
+      if (Array.isArray(info.runtime?.volumes)) {
+        return { ...runtime, volumes: info.runtime.volumes };
+      }
+    } catch {
+    }
+    return runtime;
   }
   async setSpaceVolumes(repoId, volumes) {
     await this.requestJson(`/api/spaces/${repoId}/volumes`, {
