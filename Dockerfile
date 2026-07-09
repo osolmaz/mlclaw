@@ -1,3 +1,7 @@
+ARG OPENCLAW_VERSION=2026.6.11
+ARG OPENCLAW_BASE_IMAGE=ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}
+ARG MLCLAW_RUNTIME_IMAGE=ghcr.io/osolmaz/mlclaw:0.1.0-openclaw-2026.6.11
+
 # Stage 1: build the state-sync bundle so the runtime image needs no dev deps.
 FROM node:24-bookworm-slim AS sync-build
 WORKDIR /build
@@ -5,7 +9,7 @@ COPY package.json package-lock.json tsconfig.json vite.control-ui.config.ts ./
 COPY src ./src
 RUN npm ci --no-audit --no-fund && npm run build
 
-FROM ghcr.io/openclaw/openclaw:2026.7.1-beta.2
+FROM ${OPENCLAW_BASE_IMAGE}
 
 LABEL org.opencontainers.image.source="https://github.com/osolmaz/mlclaw"
 LABEL org.opencontainers.image.description="ML Claw runtime for OpenClaw on Hugging Face"
@@ -48,7 +52,7 @@ ENV OPENCLAW_STATE_DIR=/tmp/openclaw-live/.openclaw
 ENV OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-live/workspace
 ENV OPENCLAW_CONFIG_PATH=/tmp/openclaw-live/.openclaw/openclaw.json
 ENV OPENCLAW_DISABLE_BONJOUR=1
-ARG MLCLAW_RUNTIME_IMAGE=ghcr.io/osolmaz/mlclaw-runtime:latest
+ARG MLCLAW_RUNTIME_IMAGE
 ENV MLCLAW_RUNTIME_IMAGE=$MLCLAW_RUNTIME_IMAGE
 
 EXPOSE 7860

@@ -1004,7 +1004,7 @@ describe("mlclaw CLI", () => {
     expect(stderr.join("\n")).toContain("gateway location changes must use `mlclaw gateway migrate`");
   });
 
-  it("bundles the current Space runtime during update by default", async () => {
+  it("uses the prebuilt runtime image during update by default", async () => {
     const hub = createFakeHub();
     await hub.addSpaceVariable("alice/research", "OPENCLAW_HF_TEMPLATE_REV", "old-template");
     await hub.addSpaceVariable("alice/research", "MLCLAW_RUNTIME_IMAGE", "registry.example/mlclaw:test");
@@ -1022,10 +1022,10 @@ describe("mlclaw CLI", () => {
     const code = await main(["update", "alice/research"], runtime);
 
     expect(code).toBe(0);
-    expect(pushed).toEqual([{ runtimeImage: undefined }]);
+    expect(pushed).toEqual([{ runtimeImage: DEFAULT_RUNTIME_IMAGE }]);
     expect(hub.calls).toContainEqual({
       name: "addSpaceVariable",
-      args: ["alice/research", "MLCLAW_RUNTIME_IMAGE", "bundled:test-template"],
+      args: ["alice/research", "MLCLAW_RUNTIME_IMAGE", DEFAULT_RUNTIME_IMAGE],
     });
     expect(hub.calls).toContainEqual({
       name: "addSpaceVariable",
@@ -1050,6 +1050,31 @@ describe("mlclaw CLI", () => {
     expect(adminsIndex).toBeGreaterThanOrEqual(0);
     expect(restartIndex).toBeGreaterThan(allowedUsersIndex);
     expect(restartIndex).toBeGreaterThan(adminsIndex);
+  });
+
+  it("can bundle the current Space runtime during update when requested", async () => {
+    const hub = createFakeHub();
+    await hub.addSpaceVariable("alice/research", "OPENCLAW_HF_TEMPLATE_REV", "old-template");
+    await hub.addSpaceVariable("alice/research", "MLCLAW_RUNTIME_IMAGE", "registry.example/mlclaw:test");
+    const { prompt } = createPrompt([]);
+    const baseRuntime = await createRuntime(hub, prompt);
+    const pushed: Array<{ runtimeImage: string | undefined }> = [];
+    const runtime = {
+      ...baseRuntime,
+      pushTemplateToSpace: async (params: { runtimeImage?: string }) => {
+        pushed.push({ runtimeImage: params.runtimeImage });
+        return { templateRev: "test-template" };
+      },
+    };
+
+    const code = await main(["update", "alice/research", "--bundled-runtime"], runtime);
+
+    expect(code).toBe(0);
+    expect(pushed).toEqual([{ runtimeImage: undefined }]);
+    expect(hub.calls).toContainEqual({
+      name: "addSpaceVariable",
+      args: ["alice/research", "MLCLAW_RUNTIME_IMAGE", "bundled:test-template"],
+    });
   });
 
   it("honors an explicit runtime image override during update", async () => {
@@ -1104,7 +1129,7 @@ describe("mlclaw CLI", () => {
     });
     expect(hub.calls).toContainEqual({
       name: "addSpaceVariable",
-      args: ["alice/mlclaw-template", "MLCLAW_RUNTIME_IMAGE", "bundled:test-template"],
+      args: ["alice/mlclaw-template", "MLCLAW_RUNTIME_IMAGE", DEFAULT_RUNTIME_IMAGE],
     });
     expect(hub.calls).toContainEqual({
       name: "addSpaceVariable",
@@ -1133,7 +1158,7 @@ describe("mlclaw CLI", () => {
   it("runs template-aware doctor checks for the canonical template Space", async () => {
     const hub = createFakeHub();
     await hub.addSpaceVariable("alice/mlclaw-template", "MLCLAW_TEMPLATE_REV", "test-template");
-    await hub.addSpaceVariable("alice/mlclaw-template", "MLCLAW_RUNTIME_IMAGE", "bundled:test-template");
+    await hub.addSpaceVariable("alice/mlclaw-template", "MLCLAW_RUNTIME_IMAGE", DEFAULT_RUNTIME_IMAGE);
     await hub.addSpaceVariable("alice/mlclaw-template", "MLCLAW_CANONICAL_SPACE_ID", "alice/mlclaw-template");
     const { prompt } = createPrompt([]);
     const output: string[] = [];

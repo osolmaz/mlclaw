@@ -47,7 +47,7 @@ This creates:
 
 - a private Storage Bucket for OpenClaw state;
 - a private Docker Space for the browser gateway;
-- a self-contained Space runtime generated from the installed `mlclaw` package;
+- a Docker Space that starts from the prebuilt `ghcr.io/osolmaz/mlclaw` image;
 - Hugging Face OAuth metadata in the Space README;
 - Space variables and write-only secrets for state sync and session signing;
 - a local deployment manifest under `~/.config/mlclaw`.
@@ -149,8 +149,9 @@ mlclaw doctor your-hf-username/mlclaw --fix
 `doctor --fix` may update Space variables and missing session-secret plumbing.
 It never reads secret values and never modifies bucket contents.
 
-`mlclaw update` also refreshes the generated Space runtime files, so older
-Spaces can move to the current implementation without recreating their bucket.
+`mlclaw update` also refreshes the generated Space Dockerfile and runtime
+metadata, so older Spaces can move to the current implementation without
+recreating their bucket.
 
 ## Browser Settings
 

@@ -2,6 +2,11 @@
 
 Status: proposed
 
+Superseded runtime decision: the default runtime image is now
+`ghcr.io/osolmaz/mlclaw:<package-version>-openclaw-2026.6.11`, and generated
+Spaces use that prebuilt image by default. See
+[`2026-07-09-prebuilt-mlclaw-image-plan.md`](2026-07-09-prebuilt-mlclaw-image-plan.md).
+
 ## Goal
 
 Cut over from ML Claw to **ML Claw** and make the public Hugging Face Space act

@@ -20,6 +20,7 @@ An ML Claw deployment has:
 
 - a private Hugging Face Storage Bucket for durable OpenClaw state snapshots;
 - a private Hugging Face Docker Space for the default browser gateway;
+- a prebuilt `ghcr.io/osolmaz/mlclaw` runtime image by default;
 - Hugging Face OAuth enabled on the Space;
 - a local deployment manifest under `~/.config/mlclaw/deployments/`;
 - local secrets under `~/.config/mlclaw/secrets/`;
@@ -99,6 +100,11 @@ After the Space builds, open it in the browser and sign in with the user's
 Hugging Face account. The Space server proxies authenticated browser traffic to
 OpenClaw on loopback using trusted-proxy auth. Do not ask the user for an
 OpenClaw gateway token for the browser Space path.
+
+Generated Spaces use the prebuilt `ghcr.io/osolmaz/mlclaw:<package>-openclaw-<version>`
+image by default. Use `--bundled-runtime` only for development or emergency
+fallbacks where the Space must build all runtime files directly from the
+uploaded Space repository.
 
 Create a public Space only when the user explicitly asks for a public demo or
 template-style deployment:

@@ -35,7 +35,7 @@ import {
   writeSecretEnv,
 } from "./local-config.js";
 import { namesFor, slugifyAgentName } from "./naming.js";
-import { bundledSpaceRuntimeRef, resolveRuntimeImage, resolveRuntimeImageOverride } from "./runtime-image.js";
+import { bundledSpaceRuntimeRef, DEFAULT_RUNTIME_IMAGE, resolveRuntimeImage, resolveSpaceRuntimeImage } from "./runtime-image.js";
 import { getTelegramBot, type TelegramBot } from "./telegram.js";
 
 export const DEFAULT_MODEL = "huggingface/google/gemma-4-26B-A4B-it";
@@ -70,6 +70,7 @@ type BootstrapOptions = {
   sleepTime?: number;
   model?: string;
   runtimeImage?: string;
+  bundledRuntime?: boolean;
   publicSpace?: boolean;
   gatewayToken?: string;
   dockerContext?: string;
@@ -81,6 +82,7 @@ type BootstrapOptions = {
 type UpdateOptions = {
   force?: boolean;
   runtimeImage?: string;
+  bundledRuntime?: boolean;
 };
 
 type DoctorOptions = {
@@ -100,6 +102,7 @@ type GatewayCommandOptions = {
   hardware?: string;
   sleepTime?: number;
   runtimeImage?: string;
+  bundledRuntime?: boolean;
   dockerContext?: string;
   pull?: boolean;
   takeover?: boolean;
@@ -229,6 +232,7 @@ export function createProgram(runtimeOverrides: CliRuntime = {}): Command {
     .option("--sleep-time <seconds>", "Space sleep timeout in seconds; -1 means never sleep", parseInteger)
     .option("--model <model>", "OpenClaw model identifier", DEFAULT_MODEL)
     .option("--runtime-image <image>", "ML Claw runtime image")
+    .option("--bundled-runtime", "Generate a bundled Space runtime instead of using the prebuilt ML Claw image", false)
     .option("--public-space", "Create the Hugging Face Space as public instead of private", false)
     .addOption(new Option("--gateway-token <token>").hideHelp())
     .option("--docker-context <name>", "Docker context for local gateway mode")
@@ -244,6 +248,7 @@ export function createProgram(runtimeOverrides: CliRuntime = {}): Command {
     .description("Regenerate and upload current ML Claw Space files")
     .argument("<owner/space>", "Hugging Face Space repo ID")
     .option("--runtime-image <image>", "Runtime image to write into the generated Space Dockerfile")
+    .option("--bundled-runtime", "Generate a bundled Space runtime instead of using the prebuilt ML Claw image", false)
     .option("--force", "Update even if the Space does not look like ML Claw", false)
     .action(async (repoId: string, opts: UpdateOptions) => {
       const token = await runtime.readToken(runtime.env);
@@ -330,6 +335,7 @@ export function createProgram(runtimeOverrides: CliRuntime = {}): Command {
     .option("--hardware <flavor>", "Hugging Face Space hardware flavor")
     .option("--sleep-time <seconds>", "Space sleep timeout in seconds; -1 means never sleep", parseInteger)
     .option("--runtime-image <image>", "ML Claw runtime image")
+    .option("--bundled-runtime", "Generate a bundled Space runtime instead of using the prebuilt ML Claw image", false)
     .option("--public-space", "Create the Hugging Face Space as public instead of private", false)
     .option("--docker-context <name>", "Docker context for local gateway startup when migrating to local")
     .option("--no-pull", "Do not docker pull before starting a local gateway")
@@ -399,7 +405,7 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
 
   const model = opts.model ?? DEFAULT_MODEL;
   const runtimeImage = resolveRuntimeImage(opts.runtimeImage, runtime.env);
-  const templateRuntimeImage = resolveRuntimeImageOverride(opts.runtimeImage, runtime.env);
+  const templateRuntimeImage = resolveSpaceRuntimeImage(opts, runtime.env);
 
   let plan: BootstrapResolvedPlan;
   for (;;) {
@@ -981,7 +987,7 @@ async function deploySpaceGateway(params: {
   });
   await hub.requestSpaceHardware(manifest.space, params.hardware, params.sleepTime);
   runtime.stdout.log(params.templateRuntimeImage
-    ? "Generating Space files from explicit runtime image"
+    ? "Generating Space files from prebuilt runtime image"
     : "Generating bundled Space runtime files");
   const { templateRev } = await runtime.pushTemplateToSpace({
     targetRepo: manifest.space,
@@ -1199,7 +1205,7 @@ async function gatewayMigrate(agent: string, opts: GatewayCommandOptions, runtim
     });
     await handoffAndStopLocalGateway({ manifest: current, hub, runtime, bucketPrefix });
     const me = await hub.whoami();
-    const templateRuntimeImage = resolveRuntimeImageOverride(opts.runtimeImage, runtime.env);
+    const templateRuntimeImage = resolveSpaceRuntimeImage(opts, runtime.env);
     await deploySpaceGateway({
       hub,
       runtime,
@@ -1641,7 +1647,7 @@ async function update(
   if (!canonicalTemplate && !variables.has("MLCLAW_TEMPLATE_REV") && !variables.has("OPENCLAW_HF_TEMPLATE_REV") && !opts.force) {
     throw new Error(`${repoId} does not look like a ML Claw deployment; pass --force to update anyway`);
   }
-  const runtimeImage = resolveRuntimeImageOverride(opts.runtimeImage, runtime.env);
+  const runtimeImage = resolveSpaceRuntimeImage(opts, runtime.env);
   const agentName = variables.get("OPENCLAW_AGENT_NAME")?.value?.trim() || repoId.split("/")[1] || "openclaw";
   runtime.stdout.log(`Generating current Space files into ${repoId}`);
   const { templateRev } = await runtime.pushTemplateToSpace({
@@ -1690,9 +1696,7 @@ async function doctor(repoId: string, opts: DoctorOptions, hub: HubApi, runtime:
     if (!variables.has("MLCLAW_TEMPLATE_REV") && !variables.has("OPENCLAW_HF_TEMPLATE_REV")) {
       issues.push("MLCLAW_TEMPLATE_REV is missing; run `mlclaw update` to refresh the template Space");
     }
-    if (!variables.has("MLCLAW_RUNTIME_IMAGE")) {
-      issues.push("MLCLAW_RUNTIME_IMAGE is missing; run `mlclaw update` to refresh the template Space");
-    }
+    addRuntimeImageFindings(variables.get("MLCLAW_RUNTIME_IMAGE")?.value, issues);
     const runtimeInfo = await hub.getSpaceRuntime(repoId);
     runtime.stdout.log(`Space: ${repoId}`);
     runtime.stdout.log("Mode: template");
@@ -1754,9 +1758,7 @@ async function doctor(repoId: string, opts: DoctorOptions, hub: HubApi, runtime:
   if ((variables.get("MLCLAW_GATEWAY_LOCATION")?.value ?? "") !== "space") {
     issues.push("MLCLAW_GATEWAY_LOCATION is not set to space");
   }
-  if (!variables.has("MLCLAW_RUNTIME_IMAGE")) {
-    issues.push("MLCLAW_RUNTIME_IMAGE is missing");
-  }
+  addRuntimeImageFindings(variables.get("MLCLAW_RUNTIME_IMAGE")?.value, issues);
   if ((variables.get("MLCLAW_OPENCLAW_PORT")?.value ?? "") !== String(DEFAULT_SPACE_OPENCLAW_PORT) && fix) {
     await hub.addSpaceVariable(repoId, "MLCLAW_OPENCLAW_PORT", String(DEFAULT_SPACE_OPENCLAW_PORT));
     fixed.push("set MLCLAW_OPENCLAW_PORT");
@@ -1830,6 +1832,21 @@ function canonicalTemplateSpaceId(env: NodeJS.ProcessEnv): string {
 
 function isCanonicalTemplateSpace(repoId: string, env: NodeJS.ProcessEnv): boolean {
   return repoId === canonicalTemplateSpaceId(env);
+}
+
+function addRuntimeImageFindings(value: string | undefined, issues: string[]): void {
+  const runtimeImage = value?.trim();
+  if (!runtimeImage) {
+    issues.push("MLCLAW_RUNTIME_IMAGE is missing; run `mlclaw update` to refresh the Space runtime");
+    return;
+  }
+  if (runtimeImage.startsWith("ghcr.io/osolmaz/mlclaw-runtime:")) {
+    issues.push(`MLCLAW_RUNTIME_IMAGE points at the legacy mlclaw-runtime package; run \`mlclaw update\` to use ${DEFAULT_RUNTIME_IMAGE}`);
+    return;
+  }
+  if (runtimeImage.startsWith("bundled:")) {
+    issues.push(`MLCLAW_RUNTIME_IMAGE uses a bundled runtime; run \`mlclaw update\` to use ${DEFAULT_RUNTIME_IMAGE}`);
+  }
 }
 
 async function settings(repoId: string, opts: SettingsOptions, hub: HubApi, runtime: Required<CliRuntime>): Promise<void> {

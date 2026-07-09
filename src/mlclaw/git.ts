@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { HubApi } from "./hub-api.js";
+import { OPENCLAW_BASE_IMAGE } from "./runtime-image.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -100,7 +101,7 @@ function imageDockerfile(runtimeImage: string): string {
 }
 
 function bundledDockerfile(): string {
-  return `FROM ghcr.io/openclaw/openclaw:2026.7.1-beta.2
+  return `FROM ${OPENCLAW_BASE_IMAGE}
 
 LABEL org.opencontainers.image.source="https://github.com/osolmaz/mlclaw"
 LABEL org.opencontainers.image.description="ML Claw runtime for OpenClaw on Hugging Face"

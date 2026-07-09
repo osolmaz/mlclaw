@@ -9756,10 +9756,10 @@ function parseGatewayLocation(value) {
 
 // src/mlclaw/git.ts
 import { execFile as execFile2 } from "node:child_process";
-import fs11 from "node:fs/promises";
+import fs12 from "node:fs/promises";
 import os4 from "node:os";
-import path12 from "node:path";
-import { fileURLToPath as fileURLToPath2 } from "node:url";
+import path13 from "node:path";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
 import { promisify as promisify2 } from "node:util";
 
 // src/vendor/hfjs-xet/error.ts
@@ -14800,15 +14800,73 @@ function sseDataToText(raw) {
   return lines.join("");
 }
 
+// src/mlclaw/runtime-image.ts
+import fs11 from "node:fs";
+import path12 from "node:path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
+var DEFAULT_OPENCLAW_VERSION = "2026.6.11";
+var DEFAULT_RUNTIME_IMAGE_REPOSITORY = "ghcr.io/osolmaz/mlclaw";
+var PACKAGE_METADATA = readPackageMetadata();
+var PACKAGE_VERSION = packageString("version", "unknown");
+var OPENCLAW_VERSION = packageConfigString("openclawVersion", DEFAULT_OPENCLAW_VERSION);
+var OPENCLAW_BASE_IMAGE = `ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}`;
+var RUNTIME_IMAGE_REPOSITORY = packageConfigString("runtimeImageRepository", DEFAULT_RUNTIME_IMAGE_REPOSITORY);
+var DEFAULT_RUNTIME_IMAGE_TAG = `${PACKAGE_VERSION}-openclaw-${OPENCLAW_VERSION}`;
+var DEFAULT_RUNTIME_IMAGE = `${RUNTIME_IMAGE_REPOSITORY}:${DEFAULT_RUNTIME_IMAGE_TAG}`;
+function resolveRuntimeImage(value, env = process.env) {
+  return value?.trim() || env.MLCLAW_RUNTIME_IMAGE?.trim() || DEFAULT_RUNTIME_IMAGE;
+}
+function resolveSpaceRuntimeImage(opts, env = process.env) {
+  if (opts.bundledRuntime) {
+    if (opts.runtimeImage?.trim() || env.MLCLAW_RUNTIME_IMAGE?.trim()) {
+      throw new Error("--bundled-runtime cannot be combined with --runtime-image or MLCLAW_RUNTIME_IMAGE");
+    }
+    return void 0;
+  }
+  return resolveRuntimeImage(opts.runtimeImage, env);
+}
+function bundledSpaceRuntimeRef(templateRev) {
+  return `bundled:${templateRev}`;
+}
+function packageString(key, fallback) {
+  const value = PACKAGE_METADATA[key];
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+function packageConfigString(key, fallback) {
+  const value = PACKAGE_METADATA.config?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+function readPackageMetadata() {
+  let dir = path12.dirname(fileURLToPath2(import.meta.url));
+  while (true) {
+    const candidate = path12.join(dir, "package.json");
+    try {
+      return JSON.parse(fs11.readFileSync(candidate, "utf8"));
+    } catch (err) {
+      if (!isMissingFileError(err)) {
+        throw err;
+      }
+    }
+    const parent = path12.dirname(dir);
+    if (parent === dir) {
+      throw new Error("could not find package.json while resolving default runtime image");
+    }
+    dir = parent;
+  }
+}
+function isMissingFileError(err) {
+  return err instanceof Error && "code" in err && err.code === "ENOENT";
+}
+
 // src/mlclaw/git.ts
 var execFileAsync2 = promisify2(execFile2);
 async function pushTemplateToSpace(params) {
-  const tempRoot = await fs11.mkdtemp(path12.join(os4.tmpdir(), "mlclaw-space-"));
+  const tempRoot = await fs12.mkdtemp(path13.join(os4.tmpdir(), "mlclaw-space-"));
   try {
     const sourceDir = params.sourceDir ?? process.env.MLCLAW_SOURCE_DIR ?? await findPackagedSourceRoot();
     const templateRev = await currentTemplateRev(sourceDir);
-    const outDir = path12.join(tempRoot, "space");
-    await fs11.mkdir(outDir, { recursive: true });
+    const outDir = path13.join(tempRoot, "space");
+    await fs12.mkdir(outDir, { recursive: true });
     await generateSpaceRepo(sourceDir, outDir, {
       ...params.runtimeImage ? { runtimeImage: params.runtimeImage } : {}
     });
@@ -14826,7 +14884,7 @@ async function pushTemplateToSpace(params) {
     });
     return { templateRev };
   } finally {
-    await fs11.rm(tempRoot, { recursive: true, force: true });
+    await fs12.rm(tempRoot, { recursive: true, force: true });
   }
 }
 async function currentTemplateRev(sourceDir) {
@@ -14839,7 +14897,7 @@ async function currentTemplateRev(sourceDir) {
     }
   } catch {
   }
-  const pkg = JSON.parse(await fs11.readFile(path12.join(sourceDir, "package.json"), "utf8"));
+  const pkg = JSON.parse(await fs12.readFile(path13.join(sourceDir, "package.json"), "utf8"));
   return `npm:${pkg.name ?? "mlclaw"}@${pkg.version ?? "unknown"}`;
 }
 async function generateSpaceRepo(sourceDir, outDir, options = {}) {
@@ -14864,10 +14922,10 @@ async function generateSpaceRepo(sourceDir, outDir, options = {}) {
     );
   }
   for (const [from, to] of copies) {
-    await copyExisting(path12.join(sourceDir, from), path12.join(outDir, to));
+    await copyExisting(path13.join(sourceDir, from), path13.join(outDir, to));
   }
-  await fs11.writeFile(
-    path12.join(outDir, "Dockerfile"),
+  await fs12.writeFile(
+    path13.join(outDir, "Dockerfile"),
     options.runtimeImage ? imageDockerfile(options.runtimeImage) : bundledDockerfile(),
     "utf8"
   );
@@ -14877,7 +14935,7 @@ function imageDockerfile(runtimeImage) {
 `;
 }
 function bundledDockerfile() {
-  return `FROM ghcr.io/openclaw/openclaw:2026.7.1-beta.2
+  return `FROM ${OPENCLAW_BASE_IMAGE}
 
 LABEL org.opencontainers.image.source="https://github.com/osolmaz/mlclaw"
 LABEL org.opencontainers.image.description="ML Claw runtime for OpenClaw on Hugging Face"
@@ -14925,13 +14983,13 @@ CMD ["/app/entrypoint.sh"]
 `;
 }
 async function findPackagedSourceRoot() {
-  const start = path12.dirname(fileURLToPath2(import.meta.url));
+  const start = path13.dirname(fileURLToPath3(import.meta.url));
   let dir = start;
   while (true) {
     if (await hasPackagedSourceFiles(dir)) {
       return dir;
     }
-    const parent = path12.dirname(dir);
+    const parent = path13.dirname(dir);
     if (parent === dir) {
       throw new Error("Could not find packaged ML Claw source files. Reinstall the mlclaw npm package.");
     }
@@ -14948,20 +15006,20 @@ async function hasPackagedSourceFiles(dir) {
     "src/hf-bucket-client/client.ts"
   ];
   try {
-    await Promise.all(required.map((file) => fs11.access(path12.join(dir, file))));
+    await Promise.all(required.map((file) => fs12.access(path13.join(dir, file))));
     return true;
   } catch {
     return false;
   }
 }
 async function copyExisting(from, to) {
-  const stat = await fs11.stat(from);
-  await fs11.mkdir(path12.dirname(to), { recursive: true });
+  const stat = await fs12.stat(from);
+  await fs12.mkdir(path13.dirname(to), { recursive: true });
   if (stat.isDirectory()) {
-    await fs11.cp(from, to, { recursive: true });
+    await fs12.cp(from, to, { recursive: true });
   } else {
-    await fs11.copyFile(from, to);
-    await fs11.chmod(to, stat.mode);
+    await fs12.copyFile(from, to);
+    await fs12.chmod(to, stat.mode);
   }
 }
 async function readFilesForCommit(root) {
@@ -14969,24 +15027,24 @@ async function readFilesForCommit(root) {
   for (const relativePath of await listFiles(root)) {
     files.push({
       path: relativePath,
-      content: await fs11.readFile(path12.join(root, relativePath))
+      content: await fs12.readFile(path13.join(root, relativePath))
     });
   }
   return files;
 }
 async function listFiles(root, dir = "") {
-  const absoluteDir = path12.join(root, dir);
-  const entries = await fs11.readdir(absoluteDir, { withFileTypes: true });
+  const absoluteDir = path13.join(root, dir);
+  const entries = await fs12.readdir(absoluteDir, { withFileTypes: true });
   const files = [];
   for (const entry of entries) {
-    const relativePath = path12.posix.join(dir.split(path12.sep).join(path12.posix.sep), entry.name);
-    const absolutePath = path12.join(root, relativePath);
+    const relativePath = path13.posix.join(dir.split(path13.sep).join(path13.posix.sep), entry.name);
+    const absolutePath = path13.join(root, relativePath);
     if (entry.isDirectory()) {
       files.push(...await listFiles(root, relativePath));
     } else if (entry.isFile()) {
       files.push(relativePath);
     } else {
-      const stat = await fs11.stat(absolutePath);
+      const stat = await fs12.stat(absolutePath);
       if (stat.isFile()) {
         files.push(relativePath);
       }
@@ -15053,9 +15111,9 @@ async function assertNoLiveForeignLease(params) {
 }
 
 // src/mlclaw/local-config.ts
-import fs12 from "node:fs/promises";
+import fs13 from "node:fs/promises";
 import os5 from "node:os";
-import path13 from "node:path";
+import path14 from "node:path";
 function defaultConfigRoot(env = process.env) {
   const explicit = env.MLCLAW_CONFIG_HOME?.trim();
   if (explicit) {
@@ -15063,32 +15121,32 @@ function defaultConfigRoot(env = process.env) {
   }
   const xdg = env.XDG_CONFIG_HOME?.trim();
   if (xdg) {
-    return path13.join(xdg, "mlclaw");
+    return path14.join(xdg, "mlclaw");
   }
-  return path13.join(os5.homedir(), ".config", "mlclaw");
+  return path14.join(os5.homedir(), ".config", "mlclaw");
 }
 function localConfigPaths(root) {
   return {
     root,
-    deploymentsDir: path13.join(root, "deployments"),
-    secretsDir: path13.join(root, "secrets")
+    deploymentsDir: path14.join(root, "deployments"),
+    secretsDir: path14.join(root, "secrets")
   };
 }
 function manifestPath(root, agent) {
-  return path13.join(localConfigPaths(root).deploymentsDir, `${agent}.json`);
+  return path14.join(localConfigPaths(root).deploymentsDir, `${agent}.json`);
 }
 function secretEnvPath(root, agent) {
-  return path13.join(localConfigPaths(root).secretsDir, `${agent}.env`);
+  return path14.join(localConfigPaths(root).secretsDir, `${agent}.env`);
 }
 async function writeManifest(root, manifest) {
   const file = manifestPath(root, manifest.agent);
-  await fs12.mkdir(path13.dirname(file), { recursive: true });
-  await fs12.writeFile(file, `${JSON.stringify(manifest, null, 2)}
+  await fs13.mkdir(path14.dirname(file), { recursive: true });
+  await fs13.writeFile(file, `${JSON.stringify(manifest, null, 2)}
 `, "utf8");
 }
 async function readManifest(root, agent) {
   const file = manifestPath(root, agent);
-  const parsed = JSON.parse(await fs12.readFile(file, "utf8"));
+  const parsed = JSON.parse(await fs13.readFile(file, "utf8"));
   if (parsed.version !== 1) {
     throw new Error(`unsupported deployment manifest version in ${file}`);
   }
@@ -15096,7 +15154,7 @@ async function readManifest(root, agent) {
 }
 async function manifestExists(root, agent) {
   try {
-    await fs12.access(manifestPath(root, agent));
+    await fs13.access(manifestPath(root, agent));
     return true;
   } catch {
     return false;
@@ -15108,12 +15166,12 @@ function renderSecretEnv(values) {
 }
 async function writeSecretEnv(root, agent, values) {
   const file = secretEnvPath(root, agent);
-  await fs12.mkdir(path13.dirname(file), { recursive: true, mode: 448 });
-  await fs12.writeFile(file, renderSecretEnv(values), { encoding: "utf8", mode: 384 });
-  await fs12.chmod(file, 384);
+  await fs13.mkdir(path14.dirname(file), { recursive: true, mode: 448 });
+  await fs13.writeFile(file, renderSecretEnv(values), { encoding: "utf8", mode: 384 });
+  await fs13.chmod(file, 384);
 }
 async function readSecretEnv(root, agent) {
-  return parseSecretEnv(await fs12.readFile(secretEnvPath(root, agent), "utf8"));
+  return parseSecretEnv(await fs13.readFile(secretEnvPath(root, agent), "utf8"));
 }
 function parseSecretEnv(raw) {
   const out = {};
@@ -15153,46 +15211,6 @@ function namesFor(owner, agentName) {
     space: `${owner}/${agentName}`,
     bucket: `${owner}/${agentName}-data`
   };
-}
-
-// src/mlclaw/runtime-image.ts
-import fs13 from "node:fs";
-import path14 from "node:path";
-import { fileURLToPath as fileURLToPath3 } from "node:url";
-var RUNTIME_IMAGE_REPOSITORY = "ghcr.io/osolmaz/mlclaw-runtime";
-var DEFAULT_RUNTIME_IMAGE = `${RUNTIME_IMAGE_REPOSITORY}:${readPackageVersion()}`;
-function resolveRuntimeImage(value, env = process.env) {
-  return value?.trim() || env.MLCLAW_RUNTIME_IMAGE?.trim() || DEFAULT_RUNTIME_IMAGE;
-}
-function resolveRuntimeImageOverride(value, env = process.env) {
-  return value?.trim() || env.MLCLAW_RUNTIME_IMAGE?.trim() || void 0;
-}
-function bundledSpaceRuntimeRef(templateRev) {
-  return `bundled:${templateRev}`;
-}
-function readPackageVersion() {
-  let dir = path14.dirname(fileURLToPath3(import.meta.url));
-  while (true) {
-    const candidate = path14.join(dir, "package.json");
-    try {
-      const parsed = JSON.parse(fs13.readFileSync(candidate, "utf8"));
-      if (typeof parsed.version === "string" && parsed.version.trim()) {
-        return parsed.version.trim();
-      }
-    } catch (err) {
-      if (!isMissingFileError(err)) {
-        throw err;
-      }
-    }
-    const parent = path14.dirname(dir);
-    if (parent === dir) {
-      throw new Error("could not find package.json while resolving default runtime image");
-    }
-    dir = parent;
-  }
-}
-function isMissingFileError(err) {
-  return err instanceof Error && "code" in err && err.code === "ENOENT";
 }
 
 // src/mlclaw/telegram.ts
@@ -15277,10 +15295,10 @@ function createProgram(runtimeOverrides = {}) {
   program2.name("mlclaw").description("Deploy OpenClaw to a Hugging Face Space and private bucket").showHelpAfterError().exitOverride((err) => {
     throw err;
   });
-  program2.command("bootstrap", { isDefault: true }).description("Create or update a Hugging Face OpenClaw deployment").option("--owner <owner>", "Hugging Face user or organization").option("--name <name>", "Agent and runtime resource base name").option("--bucket <owner/bucket>", "State bucket to create or adopt").option("--gateway <local|space>", "Where the live gateway runs").option("--telegram-token <token>", "Optional Telegram bot token").option("--telegram-token-file <path>", "File containing TELEGRAM_BOT_TOKEN=... or a raw token").option("--telegram-user-id <id>", "Allowed Telegram user ID").option("--telegram-api-root <url>", "Telegram API root override").option("--telegram-proxy <url>", "Telegram proxy URL override").option("--hardware <flavor>", "Hugging Face Space hardware flavor").option("--sleep-time <seconds>", "Space sleep timeout in seconds; -1 means never sleep", parseInteger).option("--model <model>", "OpenClaw model identifier", DEFAULT_MODEL).option("--runtime-image <image>", "ML Claw runtime image").option("--public-space", "Create the Hugging Face Space as public instead of private", false).addOption(new Option("--gateway-token <token>").hideHelp()).option("--docker-context <name>", "Docker context for local gateway mode").option("--no-pull", "Do not docker pull before starting a local gateway").option("--takeover", "Start even if a stale runtime lease is present", false).option("--yes", "Confirm paid hardware prompts for automation", false).action(async (opts) => {
+  program2.command("bootstrap", { isDefault: true }).description("Create or update a Hugging Face OpenClaw deployment").option("--owner <owner>", "Hugging Face user or organization").option("--name <name>", "Agent and runtime resource base name").option("--bucket <owner/bucket>", "State bucket to create or adopt").option("--gateway <local|space>", "Where the live gateway runs").option("--telegram-token <token>", "Optional Telegram bot token").option("--telegram-token-file <path>", "File containing TELEGRAM_BOT_TOKEN=... or a raw token").option("--telegram-user-id <id>", "Allowed Telegram user ID").option("--telegram-api-root <url>", "Telegram API root override").option("--telegram-proxy <url>", "Telegram proxy URL override").option("--hardware <flavor>", "Hugging Face Space hardware flavor").option("--sleep-time <seconds>", "Space sleep timeout in seconds; -1 means never sleep", parseInteger).option("--model <model>", "OpenClaw model identifier", DEFAULT_MODEL).option("--runtime-image <image>", "ML Claw runtime image").option("--bundled-runtime", "Generate a bundled Space runtime instead of using the prebuilt ML Claw image", false).option("--public-space", "Create the Hugging Face Space as public instead of private", false).addOption(new Option("--gateway-token <token>").hideHelp()).option("--docker-context <name>", "Docker context for local gateway mode").option("--no-pull", "Do not docker pull before starting a local gateway").option("--takeover", "Start even if a stale runtime lease is present", false).option("--yes", "Confirm paid hardware prompts for automation", false).action(async (opts) => {
     await bootstrap(opts, runtime);
   });
-  program2.command("update").description("Regenerate and upload current ML Claw Space files").argument("<owner/space>", "Hugging Face Space repo ID").option("--runtime-image <image>", "Runtime image to write into the generated Space Dockerfile").option("--force", "Update even if the Space does not look like ML Claw", false).action(async (repoId, opts) => {
+  program2.command("update").description("Regenerate and upload current ML Claw Space files").argument("<owner/space>", "Hugging Face Space repo ID").option("--runtime-image <image>", "Runtime image to write into the generated Space Dockerfile").option("--bundled-runtime", "Generate a bundled Space runtime instead of using the prebuilt ML Claw image", false).option("--force", "Update even if the Space does not look like ML Claw", false).action(async (repoId, opts) => {
     const token = await runtime.readToken(runtime.env);
     const hub = runtime.hubFactory(token);
     await update(repoId, opts, hub, token, runtime);
@@ -15312,7 +15330,7 @@ function createProgram(runtimeOverrides = {}) {
   gateway.command("logs").argument("<agent>", "Agent name").option("--tail <lines>", "Number of log lines", parseInteger, 200).action(async (agent, opts) => {
     await gatewayLogs(agent, opts, runtime);
   });
-  gateway.command("migrate").argument("<agent>", "Agent name").requiredOption("--to <local|space>", "Target gateway location").option("--hardware <flavor>", "Hugging Face Space hardware flavor").option("--sleep-time <seconds>", "Space sleep timeout in seconds; -1 means never sleep", parseInteger).option("--runtime-image <image>", "ML Claw runtime image").option("--public-space", "Create the Hugging Face Space as public instead of private", false).option("--docker-context <name>", "Docker context for local gateway startup when migrating to local").option("--no-pull", "Do not docker pull before starting a local gateway").option("--takeover", "Start even if another live runtime lease is present", false).option("--yes", "Confirm paid hardware prompts for automation", false).action(async (agent, opts) => {
+  gateway.command("migrate").argument("<agent>", "Agent name").requiredOption("--to <local|space>", "Target gateway location").option("--hardware <flavor>", "Hugging Face Space hardware flavor").option("--sleep-time <seconds>", "Space sleep timeout in seconds; -1 means never sleep", parseInteger).option("--runtime-image <image>", "ML Claw runtime image").option("--bundled-runtime", "Generate a bundled Space runtime instead of using the prebuilt ML Claw image", false).option("--public-space", "Create the Hugging Face Space as public instead of private", false).option("--docker-context <name>", "Docker context for local gateway startup when migrating to local").option("--no-pull", "Do not docker pull before starting a local gateway").option("--takeover", "Start even if another live runtime lease is present", false).option("--yes", "Confirm paid hardware prompts for automation", false).action(async (agent, opts) => {
     await gatewayMigrate(agent, opts, runtime);
   });
   gateway.command("rebind").argument("<agent>", "Agent name").requiredOption("--docker-context <name>", "Target Docker context").option("--no-pull", "Do not docker pull before starting the rebound local gateway").option("--takeover", "Rebind even if the old Docker context is unavailable", false).action(async (agent, opts) => {
@@ -15351,7 +15369,7 @@ async function bootstrap(opts, runtime) {
   const telegramUserId = telegramToken ? opts.telegramUserId ?? runtime.env.TELEGRAM_ALLOWED_USERS ?? await promptRequired("Telegram allowed user ID", runtime) : void 0;
   const model = opts.model ?? DEFAULT_MODEL;
   const runtimeImage = resolveRuntimeImage(opts.runtimeImage, runtime.env);
-  const templateRuntimeImage = resolveRuntimeImageOverride(opts.runtimeImage, runtime.env);
+  const templateRuntimeImage = resolveSpaceRuntimeImage(opts, runtime.env);
   let plan;
   for (; ; ) {
     plan = await resolveBootstrapPlan({
@@ -15800,7 +15818,7 @@ async function deploySpaceGateway(params) {
     ...typeof params.sleepTime === "number" ? { sleepTimeSeconds: params.sleepTime } : {}
   });
   await hub.requestSpaceHardware(manifest.space, params.hardware, params.sleepTime);
-  runtime.stdout.log(params.templateRuntimeImage ? "Generating Space files from explicit runtime image" : "Generating bundled Space runtime files");
+  runtime.stdout.log(params.templateRuntimeImage ? "Generating Space files from prebuilt runtime image" : "Generating bundled Space runtime files");
   const { templateRev } = await runtime.pushTemplateToSpace({
     targetRepo: manifest.space,
     token: hfToken,
@@ -16001,7 +16019,7 @@ async function gatewayMigrate(agent, opts, runtime) {
     });
     await handoffAndStopLocalGateway({ manifest: current, hub, runtime, bucketPrefix });
     const me2 = await hub.whoami();
-    const templateRuntimeImage = resolveRuntimeImageOverride(opts.runtimeImage, runtime.env);
+    const templateRuntimeImage = resolveSpaceRuntimeImage(opts, runtime.env);
     await deploySpaceGateway({
       hub,
       runtime,
@@ -16354,7 +16372,7 @@ async function update(repoId, opts, hub, hfToken, runtime) {
   if (!canonicalTemplate && !variables.has("MLCLAW_TEMPLATE_REV") && !variables.has("OPENCLAW_HF_TEMPLATE_REV") && !opts.force) {
     throw new Error(`${repoId} does not look like a ML Claw deployment; pass --force to update anyway`);
   }
-  const runtimeImage = resolveRuntimeImageOverride(opts.runtimeImage, runtime.env);
+  const runtimeImage = resolveSpaceRuntimeImage(opts, runtime.env);
   const agentName = variables.get("OPENCLAW_AGENT_NAME")?.value?.trim() || repoId.split("/")[1] || "openclaw";
   runtime.stdout.log(`Generating current Space files into ${repoId}`);
   const { templateRev } = await runtime.pushTemplateToSpace({
@@ -16401,9 +16419,7 @@ async function doctor(repoId, opts, hub, runtime) {
     if (!variables.has("MLCLAW_TEMPLATE_REV") && !variables.has("OPENCLAW_HF_TEMPLATE_REV")) {
       issues.push("MLCLAW_TEMPLATE_REV is missing; run `mlclaw update` to refresh the template Space");
     }
-    if (!variables.has("MLCLAW_RUNTIME_IMAGE")) {
-      issues.push("MLCLAW_RUNTIME_IMAGE is missing; run `mlclaw update` to refresh the template Space");
-    }
+    addRuntimeImageFindings(variables.get("MLCLAW_RUNTIME_IMAGE")?.value, issues);
     const runtimeInfo2 = await hub.getSpaceRuntime(repoId);
     runtime.stdout.log(`Space: ${repoId}`);
     runtime.stdout.log("Mode: template");
@@ -16464,9 +16480,7 @@ async function doctor(repoId, opts, hub, runtime) {
   if ((variables.get("MLCLAW_GATEWAY_LOCATION")?.value ?? "") !== "space") {
     issues.push("MLCLAW_GATEWAY_LOCATION is not set to space");
   }
-  if (!variables.has("MLCLAW_RUNTIME_IMAGE")) {
-    issues.push("MLCLAW_RUNTIME_IMAGE is missing");
-  }
+  addRuntimeImageFindings(variables.get("MLCLAW_RUNTIME_IMAGE")?.value, issues);
   if ((variables.get("MLCLAW_OPENCLAW_PORT")?.value ?? "") !== String(DEFAULT_SPACE_OPENCLAW_PORT) && fix) {
     await hub.addSpaceVariable(repoId, "MLCLAW_OPENCLAW_PORT", String(DEFAULT_SPACE_OPENCLAW_PORT));
     fixed.push("set MLCLAW_OPENCLAW_PORT");
@@ -16536,6 +16550,20 @@ function canonicalTemplateSpaceId(env) {
 }
 function isCanonicalTemplateSpace(repoId, env) {
   return repoId === canonicalTemplateSpaceId(env);
+}
+function addRuntimeImageFindings(value, issues) {
+  const runtimeImage = value?.trim();
+  if (!runtimeImage) {
+    issues.push("MLCLAW_RUNTIME_IMAGE is missing; run `mlclaw update` to refresh the Space runtime");
+    return;
+  }
+  if (runtimeImage.startsWith("ghcr.io/osolmaz/mlclaw-runtime:")) {
+    issues.push(`MLCLAW_RUNTIME_IMAGE points at the legacy mlclaw-runtime package; run \`mlclaw update\` to use ${DEFAULT_RUNTIME_IMAGE}`);
+    return;
+  }
+  if (runtimeImage.startsWith("bundled:")) {
+    issues.push(`MLCLAW_RUNTIME_IMAGE uses a bundled runtime; run \`mlclaw update\` to use ${DEFAULT_RUNTIME_IMAGE}`);
+  }
 }
 async function settings(repoId, opts, hub, runtime) {
   if (opts.gateway) {

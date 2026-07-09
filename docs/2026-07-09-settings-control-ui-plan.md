@@ -404,7 +404,7 @@ Build/package tests:
 
 - Vite control UI build is included in generated Space files;
 - package check includes the built assets needed by `mlclaw update`;
-- generated Space still starts from the bundled runtime.
+- generated Space starts from the prebuilt `ghcr.io/osolmaz/mlclaw` runtime image.
 
 Live test:
 

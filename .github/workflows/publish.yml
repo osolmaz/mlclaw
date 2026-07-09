@@ -51,11 +51,16 @@ jobs:
           node-version: "24"
           cache: npm
           registry-url: "https://registry.npmjs.org"
-      - id: package-version
+      - id: runtime-config
         shell: bash
         run: |
           version="$(node -p 'require("./package.json").version')"
+          openclaw_version="$(node -p 'require("./package.json").config.openclawVersion')"
+          runtime_image="$(node -p 'require("./package.json").config.runtimeImageRepository')"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "openclaw_version=${openclaw_version}" >> "$GITHUB_OUTPUT"
+          echo "runtime_image=${runtime_image}" >> "$GITHUB_OUTPUT"
+          echo "runtime_tag=${version}-openclaw-${openclaw_version}" >> "$GITHUB_OUTPUT"
       - run: npm ci
       - run: npm run build
       - run: npm run typecheck
@@ -80,16 +85,37 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up QEMU
+        if: ${{ github.event_name == 'release' || inputs.publish_image == 'true' }}
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        if: ${{ github.event_name == 'release' || inputs.publish_image == 'true' }}
+        uses: docker/setup-buildx-action@v3
       - name: Build and publish runtime image
         if: ${{ github.event_name == 'release' || inputs.publish_image == 'true' }}
         uses: docker/build-push-action@v6
         with:
           context: .
+          platforms: linux/amd64,linux/arm64
           push: true
+          build-args: |
+            OPENCLAW_VERSION=${{ steps.runtime-config.outputs.openclaw_version }}
+            OPENCLAW_BASE_IMAGE=ghcr.io/openclaw/openclaw:${{ steps.runtime-config.outputs.openclaw_version }}
+            MLCLAW_RUNTIME_IMAGE=${{ steps.runtime-config.outputs.runtime_image }}:${{ steps.runtime-config.outputs.runtime_tag }}
           tags: |
-            ghcr.io/${{ github.repository_owner }}/mlclaw-runtime:latest
-            ghcr.io/${{ github.repository_owner }}/mlclaw-runtime:${{ steps.package-version.outputs.version }}
-            ghcr.io/${{ github.repository_owner }}/mlclaw-runtime:v${{ steps.package-version.outputs.version }}
+            ${{ steps.runtime-config.outputs.runtime_image }}:${{ steps.runtime-config.outputs.runtime_tag }}
+            ${{ steps.runtime-config.outputs.runtime_image }}:openclaw-${{ steps.runtime-config.outputs.openclaw_version }}
+            ${{ steps.runtime-config.outputs.runtime_image }}:sha-${{ github.sha }}
+            ${{ steps.runtime-config.outputs.runtime_image }}:latest
+      - name: Warn if GHCR image is not public
+        if: ${{ github.event_name == 'release' || inputs.publish_image == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+        run: |
+          gh api --method PATCH /user/packages/container/mlclaw/visibility -f visibility=public || {
+            echo "::warning::Could not make ghcr.io/osolmaz/mlclaw public automatically. Hugging Face Spaces need the image package to be public."
+          }
       - name: Update canonical Hugging Face template Space
         if: ${{ github.event_name == 'release' || inputs.update_template_space == 'true' }}
         env:
