@@ -86,8 +86,6 @@ describe("Hugging Face tooling baseline", () => {
     expect(agentsMd).toContain("`hf-cli`");
     expect(agentsMd).toContain("`.agents/skills`");
     expect(agentsMd).toContain("`skills`");
-    expect(agentsMd).toContain("Direct browser/webchat messages from the user always need a visible text reply.");
-    expect(agentsMd).toContain("Do not answer `NO_REPLY` to direct browser/webchat user messages");
 
     const rawManifest = await fs.readFile(path.join(workspaceDir, ".agents/.mlclaw-hf-tooling.json"), "utf8");
     expect(rawManifest).toContain("\"installedAt\": \"2026-07-09T00:00:00.000Z\"");
@@ -136,7 +134,6 @@ describe("Hugging Face tooling baseline", () => {
     const agentsMd = await fs.readFile(path.join(workspaceDir, "AGENTS.md"), "utf8");
     expect(agentsMd).toContain("Keep this user instruction.");
     expect(agentsMd).toContain("ML Claw Hugging Face Tooling");
-    expect(agentsMd).toContain("ML Claw Browser Chat");
     expect(agentsMd).toContain("`huggingface-datasets`");
     expect(agentsMd).not.toContain("old block");
   });

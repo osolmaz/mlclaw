@@ -148,13 +148,6 @@ Hugging Face agent skills are available in both \`.agents/skills\` and
 ${skills}
 
 The pinned tooling manifest is \`.agents/.mlclaw-hf-tooling.json\`.
-
-## ML Claw Browser Chat
-
-Direct browser/webchat messages from the user always need a visible text reply.
-Do not answer \`NO_REPLY\` to direct browser/webchat user messages, including
-short tests like "test", "hi", or "who are you". Reserve \`NO_REPLY\` only for
-background checks where there is genuinely no user-facing message to send.
 ${MLCLAW_CONTEXT_END}
 `;
 }
