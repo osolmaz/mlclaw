@@ -14877,7 +14877,7 @@ function imageDockerfile(runtimeImage) {
 `;
 }
 function bundledDockerfile() {
-  return `FROM ghcr.io/openclaw/openclaw:latest
+  return `FROM ghcr.io/openclaw/openclaw:2026.7.1-beta.2
 
 LABEL org.opencontainers.image.source="https://github.com/osolmaz/mlclaw"
 LABEL org.opencontainers.image.description="ML Claw runtime for OpenClaw on Hugging Face"

@@ -5,7 +5,7 @@ COPY package.json package-lock.json tsconfig.json vite.control-ui.config.ts ./
 COPY src ./src
 RUN npm ci --no-audit --no-fund && npm run build
 
-FROM ghcr.io/openclaw/openclaw:latest
+FROM ghcr.io/openclaw/openclaw:2026.7.1-beta.2
 
 LABEL org.opencontainers.image.source="https://github.com/osolmaz/mlclaw"
 LABEL org.opencontainers.image.description="ML Claw runtime for OpenClaw on Hugging Face"

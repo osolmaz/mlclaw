@@ -94,7 +94,7 @@ describe("generated Space repository", () => {
     expect(files).not.toContain("scripts/parity-probe.ts");
 
     const dockerfile = await fs.readFile(path.join(outDir, "Dockerfile"), "utf8");
-    expect(dockerfile).toContain("FROM ghcr.io/openclaw/openclaw:latest");
+    expect(dockerfile).toContain("FROM ghcr.io/openclaw/openclaw:2026.7.1-beta.2");
     expect(dockerfile).toContain("COPY --chown=node:node runtime/hf-state-sync.js /app/hf-state-sync.js");
     expect(dockerfile).toContain("COPY --chown=node:node runtime/hf-tooling-seed.js /app/hf-tooling-seed.js");
     expect(dockerfile).toContain("\"hf-discover==1.3.7\"");
