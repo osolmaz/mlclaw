@@ -110,6 +110,29 @@ describe("snapshot/restore round-trip", () => {
     );
   });
 
+  it("fails closed when the configured mounted bucket root is missing", async () => {
+    const mountDir = path.join(dir, "missing-mounted-bucket");
+    const hub = createMountedBucketHub({ mountDir });
+    const live = path.join(dir, "live-missing-mount");
+    await writeState(live, "missing-mount");
+
+    const snap = await runSnapshot({
+      config: configFor(live, { stateMountDir: mountDir }),
+      hub,
+      bootTime: BOOT,
+    });
+
+    expect(snap.kind).toBe("failed");
+    if (snap.kind === "failed") {
+      expect(snap.detail).toContain("mounted bucket root is missing");
+    }
+    await expect(fs.access(mountDir)).rejects.toThrow();
+    await expect(runRestore({
+      config: configFor(path.join(dir, "restore-missing-mount"), { stateMountDir: mountDir }),
+      hub,
+    })).rejects.toThrow("mounted bucket root is missing");
+  });
+
   it("restores into a live dir child under an existing mounted volume root", async () => {
     const hub = createFakeHub();
     const source = path.join(dir, "source");

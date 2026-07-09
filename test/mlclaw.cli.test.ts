@@ -208,7 +208,7 @@ async function createRuntime(hub: HubApi, prompt: ReturnType<typeof createPrompt
   const docker = createFakeDocker();
   const configRoot = await fs.mkdtemp(path.join(os.tmpdir(), "mlclaw-cli-test-"));
   return {
-    env: {},
+    env: { MLCLAW_ROUTER_TOKEN: "hf_router_test" },
     stdout: { log: () => undefined },
     stderr: { error: (message: unknown) => stderr.push(String(message)) },
     readToken: async () => "hf_test_token",
@@ -854,9 +854,31 @@ describe("mlclaw CLI", () => {
     expect(hub.calls.some((call) =>
       call.name === "addSpaceSecret" && ["HF_TOKEN", "HUGGINGFACE_HUB_TOKEN"].includes(String(call.args[1]))
     )).toBe(false);
+    expect(hub.calls).toContainEqual({ name: "addSpaceSecret", args: ["alice/research", "MLCLAW_ROUTER_TOKEN", "hf_router_test"] });
     expect(hub.calls).toContainEqual({ name: "deleteSpaceSecret", args: ["alice/research", "HF_TOKEN"] });
     expect(hub.calls).toContainEqual({ name: "deleteSpaceSecret", args: ["alice/research", "HUGGINGFACE_HUB_TOKEN"] });
     expect(hub.calls.some((call) => call.name === "addSpaceSecret" && call.args[1] === "TELEGRAM_BOT_TOKEN")).toBe(false);
+  });
+
+  it("requires a Router token for non-interactive Space bootstrap with Hugging Face Router models", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([], false);
+    const stderr: string[] = [];
+    const runtime = {
+      ...await createRuntime(hub, prompt, stderr),
+      env: {},
+    };
+
+    const code = await main([
+      "bootstrap",
+      "--name",
+      "research",
+      "--yes",
+    ], runtime);
+
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain("set MLCLAW_ROUTER_TOKEN or pass --router-token-file");
+    expect(hub.calls.some((call) => call.name === "createDockerSpace")).toBe(false);
   });
 
   it("shows existing bucket and Space actions before bootstrap updates resources", async () => {

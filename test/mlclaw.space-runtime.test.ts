@@ -5,10 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createSignedCookie } from "../src/mlclaw-space-runtime/cookies.js";
+import { createCsrfToken } from "../src/mlclaw-space-runtime/csrf.js";
 import { resolveBranding } from "../src/mlclaw-space-runtime/branding.js";
 import { loadConfig, type SpaceRuntimeConfig } from "../src/mlclaw-space-runtime/config.js";
 import { PRESET_MODEL_CHOICES } from "../src/mlclaw-space-runtime/model-choices.js";
 import { configureOpenClawGateway } from "../src/mlclaw-space-runtime/openclaw-config.js";
+import { createSpaceRuntimeApp } from "../src/mlclaw-space-runtime/app.js";
 import { SpaceRuntimeServer } from "../src/mlclaw-space-runtime/server.js";
 
 const cleanups: Array<() => Promise<void> | void> = [];
@@ -788,6 +790,73 @@ describe("ML Claw Space runtime", () => {
     }
   });
 
+  it("passes only the Router token to the OpenClaw child when broad Hub tokens are present", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "mlclaw-router-token-"));
+    cleanups.push(() => fs.rm(root, { recursive: true, force: true }));
+    const envFile = path.join(root, "env.json");
+    const previousHfToken = process.env.HF_TOKEN;
+    const previousHubToken = process.env.HUGGINGFACE_HUB_TOKEN;
+    process.env.HF_TOKEN = "hf_broad";
+    process.env.HUGGINGFACE_HUB_TOKEN = "hf_broad";
+    cleanups.push(() => {
+      if (previousHfToken === undefined) {
+        delete process.env.HF_TOKEN;
+      } else {
+        process.env.HF_TOKEN = previousHfToken;
+      }
+      if (previousHubToken === undefined) {
+        delete process.env.HUGGINGFACE_HUB_TOKEN;
+      } else {
+        process.env.HUGGINGFACE_HUB_TOKEN = previousHubToken;
+      }
+    });
+    const config = await testConfig({
+      routerToken: "hf_router",
+      openclawArgs: [
+        "-e",
+        `require("fs").writeFileSync(${JSON.stringify(envFile)},JSON.stringify({HF_TOKEN:process.env.HF_TOKEN,HUGGINGFACE_HUB_TOKEN:process.env.HUGGINGFACE_HUB_TOKEN}));setInterval(()=>undefined,100000)`,
+      ],
+    });
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(() => closeServer(server), () => runtime.stop());
+
+    await waitFor(async () => fileExists(envFile));
+    const env = JSON.parse(await fs.readFile(envFile, "utf8")) as Record<string, string>;
+    expect(env).toEqual({
+      HF_TOKEN: "hf_router",
+      HUGGINGFACE_HUB_TOKEN: "hf_router",
+    });
+  });
+
+  it("restarts only the OpenClaw child when runtime restart has no Hub token", async () => {
+    const config = await testConfig({ hfToken: undefined });
+    let restartCount = 0;
+    const app = createSpaceRuntimeApp(config, {
+      openclawRunning: () => true,
+      openAiConfigured: async () => false,
+      restartOpenClawWithOpenAi: async () => undefined,
+      restartOpenClaw: async () => {
+        restartCount += 1;
+      },
+      setModelSettings: () => undefined,
+    });
+    const cookie = sessionCookie(config, "alice");
+    const csrf = createCsrfToken({ username: "alice", sessionSecret: config.sessionSecret });
+
+    const response = await app.fetch(new Request(`${config.publicUrl}/mlclaw/api/runtime/restart`, {
+      method: "POST",
+      headers: {
+        cookie,
+        "x-mlclaw-csrf": csrf,
+      },
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, restartPending: false });
+    expect(restartCount).toBe(1);
+  });
+
   it("configures OpenClaw as a loopback trusted-proxy browser gateway", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "mlclaw-openclaw-config-"));
     cleanups.push(() => fs.rm(root, { recursive: true, force: true }));
@@ -995,6 +1064,7 @@ async function testConfig(overrides: Partial<SpaceRuntimeConfig> = {}): Promise<
     allowAnySignedIn: false,
     mode: "app",
     hfToken: undefined,
+    routerToken: undefined,
     hubUrl: "https://huggingface.co",
     openaiCredentialFile: path.join(root, "secrets", "openai.env"),
     runtimeSettingsFile: path.join(root, ".mlclaw", "settings.json"),
@@ -1024,6 +1094,15 @@ async function readPidFile(file: string): Promise<number | undefined> {
     return Number.isFinite(pid) ? pid : undefined;
   } catch {
     return undefined;
+  }
+}
+
+async function fileExists(file: string): Promise<boolean> {
+  try {
+    await fs.access(file);
+    return true;
+  } catch {
+    return false;
   }
 }
 

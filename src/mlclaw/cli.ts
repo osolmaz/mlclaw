@@ -26,6 +26,7 @@ import { normalizeBucketPrefix } from "../hf-state-sync/paths.js";
 import {
   defaultConfigRoot,
   manifestExists,
+  parseSecretEnv,
   readManifest,
   readSecretEnv,
   secretEnvPath,
@@ -75,6 +76,8 @@ type BootstrapOptions = {
   bundledRuntime?: boolean;
   publicSpace?: boolean;
   gatewayToken?: string;
+  routerToken?: string;
+  routerTokenFile?: string;
   dockerContext?: string;
   pull?: boolean;
   takeover?: boolean;
@@ -237,6 +240,8 @@ export function createProgram(runtimeOverrides: CliRuntime = {}): Command {
     .option("--bundled-runtime", "Generate a bundled Space runtime instead of using the prebuilt ML Claw image", false)
     .option("--public-space", "Create the Hugging Face Space as public instead of private", false)
     .addOption(new Option("--gateway-token <token>").hideHelp())
+    .option("--router-token <token>", "Hugging Face Router inference token for Space gateway model calls")
+    .option("--router-token-file <path>", "File containing MLCLAW_ROUTER_TOKEN=..., HF_ROUTER_TOKEN=..., or a raw token")
     .option("--docker-context <name>", "Docker context for local gateway mode")
     .option("--no-pull", "Do not docker pull before starting a local gateway")
     .option("--takeover", "Start even if a stale runtime lease is present", false)
@@ -577,6 +582,12 @@ async function resolveBootstrapPlan(params: {
     hub,
   });
   const bucket = bucketPlan.bucket;
+  const routerToken = await resolveRouterToken({
+    opts,
+    runtime,
+    gatewayLocation,
+    model,
+  });
   const spacePlan = gatewayLocation === "space"
     ? {
       space: names.space,
@@ -613,6 +624,7 @@ async function resolveBootstrapPlan(params: {
     ...(bucketPrefix ? { bucketPrefix } : {}),
     ...(opts.telegramProxy ? { telegramProxy: opts.telegramProxy } : {}),
     ...(opts.telegramApiRoot ? { telegramApiRoot: opts.telegramApiRoot } : {}),
+    ...(routerToken ? { routerToken } : {}),
   });
   return {
     agentName,
@@ -930,6 +942,7 @@ function parseBucketId(raw: string): string {
 
 function deploymentSecrets(params: {
   hfToken: string;
+  routerToken?: string;
   telegramToken?: string;
   telegramUserId?: string;
   sessionSecret: string;
@@ -946,6 +959,7 @@ function deploymentSecrets(params: {
   return {
     HF_TOKEN: params.hfToken,
     HUGGINGFACE_HUB_TOKEN: params.hfToken,
+    ...(params.routerToken ? { MLCLAW_ROUTER_TOKEN: params.routerToken } : {}),
     OPENCLAW_HF_STATE_BUCKET: params.bucket,
     OPENCLAW_MODEL: params.model,
     OPENCLAW_AGENT_NAME: params.agentName,
@@ -1027,6 +1041,7 @@ async function deploySpaceGateway(params: {
   await clearSpaceGatewayDisabled(hub, manifest.space);
   await setDeploymentSecrets(hub, manifest.space, {
     MLCLAW_SESSION_SECRET: requiredSecret(secrets, "MLCLAW_SESSION_SECRET"),
+    ...(secrets.MLCLAW_ROUTER_TOKEN ? { MLCLAW_ROUTER_TOKEN: secrets.MLCLAW_ROUTER_TOKEN } : {}),
     ...(secrets.TELEGRAM_BOT_TOKEN ? { TELEGRAM_BOT_TOKEN: secrets.TELEGRAM_BOT_TOKEN } : {}),
     ...(secrets.TELEGRAM_ALLOWED_USERS ? { TELEGRAM_ALLOWED_USERS: secrets.TELEGRAM_ALLOWED_USERS } : {}),
     ...(secrets.TELEGRAM_PROXY ? { TELEGRAM_PROXY: secrets.TELEGRAM_PROXY } : {}),
@@ -2024,6 +2039,52 @@ async function readOptionalTelegramToken(opts: BootstrapOptions, runtime: Requir
     return (match?.[1] ?? raw.trim()).trim();
   }
   return undefined;
+}
+
+async function resolveRouterToken(params: {
+  opts: BootstrapOptions;
+  runtime: Required<CliRuntime>;
+  gatewayLocation: GatewayLocation;
+  model: string;
+}): Promise<string | undefined> {
+  const direct = params.opts.routerToken ?? params.runtime.env.MLCLAW_ROUTER_TOKEN ?? params.runtime.env.HF_ROUTER_TOKEN;
+  const fromFile = direct ? undefined : await readOptionalRouterTokenFile(params.opts.routerTokenFile);
+  const existing = nonEmpty(direct) ?? fromFile;
+  if (existing) {
+    return existing;
+  }
+  if (params.gatewayLocation !== "space" || !isHuggingFaceRouterModel(params.model)) {
+    return undefined;
+  }
+  if (!params.runtime.prompt.isInteractive()) {
+    throw new Error("Space gateway model uses the Hugging Face Router; set MLCLAW_ROUTER_TOKEN or pass --router-token-file for inference.");
+  }
+  const value = await params.runtime.prompt.password({
+    message: "Hugging Face Router token",
+    placeholder: "hf_...",
+  });
+  if (isCancel(value)) {
+    params.runtime.prompt.cancel("Cancelled");
+    throw new Error("cancelled");
+  }
+  const token = typeof value === "string" ? nonEmpty(value) : undefined;
+  if (!token) {
+    throw new Error("Hugging Face Router token is required for Space gateway inference with huggingface/ models.");
+  }
+  return token;
+}
+
+async function readOptionalRouterTokenFile(file: string | undefined): Promise<string | undefined> {
+  if (!file) {
+    return undefined;
+  }
+  const raw = await fs.readFile(file, "utf8");
+  const parsed = parseSecretEnv(raw);
+  return nonEmpty(parsed.MLCLAW_ROUTER_TOKEN) ?? nonEmpty(parsed.HF_ROUTER_TOKEN) ?? nonEmpty(raw);
+}
+
+function isHuggingFaceRouterModel(model: string): boolean {
+  return model.trim().startsWith("huggingface/");
 }
 
 async function promptAgentName(runtime: Required<CliRuntime>): Promise<string> {

@@ -37,6 +37,12 @@ You need a Hugging Face account and a token available through `HF_TOKEN`,
 `HF_TOKEN_PATH`, `$HF_HOME/token`, or `hf auth login`. You never paste that
 token into someone else's app; the bootstrapper runs locally.
 
+For the default Hugging Face Router model in Space gateway mode, provide an
+inference token through `MLCLAW_ROUTER_TOKEN`, `HF_ROUTER_TOKEN`, or
+`--router-token-file`. That token is stored in the Space as
+`MLCLAW_ROUTER_TOKEN` for model calls. It is separate from the local token used
+to create buckets and Spaces.
+
 ## Default Flow
 
 ```bash
@@ -51,6 +57,8 @@ This creates:
 - Hugging Face OAuth metadata in the Space README;
 - Space variables, a bucket volume mount for state sync, and a write-only
   secret for session signing;
+- a separate `MLCLAW_ROUTER_TOKEN` Space secret when using Hugging Face Router
+  models;
 - a local deployment manifest under `~/.config/mlclaw`.
 
 Open the Space, sign in with your Hugging Face account, and use the OpenClaw
@@ -233,7 +241,8 @@ state stays on local container disk at
 That keeps SQLite off bucket-backed storage while preserving the agent's memory
 across Space rebuilds, local container replacement, and gateway migration. The
 Space does not need `HF_TOKEN` or `HUGGINGFACE_HUB_TOKEN` secrets for state
-sync.
+sync. Hugging Face Router inference uses the narrower `MLCLAW_ROUTER_TOKEN`
+secret instead.
 
 ## Costs
 

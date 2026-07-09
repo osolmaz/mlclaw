@@ -206,7 +206,11 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
     if (config.mode !== "app") {
       return c.json({ ok: false, error: "template mode cannot restart runtime" }, 403);
     }
-    return c.json({ ok: true, restartPending: await restartCurrentSpace(config) });
+    const restartPending = await restartCurrentSpace(config);
+    if (!restartPending) {
+      await controls.restartOpenClaw();
+    }
+    return c.json({ ok: true, restartPending });
   });
 
   app.get("/mlclaw", (c) => controlUi(c, config));

@@ -4816,6 +4816,21 @@ function createHfBucketHub(params) {
 }
 function createMountedBucketHub(params) {
   const root = path.resolve(params.mountDir);
+  const assertMountRoot = async () => {
+    let stat;
+    try {
+      stat = await fs.stat(root);
+    } catch (err) {
+      if (isNotFound(err)) {
+        throw new Error(`mounted bucket root is missing: ${root}`);
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(`mounted bucket root is not accessible: ${root}: ${message}`);
+    }
+    if (!stat.isDirectory()) {
+      throw new Error(`mounted bucket root is not a directory: ${root}`);
+    }
+  };
   const localPathFor = (remotePath2) => {
     const normalized = remotePath2.replace(/^\/+/, "");
     const resolved = path.resolve(root, normalized);
@@ -4826,6 +4841,7 @@ function createMountedBucketHub(params) {
   };
   return {
     async download(remotePath2, localPath) {
+      await assertMountRoot();
       const source = localPathFor(remotePath2);
       try {
         await fs.copyFile(source, localPath);
@@ -4839,6 +4855,7 @@ function createMountedBucketHub(params) {
       }
     },
     async upload(localPath, remotePath2) {
+      await assertMountRoot();
       const target = localPathFor(remotePath2);
       const dir = path.dirname(target);
       const tmp = path.join(dir, `.tmp-${path.basename(target)}-${process.pid}-${Date.now()}`);
@@ -4853,6 +4870,7 @@ function createMountedBucketHub(params) {
       }
     },
     async delete(remotePaths) {
+      await assertMountRoot();
       for (const remotePath2 of remotePaths) {
         try {
           await fs.rm(localPathFor(remotePath2), { force: true });

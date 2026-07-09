@@ -51,6 +51,9 @@ Collect or confirm:
 
 - Hugging Face token access: `HF_TOKEN`, `HF_TOKEN_PATH`, `$HF_HOME/token`, or
   `hf auth login`.
+- Hugging Face Router inference token for Space gateway mode when using
+  `huggingface/` models: `MLCLAW_ROUTER_TOKEN`, `HF_ROUTER_TOKEN`, or
+  `--router-token-file`.
 - Agent name, unless a Telegram bot token is supplied and the user wants the
   name derived from the bot username.
 - Gateway mode:

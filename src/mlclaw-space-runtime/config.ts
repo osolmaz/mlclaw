@@ -25,6 +25,7 @@ export type SpaceRuntimeConfig = {
   allowAnySignedIn: boolean;
   mode: RuntimeMode;
   hfToken: string | undefined;
+  routerToken: string | undefined;
   hubUrl: string;
   openaiCredentialFile: string;
   runtimeSettingsFile: string;
@@ -100,6 +101,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpaceRuntimeCo
     allowAnySignedIn: env.MLCLAW_ALLOW_ANY_SIGNED_IN === "1" || env.MLCLAW_ALLOW_ANY_SIGNED_IN === "true",
     mode,
     hfToken: trim(env.HF_TOKEN ?? env.HUGGINGFACE_HUB_TOKEN),
+    routerToken: trim(env.MLCLAW_ROUTER_TOKEN ?? env.HF_ROUTER_TOKEN),
     hubUrl: trim(env.HF_ENDPOINT) ?? "https://huggingface.co",
     openaiCredentialFile: trim(env.MLCLAW_OPENAI_CREDENTIAL_FILE) ?? "/tmp/mlclaw-secrets/openai.env",
     runtimeSettingsFile,

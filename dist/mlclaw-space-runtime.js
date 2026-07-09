@@ -564,6 +564,7 @@ function loadConfig(env = process.env) {
     allowAnySignedIn: env.MLCLAW_ALLOW_ANY_SIGNED_IN === "1" || env.MLCLAW_ALLOW_ANY_SIGNED_IN === "true",
     mode,
     hfToken: trim(env.HF_TOKEN ?? env.HUGGINGFACE_HUB_TOKEN),
+    routerToken: trim(env.MLCLAW_ROUTER_TOKEN ?? env.HF_ROUTER_TOKEN),
     hubUrl: trim(env.HF_ENDPOINT) ?? "https://huggingface.co",
     openaiCredentialFile: trim(env.MLCLAW_OPENAI_CREDENTIAL_FILE) ?? "/tmp/mlclaw-secrets/openai.env",
     runtimeSettingsFile,
@@ -7820,7 +7821,11 @@ function createSpaceRuntimeApp(config2, controls) {
     if (config2.mode !== "app") {
       return c.json({ ok: false, error: "template mode cannot restart runtime" }, 403);
     }
-    return c.json({ ok: true, restartPending: await restartCurrentSpace(config2) });
+    const restartPending = await restartCurrentSpace(config2);
+    if (!restartPending) {
+      await controls.restartOpenClaw();
+    }
+    return c.json({ ok: true, restartPending });
   });
   app.get("/mlclaw", (c) => controlUi(c, config2));
   app.get("/mlclaw/*", (c) => controlUi(c, config2));
@@ -8366,6 +8371,10 @@ var SpaceRuntimeServer = class {
       if (process.env.MLCLAW_PASS_HF_TOKEN_TO_OPENCLAW !== "1") {
         delete env.HF_TOKEN;
         delete env.HUGGINGFACE_HUB_TOKEN;
+      }
+      if (this.config.routerToken) {
+        env.HF_TOKEN = this.config.routerToken;
+        env.HUGGINGFACE_HUB_TOKEN = this.config.routerToken;
       }
       this.openclaw = spawn(this.config.openclawCommand, this.config.openclawArgs, {
         stdio: "inherit",

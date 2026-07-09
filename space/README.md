@@ -9,7 +9,7 @@ hf_oauth: true
 hf_oauth_expiration_minutes: 43200
 pinned: false
 secrets:
-  - HF_TOKEN
+  - MLCLAW_ROUTER_TOKEN
   - MLCLAW_SESSION_SECRET
   - OPENAI_API_KEY
 ---
@@ -60,9 +60,10 @@ OpenClaw trusted-proxy auth. The browser never receives an OpenClaw gateway
 token.
 
 Durable state lives in a private Hugging Face Storage Bucket configured by
-`OPENCLAW_HF_STATE_BUCKET`. The bucket is not mounted as a live filesystem;
-`hf-state-sync` restores verified snapshots on boot and uploads new snapshots
-during runtime and shutdown.
+`OPENCLAW_HF_STATE_BUCKET` and mounted at `/data/mlclaw-state`. The mount is
+only the snapshot store; live SQLite and workspace state stay on local
+container disk. `hf-state-sync` restores verified snapshots on boot and uploads
+new snapshots during runtime and shutdown.
 
 Manage an existing deployment from your machine with:
 

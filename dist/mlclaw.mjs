@@ -14991,10 +14991,10 @@ RUN chmod +x /app/entrypoint.sh
 ENV PORT=7860
 ENV MLCLAW_OPENCLAW_PORT=7861
 ENV OPENCLAW_GATEWAY_PORT=7861
-ENV OPENCLAW_LIVE_DIR=/tmp/openclaw-live
-ENV OPENCLAW_STATE_DIR=/tmp/openclaw-live/.openclaw
-ENV OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-live/workspace
-ENV OPENCLAW_CONFIG_PATH=/tmp/openclaw-live/.openclaw/openclaw.json
+ENV OPENCLAW_LIVE_DIR=/home/node/.local/share/mlclaw/live
+ENV OPENCLAW_STATE_DIR=/home/node/.local/share/mlclaw/live/.openclaw
+ENV OPENCLAW_WORKSPACE_DIR=/home/node/.local/share/mlclaw/live/workspace
+ENV OPENCLAW_CONFIG_PATH=/home/node/.local/share/mlclaw/live/.openclaw/openclaw.json
 ENV OPENCLAW_DISABLE_BONJOUR=1
 
 EXPOSE 7860
@@ -15319,7 +15319,7 @@ function createProgram(runtimeOverrides = {}) {
   program2.name("mlclaw").description("Deploy OpenClaw to a Hugging Face Space and private bucket").showHelpAfterError().exitOverride((err) => {
     throw err;
   });
-  program2.command("bootstrap", { isDefault: true }).description("Create or update a Hugging Face OpenClaw deployment").option("--owner <owner>", "Hugging Face user or organization").option("--name <name>", "Agent and runtime resource base name").option("--bucket <owner/bucket>", "State bucket to create or adopt").option("--gateway <local|space>", "Where the live gateway runs").option("--telegram-token <token>", "Optional Telegram bot token").option("--telegram-token-file <path>", "File containing TELEGRAM_BOT_TOKEN=... or a raw token").option("--telegram-user-id <id>", "Allowed Telegram user ID").option("--telegram-api-root <url>", "Telegram API root override").option("--telegram-proxy <url>", "Telegram proxy URL override").option("--hardware <flavor>", "Hugging Face Space hardware flavor").option("--sleep-time <seconds>", "Space sleep timeout in seconds; -1 means never sleep", parseInteger).option("--model <model>", "OpenClaw model identifier", DEFAULT_MODEL).option("--runtime-image <image>", "ML Claw runtime image").option("--bundled-runtime", "Generate a bundled Space runtime instead of using the prebuilt ML Claw image", false).option("--public-space", "Create the Hugging Face Space as public instead of private", false).addOption(new Option("--gateway-token <token>").hideHelp()).option("--docker-context <name>", "Docker context for local gateway mode").option("--no-pull", "Do not docker pull before starting a local gateway").option("--takeover", "Start even if a stale runtime lease is present", false).option("--yes", "Confirm paid hardware prompts for automation", false).action(async (opts) => {
+  program2.command("bootstrap", { isDefault: true }).description("Create or update a Hugging Face OpenClaw deployment").option("--owner <owner>", "Hugging Face user or organization").option("--name <name>", "Agent and runtime resource base name").option("--bucket <owner/bucket>", "State bucket to create or adopt").option("--gateway <local|space>", "Where the live gateway runs").option("--telegram-token <token>", "Optional Telegram bot token").option("--telegram-token-file <path>", "File containing TELEGRAM_BOT_TOKEN=... or a raw token").option("--telegram-user-id <id>", "Allowed Telegram user ID").option("--telegram-api-root <url>", "Telegram API root override").option("--telegram-proxy <url>", "Telegram proxy URL override").option("--hardware <flavor>", "Hugging Face Space hardware flavor").option("--sleep-time <seconds>", "Space sleep timeout in seconds; -1 means never sleep", parseInteger).option("--model <model>", "OpenClaw model identifier", DEFAULT_MODEL).option("--runtime-image <image>", "ML Claw runtime image").option("--bundled-runtime", "Generate a bundled Space runtime instead of using the prebuilt ML Claw image", false).option("--public-space", "Create the Hugging Face Space as public instead of private", false).addOption(new Option("--gateway-token <token>").hideHelp()).option("--router-token <token>", "Hugging Face Router inference token for Space gateway model calls").option("--router-token-file <path>", "File containing MLCLAW_ROUTER_TOKEN=..., HF_ROUTER_TOKEN=..., or a raw token").option("--docker-context <name>", "Docker context for local gateway mode").option("--no-pull", "Do not docker pull before starting a local gateway").option("--takeover", "Start even if a stale runtime lease is present", false).option("--yes", "Confirm paid hardware prompts for automation", false).action(async (opts) => {
     await bootstrap(opts, runtime);
   });
   program2.command("update").description("Regenerate and upload current ML Claw Space files").argument("<owner/space>", "Hugging Face Space repo ID").option("--runtime-image <image>", "Runtime image to write into the generated Space Dockerfile").option("--bundled-runtime", "Generate a bundled Space runtime instead of using the prebuilt ML Claw image", false).option("--force", "Update even if the Space does not look like ML Claw", false).action(async (repoId, opts) => {
@@ -15540,6 +15540,12 @@ async function resolveBootstrapPlan(params) {
     hub
   });
   const bucket = bucketPlan.bucket;
+  const routerToken = await resolveRouterToken({
+    opts,
+    runtime,
+    gatewayLocation,
+    model
+  });
   const spacePlan = gatewayLocation === "space" ? {
     space: names.space,
     exists: await hub.spaceExists(names.space),
@@ -15572,7 +15578,8 @@ async function resolveBootstrapPlan(params) {
     runtimeId: gatewayLocation === "local" ? manifest.localRuntimeId : spaceRuntimeId(agentName),
     ...bucketPrefix ? { bucketPrefix } : {},
     ...opts.telegramProxy ? { telegramProxy: opts.telegramProxy } : {},
-    ...opts.telegramApiRoot ? { telegramApiRoot: opts.telegramApiRoot } : {}
+    ...opts.telegramApiRoot ? { telegramApiRoot: opts.telegramApiRoot } : {},
+    ...routerToken ? { routerToken } : {}
   });
   return {
     agentName,
@@ -15820,6 +15827,7 @@ function deploymentSecrets(params) {
   return {
     HF_TOKEN: params.hfToken,
     HUGGINGFACE_HUB_TOKEN: params.hfToken,
+    ...params.routerToken ? { MLCLAW_ROUTER_TOKEN: params.routerToken } : {},
     OPENCLAW_HF_STATE_BUCKET: params.bucket,
     OPENCLAW_MODEL: params.model,
     OPENCLAW_AGENT_NAME: params.agentName,
@@ -15878,6 +15886,7 @@ async function deploySpaceGateway(params) {
   await clearSpaceGatewayDisabled(hub, manifest.space);
   await setDeploymentSecrets(hub, manifest.space, {
     MLCLAW_SESSION_SECRET: requiredSecret(secrets, "MLCLAW_SESSION_SECRET"),
+    ...secrets.MLCLAW_ROUTER_TOKEN ? { MLCLAW_ROUTER_TOKEN: secrets.MLCLAW_ROUTER_TOKEN } : {},
     ...secrets.TELEGRAM_BOT_TOKEN ? { TELEGRAM_BOT_TOKEN: secrets.TELEGRAM_BOT_TOKEN } : {},
     ...secrets.TELEGRAM_ALLOWED_USERS ? { TELEGRAM_ALLOWED_USERS: secrets.TELEGRAM_ALLOWED_USERS } : {},
     ...secrets.TELEGRAM_PROXY ? { TELEGRAM_PROXY: secrets.TELEGRAM_PROXY } : {},
@@ -16740,6 +16749,44 @@ async function readOptionalTelegramToken(opts, runtime) {
     return (match?.[1] ?? raw.trim()).trim();
   }
   return void 0;
+}
+async function resolveRouterToken(params) {
+  const direct = params.opts.routerToken ?? params.runtime.env.MLCLAW_ROUTER_TOKEN ?? params.runtime.env.HF_ROUTER_TOKEN;
+  const fromFile = direct ? void 0 : await readOptionalRouterTokenFile(params.opts.routerTokenFile);
+  const existing = nonEmpty(direct) ?? fromFile;
+  if (existing) {
+    return existing;
+  }
+  if (params.gatewayLocation !== "space" || !isHuggingFaceRouterModel(params.model)) {
+    return void 0;
+  }
+  if (!params.runtime.prompt.isInteractive()) {
+    throw new Error("Space gateway model uses the Hugging Face Router; set MLCLAW_ROUTER_TOKEN or pass --router-token-file for inference.");
+  }
+  const value = await params.runtime.prompt.password({
+    message: "Hugging Face Router token",
+    placeholder: "hf_..."
+  });
+  if (q(value)) {
+    params.runtime.prompt.cancel("Cancelled");
+    throw new Error("cancelled");
+  }
+  const token = typeof value === "string" ? nonEmpty(value) : void 0;
+  if (!token) {
+    throw new Error("Hugging Face Router token is required for Space gateway inference with huggingface/ models.");
+  }
+  return token;
+}
+async function readOptionalRouterTokenFile(file) {
+  if (!file) {
+    return void 0;
+  }
+  const raw = await fs14.readFile(file, "utf8");
+  const parsed = parseSecretEnv(raw);
+  return nonEmpty(parsed.MLCLAW_ROUTER_TOKEN) ?? nonEmpty(parsed.HF_ROUTER_TOKEN) ?? nonEmpty(raw);
+}
+function isHuggingFaceRouterModel(model) {
+  return model.trim().startsWith("huggingface/");
 }
 async function promptAgentName(runtime) {
   if (!runtime.prompt.isInteractive()) {

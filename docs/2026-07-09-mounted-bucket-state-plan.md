@@ -22,6 +22,8 @@ The Space runtime is unprivileged:
 
 - no personal `HF_TOKEN` or `HUGGINGFACE_HUB_TOKEN` secret is stored in app
   Spaces;
+- Hugging Face Router inference uses a separate `MLCLAW_ROUTER_TOKEN` secret
+  when the selected model needs the HF Router;
 - the private bucket is mounted read-write into the Space at
   `/data/mlclaw-state`;
 - live OpenClaw state stays on normal local container disk at
@@ -51,6 +53,7 @@ The bucket mount is a snapshot target, not the live database filesystem.
    - set `OPENCLAW_LIVE_DIR=/home/node/.local/share/mlclaw/live`;
    - attach the deployment bucket as a read-write Space volume;
    - do not write `HF_TOKEN` or `HUGGINGFACE_HUB_TOKEN` as Space secrets;
+   - write only `MLCLAW_ROUTER_TOKEN` for Router model inference;
    - delete old token secrets from existing app Spaces during bootstrap,
      update, or `doctor --fix`.
 
@@ -69,6 +72,8 @@ The bucket mount is a snapshot target, not the live database filesystem.
 - Unit test mounted storage snapshot/restore.
 - Unit test bootstrap does not write HF token secrets and does set the bucket
   volume.
+- Unit test default Space bootstrap requires a Router token and stores it as
+  `MLCLAW_ROUTER_TOKEN`.
 - Unit test doctor reports/fixes missing volume and stale token secrets.
 - Run `npm run build`, `npm test`, `npm run typecheck`, and
   `npm run check:secrets`.
@@ -77,4 +82,3 @@ The bucket mount is a snapshot target, not the live database filesystem.
   - `osolmaz/mlclaw-data`
   - `osolmaz/mlclaw-test`
   - `osolmaz/mlclaw-test-data`
-

@@ -174,6 +174,10 @@ export class SpaceRuntimeServer {
         delete env.HF_TOKEN;
         delete env.HUGGINGFACE_HUB_TOKEN;
       }
+      if (this.config.routerToken) {
+        env.HF_TOKEN = this.config.routerToken;
+        env.HUGGINGFACE_HUB_TOKEN = this.config.routerToken;
+      }
       this.openclaw = spawn(this.config.openclawCommand, this.config.openclawArgs, {
         stdio: "inherit",
         env,

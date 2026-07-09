@@ -85,6 +85,21 @@ export function createHfBucketHub(params: { bucket: string; token?: string }): B
 /** BucketHub backed by a read-write Storage Bucket volume mounted in the Space. */
 export function createMountedBucketHub(params: { mountDir: string }): BucketHub {
   const root = path.resolve(params.mountDir);
+  const assertMountRoot = async (): Promise<void> => {
+    let stat;
+    try {
+      stat = await fs.stat(root);
+    } catch (err) {
+      if (isNotFound(err)) {
+        throw new Error(`mounted bucket root is missing: ${root}`);
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(`mounted bucket root is not accessible: ${root}: ${message}`);
+    }
+    if (!stat.isDirectory()) {
+      throw new Error(`mounted bucket root is not a directory: ${root}`);
+    }
+  };
   const localPathFor = (remotePath: string): string => {
     const normalized = remotePath.replace(/^\/+/, "");
     const resolved = path.resolve(root, normalized);
@@ -96,6 +111,7 @@ export function createMountedBucketHub(params: { mountDir: string }): BucketHub 
 
   return {
     async download(remotePath, localPath) {
+      await assertMountRoot();
       const source = localPathFor(remotePath);
       try {
         await fs.copyFile(source, localPath);
@@ -109,6 +125,7 @@ export function createMountedBucketHub(params: { mountDir: string }): BucketHub 
       }
     },
     async upload(localPath, remotePath) {
+      await assertMountRoot();
       const target = localPathFor(remotePath);
       const dir = path.dirname(target);
       const tmp = path.join(dir, `.tmp-${path.basename(target)}-${process.pid}-${Date.now()}`);
@@ -123,6 +140,7 @@ export function createMountedBucketHub(params: { mountDir: string }): BucketHub 
       }
     },
     async delete(remotePaths) {
+      await assertMountRoot();
       for (const remotePath of remotePaths) {
         try {
           await fs.rm(localPathFor(remotePath), { force: true });

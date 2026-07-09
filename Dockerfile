@@ -43,14 +43,14 @@ RUN chmod +x /app/entrypoint.sh
 
 USER root
 
-# Live state on local disk; the bucket is reached only through the TS client.
+# Live state stays on local disk; Space bucket volumes are mounted separately for snapshots.
 ENV PORT=7860
 ENV MLCLAW_OPENCLAW_PORT=7861
 ENV OPENCLAW_GATEWAY_PORT=7861
-ENV OPENCLAW_LIVE_DIR=/tmp/openclaw-live
-ENV OPENCLAW_STATE_DIR=/tmp/openclaw-live/.openclaw
-ENV OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-live/workspace
-ENV OPENCLAW_CONFIG_PATH=/tmp/openclaw-live/.openclaw/openclaw.json
+ENV OPENCLAW_LIVE_DIR=/home/node/.local/share/mlclaw/live
+ENV OPENCLAW_STATE_DIR=/home/node/.local/share/mlclaw/live/.openclaw
+ENV OPENCLAW_WORKSPACE_DIR=/home/node/.local/share/mlclaw/live/workspace
+ENV OPENCLAW_CONFIG_PATH=/home/node/.local/share/mlclaw/live/.openclaw/openclaw.json
 ENV OPENCLAW_DISABLE_BONJOUR=1
 ARG MLCLAW_RUNTIME_IMAGE
 ENV MLCLAW_RUNTIME_IMAGE=$MLCLAW_RUNTIME_IMAGE

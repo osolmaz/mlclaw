@@ -136,10 +136,10 @@ RUN chmod +x /app/entrypoint.sh
 ENV PORT=7860
 ENV MLCLAW_OPENCLAW_PORT=7861
 ENV OPENCLAW_GATEWAY_PORT=7861
-ENV OPENCLAW_LIVE_DIR=/tmp/openclaw-live
-ENV OPENCLAW_STATE_DIR=/tmp/openclaw-live/.openclaw
-ENV OPENCLAW_WORKSPACE_DIR=/tmp/openclaw-live/workspace
-ENV OPENCLAW_CONFIG_PATH=/tmp/openclaw-live/.openclaw/openclaw.json
+ENV OPENCLAW_LIVE_DIR=/home/node/.local/share/mlclaw/live
+ENV OPENCLAW_STATE_DIR=/home/node/.local/share/mlclaw/live/.openclaw
+ENV OPENCLAW_WORKSPACE_DIR=/home/node/.local/share/mlclaw/live/workspace
+ENV OPENCLAW_CONFIG_PATH=/home/node/.local/share/mlclaw/live/.openclaw/openclaw.json
 ENV OPENCLAW_DISABLE_BONJOUR=1
 
 EXPOSE 7860
