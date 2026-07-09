@@ -201,10 +201,15 @@ mlclaw gateway start <agent>
 
 ## OpenAI Credentials
 
-After signing into the Space, use `/mlclaw/openai` to submit an OpenAI API key.
-The key is stored as a Hugging Face Space Secret when possible and as a 0600
-runtime file for immediate use. The key must never be logged or returned to
-the browser.
+After signing into the Space, use the ML Claw control UI:
+
+- `/mlclaw/settings` changes the Space `OPENCLAW_MODEL`.
+- `/mlclaw/status` shows runtime, bucket, model, and OAuth status.
+- `/mlclaw/credentials` stores an OpenAI API key.
+
+The OpenAI key is stored as a Hugging Face Space Secret when possible and as a
+0600 runtime file for immediate use. The key must never be logged or returned
+to the browser.
 
 ## State Safety
 

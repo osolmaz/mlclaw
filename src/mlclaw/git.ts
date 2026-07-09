@@ -68,6 +68,7 @@ export async function generateSpaceRepo(
   const copies: Array<[string, string]> = [
     [".gitattributes", ".gitattributes"],
     ["assets/mlclaw.svg", "assets/mlclaw.svg"],
+    ["assets/mlclaw-control-ui", "assets/mlclaw-control-ui"],
     ["assets/hf-tooling", "assets/hf-tooling"],
     ["space/README.md", "README.md"],
   ];

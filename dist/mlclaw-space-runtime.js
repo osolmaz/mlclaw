@@ -64,8 +64,14 @@ function loadConfig(env = process.env) {
     openclawCommand,
     openclawArgs,
     agentName: trim(env.OPENCLAW_AGENT_NAME),
+    model: trim(env.OPENCLAW_MODEL) ?? "huggingface/google/gemma-4-26B-A4B-it",
     stateBucket: trim(env.OPENCLAW_HF_STATE_BUCKET),
-    runtimeImage: trim(env.MLCLAW_RUNTIME_IMAGE)
+    statePrefix: trim(env.OPENCLAW_HF_STATE_PREFIX),
+    gatewayLocation: trim(env.MLCLAW_GATEWAY_LOCATION),
+    runtimeImage: trim(env.MLCLAW_RUNTIME_IMAGE),
+    runtimeId: trim(env.MLCLAW_RUNTIME_ID),
+    templateRev: trim(env.MLCLAW_TEMPLATE_REV),
+    assetsDir: trim(env.MLCLAW_ASSETS_DIR) ?? "/app/assets"
   };
 }
 function resolveMode(params) {
@@ -120,59 +126,2136 @@ function trim(value) {
 // src/mlclaw-space-runtime/server.ts
 import { spawn } from "node:child_process";
 import http2 from "node:http";
-import fs3 from "node:fs/promises";
+import { Readable } from "node:stream";
 
-// src/mlclaw-space-runtime/cookies.ts
-import { createHmac, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
-function createSignedCookie(options, payload) {
-  const body = Buffer.from(JSON.stringify({
-    ...payload,
-    exp: Math.floor(Date.now() / 1e3) + options.maxAgeSeconds
-  })).toString("base64url");
-  const signature = sign(body, options.secret);
-  return serializeCookie(options.name, `${body}.${signature}`, {
-    httpOnly: true,
-    secure: options.secure,
-    sameSite: "Lax",
-    path: "/",
-    maxAge: options.maxAgeSeconds
+// src/mlclaw-space-runtime/app.ts
+import fs2 from "node:fs/promises";
+import path2 from "node:path";
+
+// node_modules/hono/dist/compose.js
+var compose = (middleware, onError, onNotFound) => {
+  return (context, next) => {
+    let index = -1;
+    return dispatch(0);
+    async function dispatch(i) {
+      if (i <= index) {
+        throw new Error("next() called multiple times");
+      }
+      index = i;
+      let res;
+      let isError = false;
+      let handler;
+      if (middleware[i]) {
+        handler = middleware[i][0][0];
+        context.req.routeIndex = i;
+      } else {
+        handler = i === middleware.length && next || void 0;
+      }
+      if (handler) {
+        try {
+          res = await handler(context, () => dispatch(i + 1));
+        } catch (err) {
+          if (err instanceof Error && onError) {
+            context.error = err;
+            res = await onError(err, context);
+            isError = true;
+          } else {
+            throw err;
+          }
+        }
+      } else {
+        if (context.finalized === false && onNotFound) {
+          res = await onNotFound(context);
+        }
+      }
+      if (res && (context.finalized === false || isError)) {
+        context.res = res;
+      }
+      return context;
+    }
+  };
+};
+
+// node_modules/hono/dist/request/constants.js
+var GET_MATCH_RESULT = /* @__PURE__ */ Symbol();
+
+// node_modules/hono/dist/utils/buffer.js
+var bufferToFormData = (arrayBuffer, contentType2) => {
+  const response = new Response(arrayBuffer, {
+    headers: {
+      // Normalize the media type (case-insensitive) while keeping parameters like the boundary
+      "Content-Type": contentType2.replace(/^[^;]+/, (mediaType) => mediaType.toLowerCase())
+    }
   });
+  return response.formData();
+};
+
+// node_modules/hono/dist/utils/body.js
+var isRawRequest = (request) => "headers" in request;
+var parseBody = async (request, options = /* @__PURE__ */ Object.create(null)) => {
+  const { all = false, dot = false } = options;
+  const headers = isRawRequest(request) ? request.headers : request.raw.headers;
+  const contentType2 = headers.get("Content-Type");
+  const mediaType = contentType2?.split(";")[0].trim().toLowerCase();
+  if (mediaType === "multipart/form-data" || mediaType === "application/x-www-form-urlencoded") {
+    return parseFormData(request, { all, dot });
+  }
+  return {};
+};
+async function parseFormData(request, options) {
+  const headers = isRawRequest(request) ? request.headers : request.raw.headers;
+  const arrayBuffer = await request.arrayBuffer();
+  const formDataPromise = bufferToFormData(arrayBuffer, headers.get("Content-Type") || "");
+  if (!isRawRequest(request)) {
+    request.bodyCache.formData = formDataPromise;
+  }
+  const formData = await formDataPromise;
+  if (formData) {
+    return convertFormDataToBodyData(formData, options);
+  }
+  return {};
 }
-function verifySignedCookie(cookieHeader, name, secret) {
-  const value = parseCookies(cookieHeader).get(name);
-  if (!value) {
+function convertFormDataToBodyData(formData, options) {
+  const form = /* @__PURE__ */ Object.create(null);
+  formData.forEach((value, key) => {
+    const shouldParseAllValues = options.all || key.endsWith("[]");
+    if (!shouldParseAllValues) {
+      form[key] = value;
+    } else {
+      handleParsingAllValues(form, key, value);
+    }
+  });
+  if (options.dot) {
+    Object.entries(form).forEach(([key, value]) => {
+      const shouldParseDotValues = key.includes(".");
+      if (shouldParseDotValues) {
+        handleParsingNestedValues(form, key, value);
+        delete form[key];
+      }
+    });
+  }
+  return form;
+}
+var handleParsingAllValues = (form, key, value) => {
+  if (form[key] !== void 0) {
+    if (Array.isArray(form[key])) {
+      ;
+      form[key].push(value);
+    } else {
+      form[key] = [form[key], value];
+    }
+  } else {
+    if (!key.endsWith("[]")) {
+      form[key] = value;
+    } else {
+      form[key] = [value];
+    }
+  }
+};
+var handleParsingNestedValues = (form, key, value) => {
+  if (/(?:^|\.)__proto__\./.test(key)) {
+    return;
+  }
+  let nestedForm = form;
+  const keys = key.split(".");
+  keys.forEach((key2, index) => {
+    if (index === keys.length - 1) {
+      nestedForm[key2] = value;
+    } else {
+      if (!nestedForm[key2] || typeof nestedForm[key2] !== "object" || Array.isArray(nestedForm[key2]) || nestedForm[key2] instanceof File) {
+        nestedForm[key2] = /* @__PURE__ */ Object.create(null);
+      }
+      nestedForm = nestedForm[key2];
+    }
+  });
+};
+
+// node_modules/hono/dist/utils/url.js
+var splitPath = (path4) => {
+  const paths = path4.split("/");
+  if (paths[0] === "") {
+    paths.shift();
+  }
+  return paths;
+};
+var splitRoutingPath = (routePath) => {
+  const { groups, path: path4 } = extractGroupsFromPath(routePath);
+  const paths = splitPath(path4);
+  return replaceGroupMarks(paths, groups);
+};
+var extractGroupsFromPath = (path4) => {
+  const groups = [];
+  path4 = path4.replace(/\{[^}]+\}/g, (match2, index) => {
+    const mark = `@${index}`;
+    groups.push([mark, match2]);
+    return mark;
+  });
+  return { groups, path: path4 };
+};
+var replaceGroupMarks = (paths, groups) => {
+  for (let i = groups.length - 1; i >= 0; i--) {
+    const [mark] = groups[i];
+    for (let j = paths.length - 1; j >= 0; j--) {
+      if (paths[j].includes(mark)) {
+        paths[j] = paths[j].replace(mark, groups[i][1]);
+        break;
+      }
+    }
+  }
+  return paths;
+};
+var patternCache = {};
+var getPattern = (label, next) => {
+  if (label === "*") {
+    return "*";
+  }
+  const match2 = label.match(/^\:([^\{\}]+)(?:\{(.+)\})?$/);
+  if (match2) {
+    const cacheKey = `${label}#${next}`;
+    if (!patternCache[cacheKey]) {
+      if (match2[2]) {
+        patternCache[cacheKey] = next && next[0] !== ":" && next[0] !== "*" ? [cacheKey, match2[1], new RegExp(`^${match2[2]}(?=/${next})`)] : [label, match2[1], new RegExp(`^${match2[2]}$`)];
+      } else {
+        patternCache[cacheKey] = [label, match2[1], true];
+      }
+    }
+    return patternCache[cacheKey];
+  }
+  return null;
+};
+var tryDecode = (str, decoder) => {
+  try {
+    return decoder(str);
+  } catch {
+    return str.replace(/(?:%[0-9A-Fa-f]{2})+/g, (match2) => {
+      try {
+        return decoder(match2);
+      } catch {
+        return match2;
+      }
+    });
+  }
+};
+var tryDecodeURI = (str) => tryDecode(str, decodeURI);
+var getPath = (request) => {
+  const url = request.url;
+  const start = url.indexOf("/", url.indexOf(":") + 4);
+  let i = start;
+  for (; i < url.length; i++) {
+    const charCode = url.charCodeAt(i);
+    if (charCode === 37) {
+      const queryIndex = url.indexOf("?", i);
+      const hashIndex = url.indexOf("#", i);
+      const end = queryIndex === -1 ? hashIndex === -1 ? void 0 : hashIndex : hashIndex === -1 ? queryIndex : Math.min(queryIndex, hashIndex);
+      const path4 = url.slice(start, end);
+      return tryDecodeURI(path4.includes("%25") ? path4.replace(/%25/g, "%2525") : path4);
+    } else if (charCode === 63 || charCode === 35) {
+      break;
+    }
+  }
+  return url.slice(start, i);
+};
+var getPathNoStrict = (request) => {
+  const result = getPath(request);
+  return result.length > 1 && result.at(-1) === "/" ? result.slice(0, -1) : result;
+};
+var mergePath = (base, sub, ...rest) => {
+  if (rest.length) {
+    sub = mergePath(sub, ...rest);
+  }
+  return `${base?.[0] === "/" ? "" : "/"}${base}${sub === "/" ? "" : `${base?.at(-1) === "/" ? "" : "/"}${sub?.[0] === "/" ? sub.slice(1) : sub}`}`;
+};
+var checkOptionalParameter = (path4) => {
+  if (path4.charCodeAt(path4.length - 1) !== 63 || !path4.includes(":")) {
+    return null;
+  }
+  const segments = path4.split("/");
+  const results = [];
+  let basePath = "";
+  segments.forEach((segment) => {
+    if (segment !== "" && !/\:/.test(segment)) {
+      basePath += "/" + segment;
+    } else if (/\:/.test(segment)) {
+      if (/\?/.test(segment)) {
+        if (results.length === 0 && basePath === "") {
+          results.push("/");
+        } else {
+          results.push(basePath);
+        }
+        const optionalSegment = segment.replace("?", "");
+        basePath += "/" + optionalSegment;
+        results.push(basePath);
+      } else {
+        basePath += "/" + segment;
+      }
+    }
+  });
+  return results.filter((v, i, a) => a.indexOf(v) === i);
+};
+var _decodeURI = (value) => {
+  if (!/[%+]/.test(value)) {
+    return value;
+  }
+  if (value.indexOf("+") !== -1) {
+    value = value.replace(/\+/g, " ");
+  }
+  return value.indexOf("%") !== -1 ? tryDecode(value, decodeURIComponent_) : value;
+};
+var _getQueryParam = (url, key, multiple) => {
+  let encoded;
+  if (!multiple && key && !/[%+]/.test(key)) {
+    let keyIndex2 = url.indexOf("?", 8);
+    if (keyIndex2 === -1) {
+      return void 0;
+    }
+    if (!url.startsWith(key, keyIndex2 + 1)) {
+      keyIndex2 = url.indexOf(`&${key}`, keyIndex2 + 1);
+    }
+    while (keyIndex2 !== -1) {
+      const trailingKeyCode = url.charCodeAt(keyIndex2 + key.length + 1);
+      if (trailingKeyCode === 61) {
+        const valueIndex = keyIndex2 + key.length + 2;
+        const endIndex = url.indexOf("&", valueIndex);
+        return _decodeURI(url.slice(valueIndex, endIndex === -1 ? void 0 : endIndex));
+      } else if (trailingKeyCode == 38 || isNaN(trailingKeyCode)) {
+        return "";
+      }
+      keyIndex2 = url.indexOf(`&${key}`, keyIndex2 + 1);
+    }
+    encoded = /[%+]/.test(url);
+    if (!encoded) {
+      return void 0;
+    }
+  }
+  const results = {};
+  encoded ??= /[%+]/.test(url);
+  let keyIndex = url.indexOf("?", 8);
+  while (keyIndex !== -1) {
+    const nextKeyIndex = url.indexOf("&", keyIndex + 1);
+    let valueIndex = url.indexOf("=", keyIndex);
+    if (valueIndex > nextKeyIndex && nextKeyIndex !== -1) {
+      valueIndex = -1;
+    }
+    let name = url.slice(
+      keyIndex + 1,
+      valueIndex === -1 ? nextKeyIndex === -1 ? void 0 : nextKeyIndex : valueIndex
+    );
+    if (encoded) {
+      name = _decodeURI(name);
+    }
+    keyIndex = nextKeyIndex;
+    if (name === "") {
+      continue;
+    }
+    let value;
+    if (valueIndex === -1) {
+      value = "";
+    } else {
+      value = url.slice(valueIndex + 1, nextKeyIndex === -1 ? void 0 : nextKeyIndex);
+      if (encoded) {
+        value = _decodeURI(value);
+      }
+    }
+    if (multiple) {
+      if (!(results[name] && Array.isArray(results[name]))) {
+        results[name] = [];
+      }
+      ;
+      results[name].push(value);
+    } else {
+      results[name] ??= value;
+    }
+  }
+  return key ? results[key] : results;
+};
+var getQueryParam = _getQueryParam;
+var getQueryParams = (url, key) => {
+  return _getQueryParam(url, key, true);
+};
+var decodeURIComponent_ = decodeURIComponent;
+
+// node_modules/hono/dist/request.js
+var tryDecodeURIComponent = (str) => tryDecode(str, decodeURIComponent_);
+var HonoRequest = class {
+  /**
+   * `.raw` can get the raw Request object.
+   *
+   * @see {@link https://hono.dev/docs/api/request#raw}
+   *
+   * @example
+   * ```ts
+   * // For Cloudflare Workers
+   * app.post('/', async (c) => {
+   *   const metadata = c.req.raw.cf?.hostMetadata?
+   *   ...
+   * })
+   * ```
+   */
+  raw;
+  #validatedData;
+  // Short name of validatedData
+  #matchResult;
+  routeIndex = 0;
+  /**
+   * `.path` can get the pathname of the request.
+   *
+   * @see {@link https://hono.dev/docs/api/request#path}
+   *
+   * @example
+   * ```ts
+   * app.get('/about/me', (c) => {
+   *   const pathname = c.req.path // `/about/me`
+   * })
+   * ```
+   */
+  path;
+  bodyCache = {};
+  constructor(request, path4 = "/", matchResult = [[]]) {
+    this.raw = request;
+    this.path = path4;
+    this.#matchResult = matchResult;
+    this.#validatedData = {};
+  }
+  param(key) {
+    return key ? this.#getDecodedParam(key) : this.#getAllDecodedParams();
+  }
+  #getDecodedParam(key) {
+    const paramKey = this.#matchResult[0][this.routeIndex][1][key];
+    const param = this.#getParamValue(paramKey);
+    return param && /\%/.test(param) ? tryDecodeURIComponent(param) : param;
+  }
+  #getAllDecodedParams() {
+    const decoded = {};
+    const keys = Object.keys(this.#matchResult[0][this.routeIndex][1]);
+    for (const key of keys) {
+      const value = this.#getParamValue(this.#matchResult[0][this.routeIndex][1][key]);
+      if (value !== void 0) {
+        decoded[key] = /\%/.test(value) ? tryDecodeURIComponent(value) : value;
+      }
+    }
+    return decoded;
+  }
+  #getParamValue(paramKey) {
+    return this.#matchResult[1] ? this.#matchResult[1][paramKey] : paramKey;
+  }
+  query(key) {
+    return getQueryParam(this.url, key);
+  }
+  queries(key) {
+    return getQueryParams(this.url, key);
+  }
+  header(name) {
+    if (name) {
+      return this.raw.headers.get(name) ?? void 0;
+    }
+    const headerData = {};
+    this.raw.headers.forEach((value, key) => {
+      headerData[key] = value;
+    });
+    return headerData;
+  }
+  async parseBody(options) {
+    return parseBody(this, options);
+  }
+  #cachedBody = (key) => {
+    const { bodyCache, raw: raw2 } = this;
+    const cachedBody = bodyCache[key];
+    if (cachedBody) {
+      return cachedBody;
+    }
+    const anyCachedKey = Object.keys(bodyCache)[0];
+    if (anyCachedKey) {
+      return bodyCache[anyCachedKey].then((body) => {
+        if (anyCachedKey === "json") {
+          body = JSON.stringify(body);
+        }
+        return new Response(body)[key]();
+      });
+    }
+    return bodyCache[key] = raw2[key]();
+  };
+  /**
+   * `.json()` can parse Request body of type `application/json`
+   *
+   * @see {@link https://hono.dev/docs/api/request#json}
+   *
+   * @example
+   * ```ts
+   * app.post('/entry', async (c) => {
+   *   const body = await c.req.json()
+   * })
+   * ```
+   */
+  json() {
+    return this.#cachedBody("text").then((text) => JSON.parse(text));
+  }
+  /**
+   * `.text()` can parse Request body of type `text/plain`
+   *
+   * @see {@link https://hono.dev/docs/api/request#text}
+   *
+   * @example
+   * ```ts
+   * app.post('/entry', async (c) => {
+   *   const body = await c.req.text()
+   * })
+   * ```
+   */
+  text() {
+    return this.#cachedBody("text");
+  }
+  /**
+   * `.arrayBuffer()` parse Request body as an `ArrayBuffer`
+   *
+   * @see {@link https://hono.dev/docs/api/request#arraybuffer}
+   *
+   * @example
+   * ```ts
+   * app.post('/entry', async (c) => {
+   *   const body = await c.req.arrayBuffer()
+   * })
+   * ```
+   */
+  arrayBuffer() {
+    return this.#cachedBody("arrayBuffer");
+  }
+  /**
+   * `.bytes()` parses the request body as a `Uint8Array`.
+   *
+   * @see {@link https://hono.dev/docs/api/request#bytes}
+   *
+   * @example
+   * ```ts
+   * app.post('/entry', async (c) => {
+   *   const body = await c.req.bytes()
+   * })
+   * ```
+   */
+  bytes() {
+    return this.#cachedBody("arrayBuffer").then((buffer) => new Uint8Array(buffer));
+  }
+  /**
+   * Parses the request body as a `Blob`.
+   * @example
+   * ```ts
+   * app.post('/entry', async (c) => {
+   *   const body = await c.req.blob();
+   * });
+   * ```
+   * @see https://hono.dev/docs/api/request#blob
+   */
+  blob() {
+    return this.#cachedBody("blob");
+  }
+  /**
+   * Parses the request body as `FormData`.
+   * @example
+   * ```ts
+   * app.post('/entry', async (c) => {
+   *   const body = await c.req.formData();
+   * });
+   * ```
+   * @see https://hono.dev/docs/api/request#formdata
+   */
+  formData() {
+    return this.#cachedBody("formData");
+  }
+  /**
+   * Adds validated data to the request.
+   *
+   * @param target - The target of the validation.
+   * @param data - The validated data to add.
+   */
+  addValidatedData(target, data) {
+    this.#validatedData[target] = data;
+  }
+  valid(target) {
+    return this.#validatedData[target];
+  }
+  /**
+   * `.url()` can get the request url strings.
+   *
+   * @see {@link https://hono.dev/docs/api/request#url}
+   *
+   * @example
+   * ```ts
+   * app.get('/about/me', (c) => {
+   *   const url = c.req.url // `http://localhost:8787/about/me`
+   *   ...
+   * })
+   * ```
+   */
+  get url() {
+    return this.raw.url;
+  }
+  /**
+   * `.method()` can get the method name of the request.
+   *
+   * @see {@link https://hono.dev/docs/api/request#method}
+   *
+   * @example
+   * ```ts
+   * app.get('/about/me', (c) => {
+   *   const method = c.req.method // `GET`
+   * })
+   * ```
+   */
+  get method() {
+    return this.raw.method;
+  }
+  get [GET_MATCH_RESULT]() {
+    return this.#matchResult;
+  }
+  /**
+   * `.matchedRoutes()` can return a matched route in the handler
+   *
+   * @deprecated
+   *
+   * Use matchedRoutes helper defined in "hono/route" instead.
+   *
+   * @see {@link https://hono.dev/docs/api/request#matchedroutes}
+   *
+   * @example
+   * ```ts
+   * app.use('*', async function logger(c, next) {
+   *   await next()
+   *   c.req.matchedRoutes.forEach(({ handler, method, path }, i) => {
+   *     const name = handler.name || (handler.length < 2 ? '[handler]' : '[middleware]')
+   *     console.log(
+   *       method,
+   *       ' ',
+   *       path,
+   *       ' '.repeat(Math.max(10 - path.length, 0)),
+   *       name,
+   *       i === c.req.routeIndex ? '<- respond from here' : ''
+   *     )
+   *   })
+   * })
+   * ```
+   */
+  get matchedRoutes() {
+    return this.#matchResult[0].map(([[, route]]) => route);
+  }
+  /**
+   * `routePath()` can retrieve the path registered within the handler
+   *
+   * @deprecated
+   *
+   * Use routePath helper defined in "hono/route" instead.
+   *
+   * @see {@link https://hono.dev/docs/api/request#routepath}
+   *
+   * @example
+   * ```ts
+   * app.get('/posts/:id', (c) => {
+   *   return c.json({ path: c.req.routePath })
+   * })
+   * ```
+   */
+  get routePath() {
+    return this.#matchResult[0].map(([[, route]]) => route)[this.routeIndex].path;
+  }
+};
+
+// node_modules/hono/dist/utils/html.js
+var HtmlEscapedCallbackPhase = {
+  Stringify: 1,
+  BeforeStream: 2,
+  Stream: 3
+};
+var raw = (value, callbacks) => {
+  const escapedString = new String(value);
+  escapedString.isEscaped = true;
+  escapedString.callbacks = callbacks;
+  return escapedString;
+};
+var resolveCallback = async (str, phase, preserveCallbacks, context, buffer) => {
+  if (typeof str === "object" && !(str instanceof String)) {
+    if (!(str instanceof Promise)) {
+      str = str.toString();
+    }
+    if (str instanceof Promise) {
+      str = await str;
+    }
+  }
+  const callbacks = str.callbacks;
+  if (!callbacks?.length) {
+    return Promise.resolve(str);
+  }
+  if (buffer) {
+    buffer[0] += str;
+  } else {
+    buffer = [str];
+  }
+  const resStr = Promise.all(callbacks.map((c) => c({ phase, buffer, context }))).then(
+    (res) => Promise.all(
+      res.filter(Boolean).map((str2) => resolveCallback(str2, phase, false, context, buffer))
+    ).then(() => buffer[0])
+  );
+  if (preserveCallbacks) {
+    return raw(await resStr, callbacks);
+  } else {
+    return resStr;
+  }
+};
+
+// node_modules/hono/dist/context.js
+var TEXT_PLAIN = "text/plain; charset=UTF-8";
+var setDefaultContentType = (contentType2, headers) => {
+  return {
+    "Content-Type": contentType2,
+    ...headers
+  };
+};
+var createResponseInstance = (body, init) => new Response(body, init);
+var Context = class {
+  #rawRequest;
+  #req;
+  /**
+   * `.env` can get bindings (environment variables, secrets, KV namespaces, D1 database, R2 bucket etc.) in Cloudflare Workers.
+   *
+   * @see {@link https://hono.dev/docs/api/context#env}
+   *
+   * @example
+   * ```ts
+   * // Environment object for Cloudflare Workers
+   * app.get('*', async c => {
+   *   const counter = c.env.COUNTER
+   * })
+   * ```
+   */
+  env = {};
+  #var;
+  finalized = false;
+  /**
+   * `.error` can get the error object from the middleware if the Handler throws an error.
+   *
+   * @see {@link https://hono.dev/docs/api/context#error}
+   *
+   * @example
+   * ```ts
+   * app.use('*', async (c, next) => {
+   *   await next()
+   *   if (c.error) {
+   *     // do something...
+   *   }
+   * })
+   * ```
+   */
+  error;
+  #status;
+  #executionCtx;
+  #res;
+  #layout;
+  #renderer;
+  #notFoundHandler;
+  #preparedHeaders;
+  #matchResult;
+  #path;
+  /**
+   * Creates an instance of the Context class.
+   *
+   * @param req - The Request object.
+   * @param options - Optional configuration options for the context.
+   */
+  constructor(req, options) {
+    this.#rawRequest = req;
+    if (options) {
+      this.#executionCtx = options.executionCtx;
+      this.env = options.env;
+      this.#notFoundHandler = options.notFoundHandler;
+      this.#path = options.path;
+      this.#matchResult = options.matchResult;
+    }
+  }
+  /**
+   * `.req` is the instance of {@link HonoRequest}.
+   */
+  get req() {
+    this.#req ??= new HonoRequest(this.#rawRequest, this.#path, this.#matchResult);
+    return this.#req;
+  }
+  /**
+   * @see {@link https://hono.dev/docs/api/context#event}
+   * The FetchEvent associated with the current request.
+   *
+   * @throws Will throw an error if the context does not have a FetchEvent.
+   */
+  get event() {
+    if (this.#executionCtx && "respondWith" in this.#executionCtx) {
+      return this.#executionCtx;
+    } else {
+      throw Error("This context has no FetchEvent");
+    }
+  }
+  /**
+   * @see {@link https://hono.dev/docs/api/context#executionctx}
+   * The ExecutionContext associated with the current request.
+   *
+   * @throws Will throw an error if the context does not have an ExecutionContext.
+   */
+  get executionCtx() {
+    if (this.#executionCtx) {
+      return this.#executionCtx;
+    } else {
+      throw Error("This context has no ExecutionContext");
+    }
+  }
+  /**
+   * @see {@link https://hono.dev/docs/api/context#res}
+   * The Response object for the current request.
+   */
+  get res() {
+    return this.#res ||= createResponseInstance(null, {
+      headers: this.#preparedHeaders ??= new Headers()
+    });
+  }
+  /**
+   * Sets the Response object for the current request.
+   *
+   * @param _res - The Response object to set.
+   */
+  set res(_res) {
+    if (this.#res && _res) {
+      _res = createResponseInstance(_res.body, _res);
+      for (const [k, v] of this.#res.headers.entries()) {
+        if (k === "content-type") {
+          continue;
+        }
+        if (k === "set-cookie") {
+          const cookies = this.#res.headers.getSetCookie();
+          _res.headers.delete("set-cookie");
+          for (const cookie of cookies) {
+            _res.headers.append("set-cookie", cookie);
+          }
+        } else {
+          _res.headers.set(k, v);
+        }
+      }
+    }
+    this.#res = _res;
+    this.finalized = true;
+  }
+  /**
+   * `.render()` can create a response within a layout.
+   *
+   * @see {@link https://hono.dev/docs/api/context#render-setrenderer}
+   *
+   * @example
+   * ```ts
+   * app.get('/', (c) => {
+   *   return c.render('Hello!')
+   * })
+   * ```
+   */
+  render = (...args) => {
+    this.#renderer ??= (content) => this.html(content);
+    return this.#renderer(...args);
+  };
+  /**
+   * Sets the layout for the response.
+   *
+   * @param layout - The layout to set.
+   * @returns The layout function.
+   */
+  setLayout = (layout) => this.#layout = layout;
+  /**
+   * Gets the current layout for the response.
+   *
+   * @returns The current layout function.
+   */
+  getLayout = () => this.#layout;
+  /**
+   * `.setRenderer()` can set the layout in the custom middleware.
+   *
+   * @see {@link https://hono.dev/docs/api/context#render-setrenderer}
+   *
+   * @example
+   * ```tsx
+   * app.use('*', async (c, next) => {
+   *   c.setRenderer((content) => {
+   *     return c.html(
+   *       <html>
+   *         <body>
+   *           <p>{content}</p>
+   *         </body>
+   *       </html>
+   *     )
+   *   })
+   *   await next()
+   * })
+   * ```
+   */
+  setRenderer = (renderer) => {
+    this.#renderer = renderer;
+  };
+  /**
+   * `.header()` can set headers.
+   *
+   * @see {@link https://hono.dev/docs/api/context#header}
+   *
+   * @example
+   * ```ts
+   * app.get('/welcome', (c) => {
+   *   // Set headers
+   *   c.header('X-Message', 'Hello!')
+   *   c.header('Content-Type', 'text/plain')
+   *
+   *   return c.body('Thank you for coming')
+   * })
+   * ```
+   */
+  header = (name, value, options) => {
+    if (this.finalized) {
+      this.#res = createResponseInstance(this.#res.body, this.#res);
+    }
+    const headers = this.#res ? this.#res.headers : this.#preparedHeaders ??= new Headers();
+    if (value === void 0) {
+      headers.delete(name);
+    } else if (options?.append) {
+      headers.append(name, value);
+    } else {
+      headers.set(name, value);
+    }
+  };
+  status = (status) => {
+    this.#status = status;
+  };
+  /**
+   * `.set()` can set the value specified by the key.
+   *
+   * @see {@link https://hono.dev/docs/api/context#set-get}
+   *
+   * @example
+   * ```ts
+   * app.use('*', async (c, next) => {
+   *   c.set('message', 'Hono is hot!!')
+   *   await next()
+   * })
+   * ```
+   */
+  set = (key, value) => {
+    this.#var ??= /* @__PURE__ */ new Map();
+    this.#var.set(key, value);
+  };
+  /**
+   * `.get()` can use the value specified by the key.
+   *
+   * @see {@link https://hono.dev/docs/api/context#set-get}
+   *
+   * @example
+   * ```ts
+   * app.get('/', (c) => {
+   *   const message = c.get('message')
+   *   return c.text(`The message is "${message}"`)
+   * })
+   * ```
+   */
+  get = (key) => {
+    return this.#var ? this.#var.get(key) : void 0;
+  };
+  /**
+   * `.var` can access the value of a variable.
+   *
+   * @see {@link https://hono.dev/docs/api/context#var}
+   *
+   * @example
+   * ```ts
+   * const result = c.var.client.oneMethod()
+   * ```
+   */
+  // c.var.propName is a read-only
+  get var() {
+    if (!this.#var) {
+      return {};
+    }
+    return Object.fromEntries(this.#var);
+  }
+  #newResponse(data, arg, headers) {
+    const responseHeaders = this.#res ? new Headers(this.#res.headers) : this.#preparedHeaders ?? new Headers();
+    if (typeof arg === "object" && "headers" in arg) {
+      const argHeaders = arg.headers instanceof Headers ? arg.headers : new Headers(arg.headers);
+      for (const [key, value] of argHeaders) {
+        if (key.toLowerCase() === "set-cookie") {
+          responseHeaders.append(key, value);
+        } else {
+          responseHeaders.set(key, value);
+        }
+      }
+    }
+    if (headers) {
+      for (const [k, v] of Object.entries(headers)) {
+        if (typeof v === "string") {
+          responseHeaders.set(k, v);
+        } else {
+          responseHeaders.delete(k);
+          for (const v2 of v) {
+            responseHeaders.append(k, v2);
+          }
+        }
+      }
+    }
+    const status = typeof arg === "number" ? arg : arg?.status ?? this.#status;
+    return createResponseInstance(data, { status, headers: responseHeaders });
+  }
+  newResponse = (...args) => this.#newResponse(...args);
+  /**
+   * `.body()` can return the HTTP response.
+   * You can set headers with `.header()` and set HTTP status code with `.status`.
+   * This can also be set in `.text()`, `.json()` and so on.
+   *
+   * @see {@link https://hono.dev/docs/api/context#body}
+   *
+   * @example
+   * ```ts
+   * app.get('/welcome', (c) => {
+   *   // Set headers
+   *   c.header('X-Message', 'Hello!')
+   *   c.header('Content-Type', 'text/plain')
+   *   // Set HTTP status code
+   *   c.status(201)
+   *
+   *   // Return the response body
+   *   return c.body('Thank you for coming')
+   * })
+   * ```
+   */
+  body = (data, arg, headers) => this.#newResponse(data, arg, headers);
+  /**
+   * `.text()` can render text as `Content-Type:text/plain`.
+   *
+   * @see {@link https://hono.dev/docs/api/context#text}
+   *
+   * @example
+   * ```ts
+   * app.get('/say', (c) => {
+   *   return c.text('Hello!')
+   * })
+   * ```
+   */
+  text = (text, arg, headers) => {
+    return !this.#preparedHeaders && !this.#status && !arg && !headers && !this.finalized ? new Response(text) : this.#newResponse(
+      text,
+      arg,
+      setDefaultContentType(TEXT_PLAIN, headers)
+    );
+  };
+  /**
+   * `.json()` can render JSON as `Content-Type:application/json`.
+   *
+   * @see {@link https://hono.dev/docs/api/context#json}
+   *
+   * @example
+   * ```ts
+   * app.get('/api', (c) => {
+   *   return c.json({ message: 'Hello!' })
+   * })
+   * ```
+   */
+  json = (object2, arg, headers) => {
+    return this.#newResponse(
+      JSON.stringify(object2),
+      arg,
+      setDefaultContentType("application/json", headers)
+    );
+  };
+  html = (html, arg, headers) => {
+    const res = (html2) => this.#newResponse(html2, arg, setDefaultContentType("text/html; charset=UTF-8", headers));
+    return typeof html === "object" ? resolveCallback(html, HtmlEscapedCallbackPhase.Stringify, false, {}).then(res) : res(html);
+  };
+  /**
+   * `.redirect()` can Redirect, default status code is 302.
+   *
+   * @see {@link https://hono.dev/docs/api/context#redirect}
+   *
+   * @example
+   * ```ts
+   * app.get('/redirect', (c) => {
+   *   return c.redirect('/')
+   * })
+   * app.get('/redirect-permanently', (c) => {
+   *   return c.redirect('/', 301)
+   * })
+   * ```
+   */
+  redirect = (location, status) => {
+    const locationString = String(location);
+    this.header(
+      "Location",
+      // Multibyes should be encoded
+      // eslint-disable-next-line no-control-regex
+      !/[^\x00-\xFF]/.test(locationString) ? locationString : encodeURI(locationString)
+    );
+    return this.newResponse(null, status ?? 302);
+  };
+  /**
+   * `.notFound()` can return the Not Found Response.
+   *
+   * @see {@link https://hono.dev/docs/api/context#notfound}
+   *
+   * @example
+   * ```ts
+   * app.get('/notfound', (c) => {
+   *   return c.notFound()
+   * })
+   * ```
+   */
+  notFound = () => {
+    this.#notFoundHandler ??= () => createResponseInstance();
+    return this.#notFoundHandler(this);
+  };
+};
+
+// node_modules/hono/dist/router.js
+var METHOD_NAME_ALL = "ALL";
+var METHOD_NAME_ALL_LOWERCASE = "all";
+var METHODS = ["get", "post", "put", "delete", "options", "patch"];
+var MESSAGE_MATCHER_IS_ALREADY_BUILT = "Can not add a route since the matcher is already built.";
+var UnsupportedPathError = class extends Error {
+};
+
+// node_modules/hono/dist/utils/constants.js
+var COMPOSED_HANDLER = "__COMPOSED_HANDLER";
+
+// node_modules/hono/dist/hono-base.js
+var notFoundHandler = (c) => {
+  return c.text("404 Not Found", 404);
+};
+var errorHandler = (err, c) => {
+  if ("getResponse" in err) {
+    const res = err.getResponse();
+    return c.newResponse(res.body, res);
+  }
+  console.error(err);
+  return c.text("Internal Server Error", 500);
+};
+var Hono = class _Hono {
+  get;
+  post;
+  put;
+  delete;
+  options;
+  patch;
+  all;
+  on;
+  use;
+  /*
+    This class is like an abstract class and does not have a router.
+    To use it, inherit the class and implement router in the constructor.
+  */
+  router;
+  getPath;
+  // Cannot use `#` because it requires visibility at JavaScript runtime.
+  _basePath = "/";
+  #path = "/";
+  routes = [];
+  constructor(options = {}) {
+    const allMethods = [...METHODS, METHOD_NAME_ALL_LOWERCASE];
+    allMethods.forEach((method) => {
+      this[method] = (args1, ...args) => {
+        if (typeof args1 === "string") {
+          this.#path = args1;
+        } else {
+          this.#addRoute(method, this.#path, args1);
+        }
+        args.forEach((handler) => {
+          this.#addRoute(method, this.#path, handler);
+        });
+        return this;
+      };
+    });
+    this.on = (method, path4, ...handlers) => {
+      for (const p of [path4].flat()) {
+        this.#path = p;
+        for (const m of [method].flat()) {
+          handlers.map((handler) => {
+            this.#addRoute(m.toUpperCase(), this.#path, handler);
+          });
+        }
+      }
+      return this;
+    };
+    this.use = (arg1, ...handlers) => {
+      if (typeof arg1 === "string") {
+        this.#path = arg1;
+      } else {
+        this.#path = "*";
+        handlers.unshift(arg1);
+      }
+      handlers.forEach((handler) => {
+        this.#addRoute(METHOD_NAME_ALL, this.#path, handler);
+      });
+      return this;
+    };
+    const { strict, ...optionsWithoutStrict } = options;
+    Object.assign(this, optionsWithoutStrict);
+    this.getPath = strict ?? true ? options.getPath ?? getPath : getPathNoStrict;
+  }
+  #clone() {
+    const clone = new _Hono({
+      router: this.router,
+      getPath: this.getPath
+    });
+    clone.errorHandler = this.errorHandler;
+    clone.#notFoundHandler = this.#notFoundHandler;
+    clone.routes = this.routes;
+    return clone;
+  }
+  #notFoundHandler = notFoundHandler;
+  // Cannot use `#` because it requires visibility at JavaScript runtime.
+  errorHandler = errorHandler;
+  /**
+   * `.route()` allows grouping other Hono instance in routes.
+   *
+   * @see {@link https://hono.dev/docs/api/routing#grouping}
+   *
+   * @param {string} path - base Path
+   * @param {Hono} app - other Hono instance
+   * @returns {Hono} routed Hono instance
+   *
+   * @example
+   * ```ts
+   * const app = new Hono()
+   * const app2 = new Hono()
+   *
+   * app2.get("/user", (c) => c.text("user"))
+   * app.route("/api", app2) // GET /api/user
+   * ```
+   */
+  route(path4, app) {
+    const subApp = this.basePath(path4);
+    app.routes.map((r) => {
+      let handler;
+      if (app.errorHandler === errorHandler) {
+        handler = r.handler;
+      } else {
+        handler = async (c, next) => (await compose([], app.errorHandler)(c, () => r.handler(c, next))).res;
+        handler[COMPOSED_HANDLER] = r.handler;
+      }
+      subApp.#addRoute(r.method, r.path, handler, r.basePath);
+    });
+    return this;
+  }
+  /**
+   * `.basePath()` allows base paths to be specified.
+   *
+   * @see {@link https://hono.dev/docs/api/routing#base-path}
+   *
+   * @param {string} path - base Path
+   * @returns {Hono} changed Hono instance
+   *
+   * @example
+   * ```ts
+   * const api = new Hono().basePath('/api')
+   * ```
+   */
+  basePath(path4) {
+    const subApp = this.#clone();
+    subApp._basePath = mergePath(this._basePath, path4);
+    return subApp;
+  }
+  /**
+   * `.onError()` handles an error and returns a customized Response.
+   *
+   * @see {@link https://hono.dev/docs/api/hono#error-handling}
+   *
+   * @param {ErrorHandler} handler - request Handler for error
+   * @returns {Hono} changed Hono instance
+   *
+   * @example
+   * ```ts
+   * app.onError((err, c) => {
+   *   console.error(`${err}`)
+   *   return c.text('Custom Error Message', 500)
+   * })
+   * ```
+   */
+  onError = (handler) => {
+    this.errorHandler = handler;
+    return this;
+  };
+  /**
+   * `.notFound()` allows you to customize a Not Found Response.
+   *
+   * @see {@link https://hono.dev/docs/api/hono#not-found}
+   *
+   * @param {NotFoundHandler} handler - request handler for not-found
+   * @returns {Hono} changed Hono instance
+   *
+   * @example
+   * ```ts
+   * app.notFound((c) => {
+   *   return c.text('Custom 404 Message', 404)
+   * })
+   * ```
+   */
+  notFound = (handler) => {
+    this.#notFoundHandler = handler;
+    return this;
+  };
+  /**
+   * `.mount()` allows you to mount applications built with other frameworks into your Hono application.
+   *
+   * @see {@link https://hono.dev/docs/api/hono#mount}
+   *
+   * @param {string} path - base Path
+   * @param {Function} applicationHandler - other Request Handler
+   * @param {MountOptions} [options] - options of `.mount()`
+   * @returns {Hono} mounted Hono instance
+   *
+   * @example
+   * ```ts
+   * import { Router as IttyRouter } from 'itty-router'
+   * import { Hono } from 'hono'
+   * // Create itty-router application
+   * const ittyRouter = IttyRouter()
+   * // GET /itty-router/hello
+   * ittyRouter.get('/hello', () => new Response('Hello from itty-router'))
+   *
+   * const app = new Hono()
+   * app.mount('/itty-router', ittyRouter.handle)
+   * ```
+   *
+   * @example
+   * ```ts
+   * const app = new Hono()
+   * // Send the request to another application without modification.
+   * app.mount('/app', anotherApp, {
+   *   replaceRequest: (req) => req,
+   * })
+   * ```
+   */
+  mount(path4, applicationHandler, options) {
+    let replaceRequest;
+    let optionHandler;
+    if (options) {
+      if (typeof options === "function") {
+        optionHandler = options;
+      } else {
+        optionHandler = options.optionHandler;
+        if (options.replaceRequest === false) {
+          replaceRequest = (request) => request;
+        } else {
+          replaceRequest = options.replaceRequest;
+        }
+      }
+    }
+    const getOptions = optionHandler ? (c) => {
+      const options2 = optionHandler(c);
+      return Array.isArray(options2) ? options2 : [options2];
+    } : (c) => {
+      let executionContext = void 0;
+      try {
+        executionContext = c.executionCtx;
+      } catch {
+      }
+      return [c.env, executionContext];
+    };
+    replaceRequest ||= (() => {
+      const mergedPath = mergePath(this._basePath, path4);
+      const pathPrefixLength = mergedPath === "/" ? 0 : mergedPath.length;
+      return (request) => {
+        const url = new URL(request.url);
+        url.pathname = this.getPath(request).slice(pathPrefixLength) || "/";
+        return new Request(url, request);
+      };
+    })();
+    const handler = async (c, next) => {
+      const res = await applicationHandler(replaceRequest(c.req.raw), ...getOptions(c));
+      if (res) {
+        return res;
+      }
+      await next();
+    };
+    this.#addRoute(METHOD_NAME_ALL, mergePath(path4, "*"), handler);
+    return this;
+  }
+  #addRoute(method, path4, handler, baseRoutePath) {
+    method = method.toUpperCase();
+    path4 = mergePath(this._basePath, path4);
+    const r = {
+      basePath: baseRoutePath !== void 0 ? mergePath(this._basePath, baseRoutePath) : this._basePath,
+      path: path4,
+      method,
+      handler
+    };
+    this.router.add(method, path4, [handler, r]);
+    this.routes.push(r);
+  }
+  #handleError(err, c) {
+    if (err instanceof Error) {
+      return this.errorHandler(err, c);
+    }
+    throw err;
+  }
+  #dispatch(request, executionCtx, env, method) {
+    if (method === "HEAD") {
+      return (async () => new Response(null, await this.#dispatch(request, executionCtx, env, "GET")))();
+    }
+    const path4 = this.getPath(request, { env });
+    const matchResult = this.router.match(method, path4);
+    const c = new Context(request, {
+      path: path4,
+      matchResult,
+      env,
+      executionCtx,
+      notFoundHandler: this.#notFoundHandler
+    });
+    if (matchResult[0].length === 1) {
+      let res;
+      try {
+        res = matchResult[0][0][0][0](c, async () => {
+          c.res = await this.#notFoundHandler(c);
+        });
+      } catch (err) {
+        return this.#handleError(err, c);
+      }
+      return res instanceof Promise ? res.then(
+        (resolved) => resolved || (c.finalized ? c.res : this.#notFoundHandler(c))
+      ).catch((err) => this.#handleError(err, c)) : res ?? this.#notFoundHandler(c);
+    }
+    const composed = compose(matchResult[0], this.errorHandler, this.#notFoundHandler);
+    return (async () => {
+      try {
+        const context = await composed(c);
+        if (!context.finalized) {
+          throw new Error(
+            "Context is not finalized. Did you forget to return a Response object or `await next()`?"
+          );
+        }
+        return context.res;
+      } catch (err) {
+        return this.#handleError(err, c);
+      }
+    })();
+  }
+  /**
+   * `.fetch()` will be entry point of your app.
+   *
+   * @see {@link https://hono.dev/docs/api/hono#fetch}
+   *
+   * @param {Request} request - request Object of request
+   * @param {Env} Env - env Object
+   * @param {ExecutionContext} - context of execution
+   * @returns {Response | Promise<Response>} response of request
+   *
+   */
+  fetch = (request, ...rest) => {
+    return this.#dispatch(request, rest[1], rest[0], request.method);
+  };
+  /**
+   * `.request()` is a useful method for testing.
+   * You can pass a URL or pathname to send a GET request.
+   * app will return a Response object.
+   * ```ts
+   * test('GET /hello is ok', async () => {
+   *   const res = await app.request('/hello')
+   *   expect(res.status).toBe(200)
+   * })
+   * ```
+   * @see https://hono.dev/docs/api/hono#request
+   */
+  request = (input, requestInit, Env, executionCtx) => {
+    if (input instanceof Request) {
+      return this.fetch(requestInit ? new Request(input, requestInit) : input, Env, executionCtx);
+    }
+    input = input.toString();
+    return this.fetch(
+      new Request(
+        /^https?:\/\//.test(input) ? input : `http://localhost${mergePath("/", input)}`,
+        requestInit
+      ),
+      Env,
+      executionCtx
+    );
+  };
+  /**
+   * `.fire()` automatically adds a global fetch event listener.
+   * This can be useful for environments that adhere to the Service Worker API, such as non-ES module Cloudflare Workers.
+   * @deprecated
+   * Use `fire` from `hono/service-worker` instead.
+   * ```ts
+   * import { Hono } from 'hono'
+   * import { fire } from 'hono/service-worker'
+   *
+   * const app = new Hono()
+   * // ...
+   * fire(app)
+   * ```
+   * @see https://hono.dev/docs/api/hono#fire
+   * @see https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API
+   * @see https://developers.cloudflare.com/workers/reference/migrate-to-module-workers/
+   */
+  fire = () => {
+    addEventListener("fetch", (event) => {
+      event.respondWith(this.#dispatch(event.request, event, void 0, event.request.method));
+    });
+  };
+};
+
+// node_modules/hono/dist/router/reg-exp-router/matcher.js
+var emptyParam = [];
+function match(method, path4) {
+  const matchers = this.buildAllMatchers();
+  const match2 = ((method2, path22) => {
+    const matcher = matchers[method2] || matchers[METHOD_NAME_ALL];
+    const staticMatch = matcher[2][path22];
+    if (staticMatch) {
+      return staticMatch;
+    }
+    const match3 = path22.match(matcher[0]);
+    if (!match3) {
+      return [[], emptyParam];
+    }
+    const index = match3.indexOf("", 1);
+    return [matcher[1][index], match3];
+  });
+  this.match = match2;
+  return match2(method, path4);
+}
+
+// node_modules/hono/dist/router/reg-exp-router/node.js
+var LABEL_REG_EXP_STR = "[^/]+";
+var ONLY_WILDCARD_REG_EXP_STR = ".*";
+var TAIL_WILDCARD_REG_EXP_STR = "(?:|/.*)";
+var PATH_ERROR = /* @__PURE__ */ Symbol();
+var regExpMetaChars = new Set(".\\+*[^]$()");
+function compareKey(a, b) {
+  if (a.length === 1) {
+    return b.length === 1 ? a < b ? -1 : 1 : -1;
+  }
+  if (b.length === 1) {
+    return 1;
+  }
+  if (a === ONLY_WILDCARD_REG_EXP_STR || a === TAIL_WILDCARD_REG_EXP_STR) {
+    return 1;
+  } else if (b === ONLY_WILDCARD_REG_EXP_STR || b === TAIL_WILDCARD_REG_EXP_STR) {
+    return -1;
+  }
+  if (a === LABEL_REG_EXP_STR) {
+    return 1;
+  } else if (b === LABEL_REG_EXP_STR) {
+    return -1;
+  }
+  return a.length === b.length ? a < b ? -1 : 1 : b.length - a.length;
+}
+var Node = class _Node {
+  #index;
+  #varIndex;
+  #children = /* @__PURE__ */ Object.create(null);
+  insert(tokens, index, paramMap, context, pathErrorCheckOnly) {
+    if (tokens.length === 0) {
+      if (this.#index !== void 0) {
+        throw PATH_ERROR;
+      }
+      if (pathErrorCheckOnly) {
+        return;
+      }
+      this.#index = index;
+      return;
+    }
+    const [token, ...restTokens] = tokens;
+    const pattern = token === "*" ? restTokens.length === 0 ? ["", "", ONLY_WILDCARD_REG_EXP_STR] : ["", "", LABEL_REG_EXP_STR] : token === "/*" ? ["", "", TAIL_WILDCARD_REG_EXP_STR] : token.match(/^\:([^\{\}]+)(?:\{(.+)\})?$/);
+    let node;
+    if (pattern) {
+      const name = pattern[1];
+      let regexpStr = pattern[2] || LABEL_REG_EXP_STR;
+      if (name && pattern[2]) {
+        if (regexpStr === ".*") {
+          throw PATH_ERROR;
+        }
+        regexpStr = regexpStr.replace(/^\((?!\?:)(?=[^)]+\)$)/, "(?:");
+        if (/\((?!\?:)/.test(regexpStr)) {
+          throw PATH_ERROR;
+        }
+      }
+      node = this.#children[regexpStr];
+      if (!node) {
+        if (Object.keys(this.#children).some(
+          (k) => k !== ONLY_WILDCARD_REG_EXP_STR && k !== TAIL_WILDCARD_REG_EXP_STR
+        )) {
+          throw PATH_ERROR;
+        }
+        if (pathErrorCheckOnly) {
+          return;
+        }
+        node = this.#children[regexpStr] = new _Node();
+        if (name !== "") {
+          node.#varIndex = context.varIndex++;
+        }
+      }
+      if (!pathErrorCheckOnly && name !== "") {
+        paramMap.push([name, node.#varIndex]);
+      }
+    } else {
+      node = this.#children[token];
+      if (!node) {
+        if (Object.keys(this.#children).some(
+          (k) => k.length > 1 && k !== ONLY_WILDCARD_REG_EXP_STR && k !== TAIL_WILDCARD_REG_EXP_STR
+        )) {
+          throw PATH_ERROR;
+        }
+        if (pathErrorCheckOnly) {
+          return;
+        }
+        node = this.#children[token] = new _Node();
+      }
+    }
+    node.insert(restTokens, index, paramMap, context, pathErrorCheckOnly);
+  }
+  buildRegExpStr() {
+    const childKeys = Object.keys(this.#children).sort(compareKey);
+    const strList = childKeys.map((k) => {
+      const c = this.#children[k];
+      return (typeof c.#varIndex === "number" ? `(${k})@${c.#varIndex}` : regExpMetaChars.has(k) ? `\\${k}` : k) + c.buildRegExpStr();
+    });
+    if (typeof this.#index === "number") {
+      strList.unshift(`#${this.#index}`);
+    }
+    if (strList.length === 0) {
+      return "";
+    }
+    if (strList.length === 1) {
+      return strList[0];
+    }
+    return "(?:" + strList.join("|") + ")";
+  }
+};
+
+// node_modules/hono/dist/router/reg-exp-router/trie.js
+var Trie = class {
+  #context = { varIndex: 0 };
+  #root = new Node();
+  insert(path4, index, pathErrorCheckOnly) {
+    const paramAssoc = [];
+    const groups = [];
+    for (let i = 0; ; ) {
+      let replaced = false;
+      path4 = path4.replace(/\{[^}]+\}/g, (m) => {
+        const mark = `@\\${i}`;
+        groups[i] = [mark, m];
+        i++;
+        replaced = true;
+        return mark;
+      });
+      if (!replaced) {
+        break;
+      }
+    }
+    const tokens = path4.match(/(?::[^\/]+)|(?:\/\*$)|./g) || [];
+    for (let i = groups.length - 1; i >= 0; i--) {
+      const [mark] = groups[i];
+      for (let j = tokens.length - 1; j >= 0; j--) {
+        if (tokens[j].indexOf(mark) !== -1) {
+          tokens[j] = tokens[j].replace(mark, groups[i][1]);
+          break;
+        }
+      }
+    }
+    this.#root.insert(tokens, index, paramAssoc, this.#context, pathErrorCheckOnly);
+    return paramAssoc;
+  }
+  buildRegExp() {
+    let regexp = this.#root.buildRegExpStr();
+    if (regexp === "") {
+      return [/^$/, [], []];
+    }
+    let captureIndex = 0;
+    const indexReplacementMap = [];
+    const paramReplacementMap = [];
+    regexp = regexp.replace(/#(\d+)|@(\d+)|\.\*\$/g, (_, handlerIndex, paramIndex) => {
+      if (handlerIndex !== void 0) {
+        indexReplacementMap[++captureIndex] = Number(handlerIndex);
+        return "$()";
+      }
+      if (paramIndex !== void 0) {
+        paramReplacementMap[Number(paramIndex)] = ++captureIndex;
+        return "";
+      }
+      return "";
+    });
+    return [new RegExp(`^${regexp}`), indexReplacementMap, paramReplacementMap];
+  }
+};
+
+// node_modules/hono/dist/router/reg-exp-router/router.js
+var nullMatcher = [/^$/, [], /* @__PURE__ */ Object.create(null)];
+var wildcardRegExpCache = /* @__PURE__ */ Object.create(null);
+function buildWildcardRegExp(path4) {
+  return wildcardRegExpCache[path4] ??= new RegExp(
+    path4 === "*" ? "" : `^${path4.replace(
+      /\/\*$|([.\\+*[^\]$()])/g,
+      (_, metaChar) => metaChar ? `\\${metaChar}` : "(?:|/.*)"
+    )}$`
+  );
+}
+function clearWildcardRegExpCache() {
+  wildcardRegExpCache = /* @__PURE__ */ Object.create(null);
+}
+function buildMatcherFromPreprocessedRoutes(routes) {
+  const trie = new Trie();
+  const handlerData = [];
+  if (routes.length === 0) {
+    return nullMatcher;
+  }
+  const routesWithStaticPathFlag = routes.map(
+    (route) => [!/\*|\/:/.test(route[0]), ...route]
+  ).sort(
+    ([isStaticA, pathA], [isStaticB, pathB]) => isStaticA ? 1 : isStaticB ? -1 : pathA.length - pathB.length
+  );
+  const staticMap = /* @__PURE__ */ Object.create(null);
+  for (let i = 0, j = -1, len = routesWithStaticPathFlag.length; i < len; i++) {
+    const [pathErrorCheckOnly, path4, handlers] = routesWithStaticPathFlag[i];
+    if (pathErrorCheckOnly) {
+      staticMap[path4] = [handlers.map(([h]) => [h, /* @__PURE__ */ Object.create(null)]), emptyParam];
+    } else {
+      j++;
+    }
+    let paramAssoc;
+    try {
+      paramAssoc = trie.insert(path4, j, pathErrorCheckOnly);
+    } catch (e) {
+      throw e === PATH_ERROR ? new UnsupportedPathError(path4) : e;
+    }
+    if (pathErrorCheckOnly) {
+      continue;
+    }
+    handlerData[j] = handlers.map(([h, paramCount]) => {
+      const paramIndexMap = /* @__PURE__ */ Object.create(null);
+      paramCount -= 1;
+      for (; paramCount >= 0; paramCount--) {
+        const [key, value] = paramAssoc[paramCount];
+        paramIndexMap[key] = value;
+      }
+      return [h, paramIndexMap];
+    });
+  }
+  const [regexp, indexReplacementMap, paramReplacementMap] = trie.buildRegExp();
+  for (let i = 0, len = handlerData.length; i < len; i++) {
+    for (let j = 0, len2 = handlerData[i].length; j < len2; j++) {
+      const map = handlerData[i][j]?.[1];
+      if (!map) {
+        continue;
+      }
+      const keys = Object.keys(map);
+      for (let k = 0, len3 = keys.length; k < len3; k++) {
+        map[keys[k]] = paramReplacementMap[map[keys[k]]];
+      }
+    }
+  }
+  const handlerMap = [];
+  for (const i in indexReplacementMap) {
+    handlerMap[i] = handlerData[indexReplacementMap[i]];
+  }
+  return [regexp, handlerMap, staticMap];
+}
+function findMiddleware(middleware, path4) {
+  if (!middleware) {
     return void 0;
   }
-  const [body, signature] = value.split(".");
-  if (!body || !signature || !signatureMatches(signature, sign(body, secret))) {
-    return void 0;
+  for (const k of Object.keys(middleware).sort((a, b) => b.length - a.length)) {
+    if (buildWildcardRegExp(k).test(path4)) {
+      return [...middleware[k]];
+    }
+  }
+  return void 0;
+}
+var RegExpRouter = class {
+  name = "RegExpRouter";
+  #middleware;
+  #routes;
+  constructor() {
+    this.#middleware = { [METHOD_NAME_ALL]: /* @__PURE__ */ Object.create(null) };
+    this.#routes = { [METHOD_NAME_ALL]: /* @__PURE__ */ Object.create(null) };
+  }
+  add(method, path4, handler) {
+    const middleware = this.#middleware;
+    const routes = this.#routes;
+    if (!middleware || !routes) {
+      throw new Error(MESSAGE_MATCHER_IS_ALREADY_BUILT);
+    }
+    if (!middleware[method]) {
+      ;
+      [middleware, routes].forEach((handlerMap) => {
+        handlerMap[method] = /* @__PURE__ */ Object.create(null);
+        Object.keys(handlerMap[METHOD_NAME_ALL]).forEach((p) => {
+          handlerMap[method][p] = [...handlerMap[METHOD_NAME_ALL][p]];
+        });
+      });
+    }
+    if (path4 === "/*") {
+      path4 = "*";
+    }
+    const paramCount = (path4.match(/\/:/g) || []).length;
+    if (/\*$/.test(path4)) {
+      const re = buildWildcardRegExp(path4);
+      if (method === METHOD_NAME_ALL) {
+        Object.keys(middleware).forEach((m) => {
+          middleware[m][path4] ||= findMiddleware(middleware[m], path4) || findMiddleware(middleware[METHOD_NAME_ALL], path4) || [];
+        });
+      } else {
+        middleware[method][path4] ||= findMiddleware(middleware[method], path4) || findMiddleware(middleware[METHOD_NAME_ALL], path4) || [];
+      }
+      Object.keys(middleware).forEach((m) => {
+        if (method === METHOD_NAME_ALL || method === m) {
+          Object.keys(middleware[m]).forEach((p) => {
+            re.test(p) && middleware[m][p].push([handler, paramCount]);
+          });
+        }
+      });
+      Object.keys(routes).forEach((m) => {
+        if (method === METHOD_NAME_ALL || method === m) {
+          Object.keys(routes[m]).forEach(
+            (p) => re.test(p) && routes[m][p].push([handler, paramCount])
+          );
+        }
+      });
+      return;
+    }
+    const paths = checkOptionalParameter(path4) || [path4];
+    for (let i = 0, len = paths.length; i < len; i++) {
+      const path22 = paths[i];
+      Object.keys(routes).forEach((m) => {
+        if (method === METHOD_NAME_ALL || method === m) {
+          routes[m][path22] ||= [
+            ...findMiddleware(middleware[m], path22) || findMiddleware(middleware[METHOD_NAME_ALL], path22) || []
+          ];
+          routes[m][path22].push([handler, paramCount - len + i + 1]);
+        }
+      });
+    }
+  }
+  match = match;
+  buildAllMatchers() {
+    const matchers = /* @__PURE__ */ Object.create(null);
+    Object.keys(this.#routes).concat(Object.keys(this.#middleware)).forEach((method) => {
+      matchers[method] ||= this.#buildMatcher(method);
+    });
+    this.#middleware = this.#routes = void 0;
+    clearWildcardRegExpCache();
+    return matchers;
+  }
+  #buildMatcher(method) {
+    const routes = [];
+    let hasOwnRoute = method === METHOD_NAME_ALL;
+    [this.#middleware, this.#routes].forEach((r) => {
+      const ownRoute = r[method] ? Object.keys(r[method]).map((path4) => [path4, r[method][path4]]) : [];
+      if (ownRoute.length !== 0) {
+        hasOwnRoute ||= true;
+        routes.push(...ownRoute);
+      } else if (method !== METHOD_NAME_ALL) {
+        routes.push(
+          ...Object.keys(r[METHOD_NAME_ALL]).map((path4) => [path4, r[METHOD_NAME_ALL][path4]])
+        );
+      }
+    });
+    if (!hasOwnRoute) {
+      return null;
+    } else {
+      return buildMatcherFromPreprocessedRoutes(routes);
+    }
+  }
+};
+
+// node_modules/hono/dist/router/smart-router/router.js
+var SmartRouter = class {
+  name = "SmartRouter";
+  #routers = [];
+  #routes = [];
+  constructor(init) {
+    this.#routers = init.routers;
+  }
+  add(method, path4, handler) {
+    if (!this.#routes) {
+      throw new Error(MESSAGE_MATCHER_IS_ALREADY_BUILT);
+    }
+    this.#routes.push([method, path4, handler]);
+  }
+  match(method, path4) {
+    if (!this.#routes) {
+      throw new Error("Fatal error");
+    }
+    const routers = this.#routers;
+    const routes = this.#routes;
+    const len = routers.length;
+    let i = 0;
+    let res;
+    for (; i < len; i++) {
+      const router = routers[i];
+      try {
+        for (let i2 = 0, len2 = routes.length; i2 < len2; i2++) {
+          router.add(...routes[i2]);
+        }
+        res = router.match(method, path4);
+      } catch (e) {
+        if (e instanceof UnsupportedPathError) {
+          continue;
+        }
+        throw e;
+      }
+      this.match = router.match.bind(router);
+      this.#routers = [router];
+      this.#routes = void 0;
+      break;
+    }
+    if (i === len) {
+      throw new Error("Fatal error");
+    }
+    this.name = `SmartRouter + ${this.activeRouter.name}`;
+    return res;
+  }
+  get activeRouter() {
+    if (this.#routes || this.#routers.length !== 1) {
+      throw new Error("No active router has been determined yet.");
+    }
+    return this.#routers[0];
+  }
+};
+
+// node_modules/hono/dist/router/trie-router/node.js
+var emptyParams = /* @__PURE__ */ Object.create(null);
+var hasChildren = (children) => {
+  for (const _ in children) {
+    return true;
+  }
+  return false;
+};
+var Node2 = class _Node2 {
+  #methods;
+  #children;
+  #patterns;
+  #order = 0;
+  #params = emptyParams;
+  constructor(method, handler, children) {
+    this.#children = children || /* @__PURE__ */ Object.create(null);
+    this.#methods = [];
+    if (method && handler) {
+      const m = /* @__PURE__ */ Object.create(null);
+      m[method] = { handler, possibleKeys: [], score: 0 };
+      this.#methods = [m];
+    }
+    this.#patterns = [];
+  }
+  insert(method, path4, handler) {
+    this.#order = ++this.#order;
+    let curNode = this;
+    const parts = splitRoutingPath(path4);
+    const possibleKeys = [];
+    for (let i = 0, len = parts.length; i < len; i++) {
+      const p = parts[i];
+      const nextP = parts[i + 1];
+      const pattern = getPattern(p, nextP);
+      const key = Array.isArray(pattern) ? pattern[0] : p;
+      if (key in curNode.#children) {
+        curNode = curNode.#children[key];
+        if (pattern) {
+          possibleKeys.push(pattern[1]);
+        }
+        continue;
+      }
+      curNode.#children[key] = new _Node2();
+      if (pattern) {
+        curNode.#patterns.push(pattern);
+        possibleKeys.push(pattern[1]);
+      }
+      curNode = curNode.#children[key];
+    }
+    curNode.#methods.push({
+      [method]: {
+        handler,
+        possibleKeys: possibleKeys.filter((v, i, a) => a.indexOf(v) === i),
+        score: this.#order
+      }
+    });
+    return curNode;
+  }
+  #pushHandlerSets(handlerSets, node, method, nodeParams, params) {
+    for (let i = 0, len = node.#methods.length; i < len; i++) {
+      const m = node.#methods[i];
+      const handlerSet = m[method] || m[METHOD_NAME_ALL];
+      const processedSet = {};
+      if (handlerSet !== void 0) {
+        handlerSet.params = /* @__PURE__ */ Object.create(null);
+        handlerSets.push(handlerSet);
+        if (nodeParams !== emptyParams || params && params !== emptyParams) {
+          for (let i2 = 0, len2 = handlerSet.possibleKeys.length; i2 < len2; i2++) {
+            const key = handlerSet.possibleKeys[i2];
+            const processed = processedSet[handlerSet.score];
+            handlerSet.params[key] = params?.[key] && !processed ? params[key] : nodeParams[key] ?? params?.[key];
+            processedSet[handlerSet.score] = true;
+          }
+        }
+      }
+    }
+  }
+  search(method, path4) {
+    const handlerSets = [];
+    this.#params = emptyParams;
+    const curNode = this;
+    let curNodes = [curNode];
+    const parts = splitPath(path4);
+    const curNodesQueue = [];
+    const len = parts.length;
+    let partOffsets = null;
+    for (let i = 0; i < len; i++) {
+      const part = parts[i];
+      const isLast = i === len - 1;
+      const tempNodes = [];
+      for (let j = 0, len2 = curNodes.length; j < len2; j++) {
+        const node = curNodes[j];
+        const nextNode = node.#children[part];
+        if (nextNode) {
+          nextNode.#params = node.#params;
+          if (isLast) {
+            if (nextNode.#children["*"]) {
+              this.#pushHandlerSets(handlerSets, nextNode.#children["*"], method, node.#params);
+            }
+            this.#pushHandlerSets(handlerSets, nextNode, method, node.#params);
+          } else {
+            tempNodes.push(nextNode);
+          }
+        }
+        for (let k = 0, len3 = node.#patterns.length; k < len3; k++) {
+          const pattern = node.#patterns[k];
+          const params = node.#params === emptyParams ? {} : { ...node.#params };
+          if (pattern === "*") {
+            const astNode = node.#children["*"];
+            if (astNode) {
+              this.#pushHandlerSets(handlerSets, astNode, method, node.#params);
+              astNode.#params = params;
+              tempNodes.push(astNode);
+            }
+            continue;
+          }
+          const [key, name, matcher] = pattern;
+          if (!part && !(matcher instanceof RegExp)) {
+            continue;
+          }
+          const child = node.#children[key];
+          if (matcher instanceof RegExp) {
+            if (partOffsets === null) {
+              partOffsets = new Array(len);
+              let offset = path4[0] === "/" ? 1 : 0;
+              for (let p = 0; p < len; p++) {
+                partOffsets[p] = offset;
+                offset += parts[p].length + 1;
+              }
+            }
+            const restPathString = path4.substring(partOffsets[i]);
+            const m = matcher.exec(restPathString);
+            if (m) {
+              params[name] = m[0];
+              this.#pushHandlerSets(handlerSets, child, method, node.#params, params);
+              if (hasChildren(child.#children)) {
+                child.#params = params;
+                const componentCount = m[0].match(/\//)?.length ?? 0;
+                const targetCurNodes = curNodesQueue[componentCount] ||= [];
+                targetCurNodes.push(child);
+              }
+              continue;
+            }
+          }
+          if (matcher === true || matcher.test(part)) {
+            params[name] = part;
+            if (isLast) {
+              this.#pushHandlerSets(handlerSets, child, method, params, node.#params);
+              if (child.#children["*"]) {
+                this.#pushHandlerSets(
+                  handlerSets,
+                  child.#children["*"],
+                  method,
+                  params,
+                  node.#params
+                );
+              }
+            } else {
+              child.#params = params;
+              tempNodes.push(child);
+            }
+          }
+        }
+      }
+      const shifted = curNodesQueue.shift();
+      curNodes = shifted ? tempNodes.concat(shifted) : tempNodes;
+    }
+    if (handlerSets.length > 1) {
+      handlerSets.sort((a, b) => {
+        return a.score - b.score;
+      });
+    }
+    return [handlerSets.map(({ handler, params }) => [handler, params])];
+  }
+};
+
+// node_modules/hono/dist/router/trie-router/router.js
+var TrieRouter = class {
+  name = "TrieRouter";
+  #node;
+  constructor() {
+    this.#node = new Node2();
+  }
+  add(method, path4, handler) {
+    const results = checkOptionalParameter(path4);
+    if (results) {
+      for (let i = 0, len = results.length; i < len; i++) {
+        this.#node.insert(method, results[i], handler);
+      }
+      return;
+    }
+    this.#node.insert(method, path4, handler);
+  }
+  match(method, path4) {
+    return this.#node.search(method, path4);
+  }
+};
+
+// node_modules/hono/dist/hono.js
+var Hono2 = class extends Hono {
+  /**
+   * Creates an instance of the Hono class.
+   *
+   * @param options - Optional configuration options for the Hono instance.
+   */
+  constructor(options = {}) {
+    super(options);
+    this.router = options.router ?? new SmartRouter({
+      routers: [new RegExpRouter(), new TrieRouter()]
+    });
+  }
+};
+
+// src/mlclaw-space-runtime/csrf.ts
+import { createHmac, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
+var CSRF_TTL_SECONDS = 60 * 60;
+function createCsrfToken(params) {
+  const now = params.now ?? Date.now();
+  const body = Buffer.from(JSON.stringify({
+    username: params.username,
+    nonce: randomBytes2(24).toString("base64url"),
+    exp: Math.floor(now / 1e3) + CSRF_TTL_SECONDS
+  })).toString("base64url");
+  return `${body}.${sign(body, params.sessionSecret)}`;
+}
+function verifyCsrfToken(params) {
+  if (!params.token) {
+    return false;
+  }
+  const [body, signature] = params.token.split(".");
+  if (!body || !signature || !signatureMatches(signature, sign(body, params.sessionSecret))) {
+    return false;
   }
   let parsed;
   try {
     parsed = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
   } catch {
-    return void 0;
+    return false;
   }
   if (!parsed || typeof parsed !== "object") {
-    return void 0;
+    return false;
   }
-  const exp = parsed.exp;
-  if (typeof exp !== "number" || exp <= Math.floor(Date.now() / 1e3)) {
-    return void 0;
-  }
-  return parsed;
-}
-function clearCookie(name, secure) {
-  return serializeCookie(name, "", {
-    httpOnly: true,
-    secure,
-    sameSite: "Lax",
-    path: "/",
-    maxAge: 0
-  });
-}
-function randomState() {
-  return randomBytes2(24).toString("base64url");
+  const payload = parsed;
+  const now = Math.floor((params.now ?? Date.now()) / 1e3);
+  return payload.username === params.username && typeof payload.exp === "number" && payload.exp > now && typeof payload.nonce === "string" && payload.nonce.length > 0;
 }
 function sign(value, secret) {
   return createHmac("sha256", secret).update(value).digest("base64url");
@@ -182,39 +2265,93 @@ function signatureMatches(a, b) {
   const right = Buffer.from(b);
   return left.length === right.length && timingSafeEqual(left, right);
 }
-function parseCookies(header) {
-  const cookies = /* @__PURE__ */ new Map();
-  for (const part of (header ?? "").split(";")) {
-    const equals = part.indexOf("=");
-    if (equals <= 0) {
-      continue;
-    }
-    const name = part.slice(0, equals).trim();
-    if (!name) {
-      continue;
-    }
-    try {
-      cookies.set(name, decodeURIComponent(part.slice(equals + 1).trim()));
-    } catch {
-      continue;
-    }
+
+// src/mlclaw-space-runtime/hub-settings.ts
+var RECOMMENDED_MODELS = [
+  {
+    id: "huggingface/google/gemma-4-26B-A4B-it",
+    label: "Gemma 4 26B A4B",
+    note: "Default quality target"
+  },
+  {
+    id: "huggingface/Qwen/Qwen3.6-35B-A3B",
+    label: "Qwen 3.6 35B A3B",
+    note: "Stronger Qwen option"
+  },
+  {
+    id: "huggingface/Qwen/Qwen3-8B",
+    label: "Qwen 3 8B",
+    note: "Lower cost option"
   }
-  return cookies;
+];
+function runtimeSettings(config2) {
+  return {
+    agentName: config2.agentName ?? null,
+    model: config2.model,
+    stateBucket: config2.stateBucket ?? null,
+    statePrefix: config2.statePrefix ?? null,
+    gatewayLocation: config2.gatewayLocation ?? null,
+    runtimeImage: config2.runtimeImage ?? null,
+    runtimeId: config2.runtimeId ?? null,
+    templateRev: config2.templateRev ?? null,
+    allowedUsers: config2.allowedUsers,
+    adminUsers: config2.adminUsers,
+    recommendedModels: RECOMMENDED_MODELS
+  };
 }
-function serializeCookie(name, value, options) {
-  const parts = [
-    `${name}=${encodeURIComponent(value)}`,
-    `Max-Age=${options.maxAge}`,
-    `Path=${options.path}`,
-    `SameSite=${options.sameSite}`
-  ];
-  if (options.httpOnly) {
-    parts.push("HttpOnly");
+function normalizeModel(value) {
+  if (typeof value !== "string") {
+    return void 0;
   }
-  if (options.secure) {
-    parts.push("Secure");
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 240 || /[\r\n\t]/.test(trimmed) || /\s/.test(trimmed)) {
+    return void 0;
   }
-  return parts.join("; ");
+  return trimmed;
+}
+async function setCurrentSpaceVariable(config2, key, value) {
+  if (!config2.spaceId || !config2.hfToken) {
+    throw new Error("Space mutation requires SPACE_ID and HF_TOKEN");
+  }
+  await hubRequest(config2, `/api/spaces/${config2.spaceId}/variables`, {
+    method: "POST",
+    body: JSON.stringify({ key, value }),
+    headers: { "content-type": "application/json" }
+  });
+}
+async function setCurrentSpaceSecret(config2, key, value) {
+  if (!config2.spaceId || !config2.hfToken) {
+    throw new Error("Space mutation requires SPACE_ID and HF_TOKEN");
+  }
+  await hubRequest(config2, `/api/spaces/${config2.spaceId}/secrets`, {
+    method: "POST",
+    body: JSON.stringify({ key, value }),
+    headers: { "content-type": "application/json" }
+  });
+}
+async function restartCurrentSpace(config2) {
+  if (!config2.spaceId || !config2.hfToken) {
+    return false;
+  }
+  await hubRequest(config2, `/api/spaces/${config2.spaceId}/restart`, {
+    method: "POST",
+    body: JSON.stringify({ factoryReboot: false }),
+    headers: { "content-type": "application/json" }
+  });
+  return true;
+}
+async function hubRequest(config2, path4, init) {
+  const response = await fetch(`${config2.hubUrl.replace(/\/+$/, "")}${path4}`, {
+    ...init,
+    headers: {
+      authorization: `Bearer ${config2.hfToken}`,
+      ...init.headers
+    }
+  });
+  if (!response.ok) {
+    throw new Error(`Hub request failed: ${response.status} ${await response.text()}`);
+  }
+  return response;
 }
 
 // node_modules/zod/v3/external.js
@@ -695,8 +2832,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path3, errorMaps, issueData } = params;
-  const fullPath = [...path3, ...issueData.path || []];
+  const { data, path: path4, errorMaps, issueData } = params;
+  const fullPath = [...path4, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -812,11 +2949,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path3, key) {
+  constructor(parent, value, path4, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path3;
+    this._path = path4;
     this._key = key;
   }
   get path() {
@@ -4311,85 +6448,26 @@ async function exchangeCodeForIdentity(settings, code) {
   return { username: userBody.data.preferred_username };
 }
 
-// src/mlclaw-space-runtime/openclaw-config.ts
+// src/mlclaw-space-runtime/openai-credentials.ts
 import fs from "node:fs/promises";
 import path from "node:path";
-async function configureOpenClawGateway(config2) {
-  const raw = await fs.readFile(config2.openclawConfigPath, "utf8");
-  const openclawConfig = JSON.parse(raw);
-  const gateway = object(openclawConfig, "gateway");
-  gateway.mode = "local";
-  gateway.bind = "loopback";
-  gateway.port = config2.openclawPort;
-  gateway.auth = {
-    mode: "trusted-proxy",
-    trustedProxy: {
-      userHeader: "x-forwarded-user",
-      requiredHeaders: ["x-forwarded-proto", "x-forwarded-host"],
-      allowLoopback: true
-    }
-  };
-  gateway.trustedProxies = ["127.0.0.1", "::1"];
-  gateway.controlUi = {
-    ...typeof gateway.controlUi === "object" && gateway.controlUi ? gateway.controlUi : {},
-    dangerouslyDisableDeviceAuth: true,
-    allowedOrigins: [config2.publicUrl]
-  };
-  await fs.mkdir(path.dirname(config2.openclawConfigPath), { recursive: true });
-  await fs.writeFile(config2.openclawConfigPath, `${JSON.stringify(openclawConfig, null, 2)}
-`, { mode: 384 });
-  await fs.chmod(config2.openclawConfigPath, 384);
-}
-function object(parent, key) {
-  const value = parent[key];
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    return value;
-  }
-  const created = {};
-  parent[key] = created;
-  return created;
-}
-
-// src/mlclaw-space-runtime/openai-credentials.ts
-import fs2 from "node:fs/promises";
-import path2 from "node:path";
 function openAiConfigured(env = process.env) {
   return Boolean(env.OPENAI_API_KEY?.trim());
 }
 async function loadOpenAiCredentialFile(file) {
   try {
-    const raw = await fs2.readFile(file, "utf8");
-    const match = raw.match(/(?:^|\n)OPENAI_API_KEY=([^\n]+)/);
-    return match?.[1]?.trim() || void 0;
+    const raw2 = await fs.readFile(file, "utf8");
+    const match2 = raw2.match(/(?:^|\n)OPENAI_API_KEY=([^\n]+)/);
+    return match2?.[1]?.trim() || void 0;
   } catch {
     return void 0;
   }
 }
 async function writeEphemeralOpenAiCredential(file, apiKey) {
-  await fs2.mkdir(path2.dirname(file), { recursive: true, mode: 448 });
-  await fs2.writeFile(file, `OPENAI_API_KEY=${apiKey.trim()}
+  await fs.mkdir(path.dirname(file), { recursive: true, mode: 448 });
+  await fs.writeFile(file, `OPENAI_API_KEY=${apiKey.trim()}
 `, { encoding: "utf8", mode: 384 });
-  await fs2.chmod(file, 384);
-}
-async function persistOpenAiCredentialToSpaceSecret(config2, apiKey) {
-  if (!config2.spaceId || !config2.hfToken) {
-    return false;
-  }
-  const response = await fetch(`${config2.hubUrl.replace(/\/+$/, "")}/api/spaces/${config2.spaceId}/secrets`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${config2.hfToken}`,
-      "content-type": "application/json"
-    },
-    body: JSON.stringify({
-      key: "OPENAI_API_KEY",
-      value: apiKey.trim()
-    })
-  });
-  if (!response.ok) {
-    return false;
-  }
-  return true;
+  await fs.chmod(file, 384);
 }
 function validateOpenAiApiKey(value) {
   if (typeof value !== "string") {
@@ -4449,55 +6527,6 @@ function unauthorizedPage(username) {
     </main>
   `);
 }
-function adminRequiredPage(username) {
-  return page("ML Claw Admin", `
-    <main>
-      <h1>Admin required</h1>
-      <p>The signed-in Hugging Face account <strong>${escapeHtml(username)}</strong> can use this Space, but cannot change credentials.</p>
-      <p class="muted">Set <code>MLCLAW_ADMINS</code> to a comma-separated list of admin usernames.</p>
-      <p><a href="/">Back to gateway</a></p>
-    </main>
-  `);
-}
-function openAiPage(configured, persistent) {
-  return page("OpenAI Credentials", `
-    <main>
-      <h1>OpenAI account</h1>
-      <p class="muted">Store an OpenAI API key as a Hugging Face Space Secret. The key is never sent to the browser after submission.</p>
-      <form method="post" action="/mlclaw/openai">
-        <label for="apiKey">OpenAI API key</label>
-        <input id="apiKey" name="apiKey" type="password" autocomplete="off" placeholder="sk-..." required>
-        <button class="button" type="submit">Save key</button>
-      </form>
-      <p class="${configured ? "ok" : "notice"}">Runtime key: ${configured ? "configured" : "not configured"}</p>
-      <p class="${persistent ? "ok" : "notice"}">Space Secret: ${persistent ? "updated" : "not confirmed"}</p>
-      <p><a href="/">Back to gateway</a></p>
-    </main>
-  `);
-}
-function statusJson(params) {
-  return JSON.stringify({
-    ok: true,
-    mode: params.config.mode,
-    agent: params.config.agentName ?? null,
-    space: params.config.spaceId ?? null,
-    stateBucket: params.config.stateBucket ?? null,
-    runtimeImage: params.config.runtimeImage ?? null,
-    openclaw: {
-      running: params.openclawRunning,
-      host: params.config.openclawHost,
-      port: params.config.openclawPort
-    },
-    auth: {
-      hfOAuthConfigured: Boolean(params.config.oauthClientId && params.config.oauthClientSecret),
-      allowedUsers: params.config.allowedUsers,
-      allowAnySignedIn: params.config.allowAnySignedIn
-    },
-    openai: {
-      configured: params.openAiConfigured
-    }
-  }, null, 2);
-}
 function page(title, body) {
   return `<!doctype html>
 <html lang="en">
@@ -4542,9 +6571,548 @@ function escapeHtml(value) {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 }
 
+// src/mlclaw-space-runtime/cookies.ts
+import { createHmac as createHmac2, randomBytes as randomBytes3, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+function createSignedCookie(options, payload) {
+  const body = Buffer.from(JSON.stringify({
+    ...payload,
+    exp: Math.floor(Date.now() / 1e3) + options.maxAgeSeconds
+  })).toString("base64url");
+  const signature = sign2(body, options.secret);
+  return serializeCookie(options.name, `${body}.${signature}`, {
+    httpOnly: true,
+    secure: options.secure,
+    sameSite: "Lax",
+    path: "/",
+    maxAge: options.maxAgeSeconds
+  });
+}
+function verifySignedCookie(cookieHeader, name, secret) {
+  const value = parseCookies(cookieHeader).get(name);
+  if (!value) {
+    return void 0;
+  }
+  const [body, signature] = value.split(".");
+  if (!body || !signature || !signatureMatches2(signature, sign2(body, secret))) {
+    return void 0;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+  } catch {
+    return void 0;
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return void 0;
+  }
+  const exp = parsed.exp;
+  if (typeof exp !== "number" || exp <= Math.floor(Date.now() / 1e3)) {
+    return void 0;
+  }
+  return parsed;
+}
+function clearCookie(name, secure) {
+  return serializeCookie(name, "", {
+    httpOnly: true,
+    secure,
+    sameSite: "Lax",
+    path: "/",
+    maxAge: 0
+  });
+}
+function randomState() {
+  return randomBytes3(24).toString("base64url");
+}
+function sign2(value, secret) {
+  return createHmac2("sha256", secret).update(value).digest("base64url");
+}
+function signatureMatches2(a, b) {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && timingSafeEqual2(left, right);
+}
+function parseCookies(header) {
+  const cookies = /* @__PURE__ */ new Map();
+  for (const part of (header ?? "").split(";")) {
+    const equals = part.indexOf("=");
+    if (equals <= 0) {
+      continue;
+    }
+    const name = part.slice(0, equals).trim();
+    if (!name) {
+      continue;
+    }
+    try {
+      cookies.set(name, decodeURIComponent(part.slice(equals + 1).trim()));
+    } catch {
+      continue;
+    }
+  }
+  return cookies;
+}
+function serializeCookie(name, value, options) {
+  const parts = [
+    `${name}=${encodeURIComponent(value)}`,
+    `Max-Age=${options.maxAge}`,
+    `Path=${options.path}`,
+    `SameSite=${options.sameSite}`
+  ];
+  if (options.httpOnly) {
+    parts.push("HttpOnly");
+  }
+  if (options.secure) {
+    parts.push("Secure");
+  }
+  return parts.join("; ");
+}
+
+// src/mlclaw-space-runtime/session.ts
+var SESSION_COOKIE = "mlclaw_session";
+var STATE_COOKIE = "mlclaw_oauth";
+var SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
+var STATE_TTL_SECONDS = 60 * 10;
+function createSessionCookie(params) {
+  return createSignedCookie({
+    name: SESSION_COOKIE,
+    secret: params.sessionSecret,
+    maxAgeSeconds: SESSION_TTL_SECONDS,
+    secure: params.secure
+  }, { username: params.username });
+}
+function createOauthStateCookie(params) {
+  const state = params.state ?? randomState();
+  return {
+    state,
+    cookie: createSignedCookie({
+      name: STATE_COOKIE,
+      secret: params.sessionSecret,
+      maxAgeSeconds: STATE_TTL_SECONDS,
+      secure: params.secure
+    }, { state, next: normalizeNext(params.next) })
+  };
+}
+function clearSessionCookie(secure) {
+  return clearCookie(SESSION_COOKIE, secure);
+}
+function clearOauthStateCookie(secure) {
+  return clearCookie(STATE_COOKIE, secure);
+}
+function readSession(cookieHeader, sessionSecret) {
+  return verifySignedCookie(cookieHeader, SESSION_COOKIE, sessionSecret);
+}
+function readOauthState(cookieHeader, sessionSecret) {
+  return verifySignedCookie(cookieHeader, STATE_COOKIE, sessionSecret);
+}
+function normalizeNext(value) {
+  if (!value.startsWith("/") || value.startsWith("//") || value.includes("\r") || value.includes("\n")) {
+    return "/";
+  }
+  return value;
+}
+
+// src/mlclaw-space-runtime/app.ts
+function createSpaceRuntimeApp(config2, controls) {
+  const app = new Hono2();
+  app.get("/health", (c) => health(c, config2, controls));
+  app.get("/healthz", (c) => health(c, config2, controls));
+  app.get("/assets/mlclaw.svg", async () => serveFile(path2.join(config2.assetsDir, "mlclaw.svg"), "image/svg+xml; charset=utf-8"));
+  app.get("/oauth/login", (c) => handleOauthLogin(c, config2));
+  app.get("/oauth/callback", (c) => handleOauthCallback(c, config2));
+  app.get("/login", (c) => c.html(loginPage(config2, void 0, normalizeNext(c.req.query("next") ?? "/"))));
+  app.get("/logout", (c) => logoutResponse(config2, false));
+  app.get("/mlclaw/logout", (c) => logoutResponse(config2, false));
+  app.post("/mlclaw/api/logout", (c) => logoutResponse(config2, true));
+  app.get("/mlclaw/assets/*", async (c) => {
+    const relative = c.req.path.slice("/mlclaw/assets/".length);
+    const safe = safeRelativePath(relative);
+    if (!safe) {
+      return c.text("not found\n", 404);
+    }
+    const file = path2.join(config2.assetsDir, "mlclaw-control-ui", safe);
+    return serveFile(file, contentType(file), true);
+  });
+  app.get("/mlclaw/openai", (c) => c.redirect("/mlclaw/credentials", 302));
+  app.post("/mlclaw/openai", (c) => c.redirect("/mlclaw/credentials", 303));
+  app.get("/mlclaw/api/session", (c) => {
+    const auth = requireAllowed(c, config2);
+    if (auth instanceof Response) {
+      return auth;
+    }
+    return c.json({
+      user: auth.username,
+      admin: isAdmin(config2, auth.username),
+      csrfToken: createCsrfToken({ username: auth.username, sessionSecret: config2.sessionSecret })
+    });
+  });
+  app.get("/mlclaw/api/status", async (c) => {
+    const auth = requireAllowed(c, config2);
+    if (auth instanceof Response) {
+      return auth;
+    }
+    return c.json(await statusPayload(config2, controls));
+  });
+  app.get("/mlclaw/api/settings", (c) => {
+    const auth = requireAllowed(c, config2);
+    if (auth instanceof Response) {
+      return auth;
+    }
+    return c.json(runtimeSettings(config2));
+  });
+  app.post("/mlclaw/api/settings/model", async (c) => {
+    const auth = requireAdmin(c, config2);
+    if (auth instanceof Response) {
+      return auth;
+    }
+    const csrf = requireCsrf(c, config2, auth.username);
+    if (csrf) {
+      return csrf;
+    }
+    if (config2.mode !== "app") {
+      return c.json({ ok: false, error: "template mode cannot mutate settings" }, 403);
+    }
+    const body = await readJson(c);
+    const model = normalizeModel(body?.model);
+    if (!model) {
+      return c.json({ ok: false, error: "model is required" }, 400);
+    }
+    await setCurrentSpaceVariable(config2, "OPENCLAW_MODEL", model);
+    controls.setModel(model);
+    let restartPending = false;
+    try {
+      restartPending = await restartCurrentSpace(config2);
+    } catch (err) {
+      process.stderr.write(`[mlclaw] failed to restart Space after model update: ${formatError(err)}
+`);
+    }
+    return c.json({ ok: true, model, restartPending });
+  });
+  app.post("/mlclaw/api/credentials/openai", async (c) => {
+    const auth = requireAdmin(c, config2);
+    if (auth instanceof Response) {
+      return auth;
+    }
+    const csrf = requireCsrf(c, config2, auth.username);
+    if (csrf) {
+      return csrf;
+    }
+    if (config2.mode !== "app") {
+      return c.json({ ok: false, error: "template mode cannot mutate credentials" }, 403);
+    }
+    const body = await readJson(c);
+    const apiKey = validateOpenAiApiKey(body?.apiKey);
+    if (!apiKey) {
+      return c.json({ ok: false, error: "valid OpenAI API key is required" }, 400);
+    }
+    let persistent = false;
+    if (config2.spaceId && config2.hfToken) {
+      try {
+        await setCurrentSpaceSecret(config2, "OPENAI_API_KEY", apiKey);
+        persistent = true;
+      } catch {
+        process.stderr.write("[mlclaw] failed to persist OpenAI key as Space Secret\n");
+      }
+    }
+    await writeEphemeralOpenAiCredential(config2.openaiCredentialFile, apiKey);
+    await controls.restartOpenClawWithOpenAi(apiKey);
+    return c.json({ ok: true, configured: true, persistent });
+  });
+  app.post("/mlclaw/api/runtime/restart", async (c) => {
+    const auth = requireAdmin(c, config2);
+    if (auth instanceof Response) {
+      return auth;
+    }
+    const csrf = requireCsrf(c, config2, auth.username);
+    if (csrf) {
+      return csrf;
+    }
+    if (config2.mode !== "app") {
+      return c.json({ ok: false, error: "template mode cannot restart runtime" }, 403);
+    }
+    return c.json({ ok: true, restartPending: await restartCurrentSpace(config2) });
+  });
+  app.get("/mlclaw", (c) => controlUi(c, config2));
+  app.get("/mlclaw/*", (c) => controlUi(c, config2));
+  app.notFound((c) => {
+    if (config2.mode === "template") {
+      return c.html(templatePage(config2));
+    }
+    return new Response("", { status: 404, headers: { "x-mlclaw-fallback": "openclaw" } });
+  });
+  return app;
+}
+function health(c, config2, controls) {
+  const healthy = config2.mode !== "app" || controls.openclawRunning();
+  return c.text(healthy ? "ok\n" : "openclaw is not running\n", healthy ? 200 : 503);
+}
+function handleOauthLogin(c, config2) {
+  const next = normalizeNext(c.req.query("next") ?? "/");
+  if (!config2.oauthClientId || !config2.oauthClientSecret) {
+    return c.html(loginPage(config2, "Hugging Face OAuth is not configured.", next));
+  }
+  const { state, cookie } = createOauthStateCookie({
+    next,
+    sessionSecret: config2.sessionSecret,
+    secure: config2.cookieSecure
+  });
+  const redirectUri = `${config2.publicUrl}/oauth/callback`;
+  const headers = new Headers({ location: authorizeUrl({
+    clientId: config2.oauthClientId,
+    clientSecret: config2.oauthClientSecret,
+    providerUrl: config2.providerUrl,
+    redirectUri
+  }, state) });
+  headers.append("set-cookie", cookie);
+  return new Response(null, { status: 302, headers });
+}
+async function handleOauthCallback(c, config2) {
+  const stateCookie = readOauthState(c.req.header("cookie"), config2.sessionSecret);
+  const state = c.req.query("state");
+  const code = c.req.query("code");
+  if (!stateCookie || !state || stateCookie.state !== state || !code || !config2.oauthClientId || !config2.oauthClientSecret) {
+    return c.html(loginPage(config2, "The Hugging Face sign-in attempt expired. Try again."), 401);
+  }
+  const identity = await exchangeCodeForIdentity({
+    clientId: config2.oauthClientId,
+    clientSecret: config2.oauthClientSecret,
+    providerUrl: config2.providerUrl,
+    redirectUri: `${config2.publicUrl}/oauth/callback`
+  }, code);
+  if (!identity) {
+    return c.html(loginPage(config2, "Hugging Face sign-in failed. Try again."), 401);
+  }
+  const headers = new Headers({ location: normalizeNext(typeof stateCookie.next === "string" ? stateCookie.next : "/") });
+  headers.append("set-cookie", createSessionCookie({
+    username: identity.username,
+    sessionSecret: config2.sessionSecret,
+    secure: config2.cookieSecure
+  }));
+  headers.append("set-cookie", clearOauthStateCookie(config2.cookieSecure));
+  return new Response(null, { status: 302, headers });
+}
+async function controlUi(c, config2) {
+  const auth = requireAllowed(c, config2);
+  if (auth instanceof Response) {
+    return auth;
+  }
+  return serveFile(path2.join(config2.assetsDir, "mlclaw-control-ui", "index.html"), "text/html; charset=utf-8");
+}
+function logoutResponse(config2, json) {
+  const headers = new Headers();
+  headers.append("set-cookie", clearSessionCookie(config2.cookieSecure));
+  if (json) {
+    headers.set("content-type", "application/json; charset=utf-8");
+    return new Response(`${JSON.stringify({ ok: true })}
+`, { status: 200, headers });
+  }
+  headers.set("location", "/");
+  return new Response(null, { status: 302, headers });
+}
+function requireAllowed(c, config2) {
+  const session = readSession(c.req.header("cookie"), config2.sessionSecret);
+  if (!session) {
+    return unauthenticated(c, config2);
+  }
+  if (!isAllowed(config2, session.username)) {
+    return c.html(unauthorizedPage(session.username), 403);
+  }
+  return session;
+}
+function requireAdmin(c, config2) {
+  const allowed = requireAllowed(c, config2);
+  if (allowed instanceof Response) {
+    return allowed;
+  }
+  if (!isAdmin(config2, allowed.username)) {
+    return c.json({ ok: false, error: "admin required" }, 403);
+  }
+  return allowed;
+}
+function requireCsrf(c, config2, username) {
+  if (verifyCsrfToken({
+    token: c.req.header("x-mlclaw-csrf"),
+    username,
+    sessionSecret: config2.sessionSecret
+  })) {
+    return void 0;
+  }
+  return c.json({ ok: false, error: "csrf token is invalid or missing" }, 403);
+}
+function unauthenticated(c, config2) {
+  const next = normalizeNext(c.req.path + new URL(c.req.url).search);
+  if (c.req.path.startsWith("/mlclaw/api/")) {
+    return c.json({ ok: false, error: "authentication required" }, 401);
+  }
+  if (isBrowserNavigation(c)) {
+    return c.redirect(`/login?next=${encodeURIComponent(next)}`, 302);
+  }
+  return c.html(loginPage(config2, void 0, next), 401);
+}
+function isBrowserNavigation(c) {
+  const method = c.req.method;
+  return (method === "GET" || method === "HEAD") && (c.req.header("accept") ?? "").includes("text/html");
+}
+function isAllowed(config2, username) {
+  return config2.allowAnySignedIn || config2.allowedUsers.includes(username);
+}
+function isAdmin(config2, username) {
+  return config2.adminUsers.includes(username);
+}
+async function statusPayload(config2, controls) {
+  return {
+    ok: true,
+    mode: config2.mode,
+    agent: config2.agentName ?? null,
+    model: config2.model,
+    space: config2.spaceId ?? null,
+    stateBucket: config2.stateBucket ?? null,
+    statePrefix: config2.statePrefix ?? null,
+    gatewayLocation: config2.gatewayLocation ?? null,
+    runtimeImage: config2.runtimeImage ?? null,
+    runtimeId: config2.runtimeId ?? null,
+    templateRev: config2.templateRev ?? null,
+    openclaw: {
+      running: controls.openclawRunning(),
+      host: config2.openclawHost,
+      port: config2.openclawPort
+    },
+    auth: {
+      hfOAuthConfigured: Boolean(config2.oauthClientId && config2.oauthClientSecret),
+      allowedUsers: config2.allowedUsers,
+      adminUsers: config2.adminUsers,
+      allowAnySignedIn: config2.allowAnySignedIn
+    },
+    openai: {
+      configured: await controls.openAiConfigured(),
+      environmentConfigured: openAiConfigured(),
+      runtimeFileConfigured: Boolean(await loadOpenAiCredentialFile(config2.openaiCredentialFile))
+    }
+  };
+}
+async function readJson(c) {
+  try {
+    const value = await c.req.json();
+    return value && typeof value === "object" && !Array.isArray(value) ? value : void 0;
+  } catch {
+    return void 0;
+  }
+}
+async function serveFile(file, contentTypeHeader, immutable = false) {
+  try {
+    const body = await fs2.readFile(file);
+    const headers = new Headers({ "content-type": contentTypeHeader });
+    if (immutable) {
+      headers.set("cache-control", "public, max-age=31536000, immutable");
+    }
+    return new Response(new Uint8Array(body), { status: 200, headers });
+  } catch {
+    return new Response("not found\n", {
+      status: 404,
+      headers: { "content-type": "text/plain; charset=utf-8" }
+    });
+  }
+}
+function safeRelativePath(value) {
+  let decoded;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    return void 0;
+  }
+  const normalized = path2.posix.normalize(decoded).replace(/^\/+/, "");
+  if (!normalized || normalized === "." || normalized.startsWith("../") || normalized.includes("/../")) {
+    return void 0;
+  }
+  return normalized;
+}
+function formatError(err) {
+  return err instanceof Error ? err.stack ?? err.message : String(err);
+}
+function contentType(file) {
+  if (file.endsWith(".js")) {
+    return "text/javascript; charset=utf-8";
+  }
+  if (file.endsWith(".css")) {
+    return "text/css; charset=utf-8";
+  }
+  if (file.endsWith(".svg")) {
+    return "image/svg+xml; charset=utf-8";
+  }
+  if (file.endsWith(".html")) {
+    return "text/html; charset=utf-8";
+  }
+  return "application/octet-stream";
+}
+
+// src/mlclaw-space-runtime/openclaw-config.ts
+import fs3 from "node:fs/promises";
+import path3 from "node:path";
+async function configureOpenClawGateway(config2) {
+  const raw2 = await fs3.readFile(config2.openclawConfigPath, "utf8");
+  const openclawConfig = JSON.parse(raw2);
+  const gateway = object(openclawConfig, "gateway");
+  gateway.mode = "local";
+  gateway.bind = "loopback";
+  gateway.port = config2.openclawPort;
+  gateway.auth = {
+    mode: "trusted-proxy",
+    trustedProxy: {
+      userHeader: "x-forwarded-user",
+      requiredHeaders: ["x-forwarded-proto", "x-forwarded-host"],
+      allowLoopback: true
+    }
+  };
+  gateway.trustedProxies = ["127.0.0.1", "::1"];
+  gateway.controlUi = {
+    ...typeof gateway.controlUi === "object" && gateway.controlUi ? gateway.controlUi : {},
+    dangerouslyDisableDeviceAuth: true,
+    allowedOrigins: [config2.publicUrl]
+  };
+  await fs3.mkdir(path3.dirname(config2.openclawConfigPath), { recursive: true });
+  await fs3.writeFile(config2.openclawConfigPath, `${JSON.stringify(openclawConfig, null, 2)}
+`, { mode: 384 });
+  await fs3.chmod(config2.openclawConfigPath, 384);
+}
+function object(parent, key) {
+  const value = parent[key];
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value;
+  }
+  const created = {};
+  parent[key] = created;
+  return created;
+}
+
 // src/mlclaw-space-runtime/proxy.ts
 import http from "node:http";
 import net from "node:net";
+
+// src/mlclaw-space-runtime/shell.ts
+var SHELL_MARKER = "data-mlclaw-shell";
+function shouldInjectShell(params) {
+  const method = params.method ?? "GET";
+  return (method === "GET" || method === "HEAD") && (params.requestAccept ?? "").includes("text/html") && (params.responseContentType ?? "").toLowerCase().includes("text/html") && !params.responseContentEncoding;
+}
+function injectMlClawShell(html) {
+  if (html.includes(SHELL_MARKER)) {
+    return html;
+  }
+  const shell = `
+<div ${SHELL_MARKER} style="position:fixed;right:16px;bottom:16px;z-index:2147483647;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+  <nav style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid rgba(15,23,42,.14);border-radius:8px;background:rgba(255,255,255,.96);box-shadow:0 12px 30px rgba(15,23,42,.16);color:#111827;">
+    <a href="/mlclaw" style="font-weight:700;color:#111827;text-decoration:none;">ML Claw</a>
+    <a href="/mlclaw/settings" style="color:#374151;text-decoration:none;">Settings</a>
+    <a href="/mlclaw/status" style="color:#374151;text-decoration:none;">Status</a>
+    <a href="/mlclaw/logout" style="color:#374151;text-decoration:none;">Sign out</a>
+  </nav>
+</div>
+`;
+  if (html.includes("</body>")) {
+    return html.replace("</body>", `${shell}</body>`);
+  }
+  return `${html}${shell}`;
+}
+
+// src/mlclaw-space-runtime/proxy.ts
 var ADMIN_CONTROL_UI_SCOPES = [
   "operator.admin",
   "operator.read",
@@ -4570,6 +7138,10 @@ var HOP_BY_HOP_HEADERS = /* @__PURE__ */ new Set([
 async function proxyHttp(req, res, config2, identity) {
   const headers = sanitizeHeaders(req.headers);
   headers.host = `${config2.openclawHost}:${config2.openclawPort}`;
+  if (isHtmlNavigation(req)) {
+    delete headers["accept-encoding"];
+    delete headers["Accept-Encoding"];
+  }
   addTrustedProxyHeaders(headers, config2, identity);
   const upstream = http.request({
     host: config2.openclawHost,
@@ -4578,8 +7150,29 @@ async function proxyHttp(req, res, config2, identity) {
     path: req.url,
     headers
   }, (upstreamResponse) => {
-    res.writeHead(upstreamResponse.statusCode ?? 502, sanitizeHeaders(upstreamResponse.headers));
-    upstreamResponse.pipe(res);
+    const responseHeaders = sanitizeHeaders(upstreamResponse.headers);
+    const inject = shouldInjectShell({
+      method: req.method,
+      requestAccept: String(req.headers.accept ?? ""),
+      responseContentType: headerValue(upstreamResponse.headers["content-type"]),
+      responseContentEncoding: headerValue(upstreamResponse.headers["content-encoding"])
+    });
+    if (!inject) {
+      res.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders);
+      upstreamResponse.pipe(res);
+      return;
+    }
+    const chunks = [];
+    upstreamResponse.on("data", (chunk) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    upstreamResponse.on("end", () => {
+      const body = injectMlClawShell(Buffer.concat(chunks).toString("utf8"));
+      delete responseHeaders["content-length"];
+      delete responseHeaders["Content-Length"];
+      res.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders);
+      res.end(body);
+    });
   });
   upstream.on("error", (err) => {
     process.stderr.write(`[mlclaw] upstream HTTP proxy failed: ${err.stack ?? err.message}
@@ -4664,20 +7257,37 @@ function addTrustedProxyHeaders(headers, config2, identity) {
 function resolveControlUiScopes(config2, identity) {
   return config2.adminUsers.includes(identity.username) ? ADMIN_CONTROL_UI_SCOPES : USER_CONTROL_UI_SCOPES;
 }
+function headerValue(value) {
+  if (Array.isArray(value)) {
+    return value.join(",");
+  }
+  if (typeof value === "number") {
+    return String(value);
+  }
+  return value;
+}
+function isHtmlNavigation(req) {
+  return (req.method === "GET" || req.method === "HEAD") && String(req.headers.accept ?? "").includes("text/html");
+}
 
 // src/mlclaw-space-runtime/server.ts
-var SESSION_COOKIE = "mlclaw_session";
-var STATE_COOKIE = "mlclaw_oauth";
-var SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
-var STATE_TTL_SECONDS = 60 * 10;
 var SpaceRuntimeServer = class {
   constructor(config2, options = {}) {
     this.config = config2;
     this.exitProcess = options.exitProcess ?? ((code) => process.exit(code));
+    this.app = createSpaceRuntimeApp(config2, {
+      openclawRunning: () => Boolean(this.openclaw && !this.openclaw.killed),
+      openAiConfigured: async () => openAiConfigured() || Boolean(await loadOpenAiCredentialFile(this.config.openaiCredentialFile)),
+      restartOpenClawWithOpenAi: (apiKey) => this.restartOpenClawWithOpenAi(apiKey),
+      setModel: (model) => {
+        this.config.model = model;
+      }
+    });
   }
   openclaw;
   openclawStarting = false;
   openclawStopping = false;
+  app;
   exitProcess;
   async start() {
     if (this.config.mode === "app") {
@@ -4685,7 +7295,7 @@ var SpaceRuntimeServer = class {
     }
     const server2 = http2.createServer((req, res) => {
       this.handle(req, res).catch((err) => {
-        process.stderr.write(`[mlclaw] request failed: ${formatError(err)}
+        process.stderr.write(`[mlclaw] request failed: ${formatError2(err)}
 `);
         if (!res.headersSent) {
           res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
@@ -4696,14 +7306,14 @@ var SpaceRuntimeServer = class {
     server2.on("upgrade", (req, socket, head) => {
       const netSocket = socket;
       try {
-        const session = this.readSession(req);
+        const session = readSession(req.headers.cookie, this.config.sessionSecret);
         if (!session || !this.isAllowed(session.username)) {
           rejectWebSocket(netSocket);
           return;
         }
         proxyWebSocket(req, netSocket, head, this.config, { username: session.username });
       } catch (err) {
-        process.stderr.write(`[mlclaw] websocket upgrade failed: ${formatError(err)}
+        process.stderr.write(`[mlclaw] websocket upgrade failed: ${formatError2(err)}
 `);
         rejectWebSocket(netSocket);
       }
@@ -4751,40 +7361,18 @@ var SpaceRuntimeServer = class {
   }
   async handle(req, res) {
     const url = new URL(req.url ?? "/", this.config.publicUrl);
-    if (url.pathname === "/health" || url.pathname === "/healthz") {
-      const healthy = this.config.mode !== "app" || Boolean(this.openclaw && !this.openclaw.killed);
-      this.sendText(res, healthy ? 200 : 503, healthy ? "ok\n" : "openclaw is not running\n");
-      return;
-    }
-    if (url.pathname === "/assets/mlclaw.svg") {
-      await this.sendAsset(res, "/app/assets/mlclaw.svg");
-      return;
-    }
-    if (this.config.mode === "template") {
+    if (this.config.mode === "template" && !isTemplateRuntimePath(url.pathname)) {
       this.sendHtml(res, templatePage(this.config));
       return;
     }
-    if (url.pathname === "/oauth/login") {
-      this.handleOauthLogin(res, url.searchParams.get("next") ?? "/");
-      return;
+    if (this.shouldRouteToMlClaw(url.pathname)) {
+      const response = await this.app.fetch(nodeRequestToWebRequest(req, this.config.publicUrl));
+      if (!response.headers.has("x-mlclaw-fallback")) {
+        await sendWebResponse(res, response);
+        return;
+      }
     }
-    if (url.pathname === "/oauth/callback") {
-      await this.handleOauthCallback(req, res, url);
-      return;
-    }
-    if (url.pathname === "/login") {
-      this.sendHtml(res, loginPage(this.config, void 0, normalizeNext(url.searchParams.get("next") ?? "/")));
-      return;
-    }
-    if (url.pathname === "/logout" || url.pathname === "/mlclaw/logout") {
-      res.writeHead(302, {
-        location: "/",
-        "set-cookie": clearCookie(SESSION_COOKIE, this.config.cookieSecure)
-      });
-      res.end();
-      return;
-    }
-    const session = this.readSession(req);
+    const session = readSession(req.headers.cookie, this.config.sessionSecret);
     if (!session) {
       this.sendUnauthenticated(req, res, url);
       return;
@@ -4793,102 +7381,10 @@ var SpaceRuntimeServer = class {
       this.sendHtml(res, unauthorizedPage(session.username), 403);
       return;
     }
-    if (url.pathname === "/mlclaw/status") {
-      this.sendJson(res, 200, statusJson({
-        config: this.config,
-        openclawRunning: Boolean(this.openclaw && !this.openclaw.killed),
-        openAiConfigured: openAiConfigured() || Boolean(await loadOpenAiCredentialFile(this.config.openaiCredentialFile))
-      }));
-      return;
-    }
-    if (url.pathname === "/mlclaw/openai") {
-      if (!this.isAdmin(session.username)) {
-        this.sendHtml(res, adminRequiredPage(session.username), 403);
-        return;
-      }
-      if (req.method === "GET") {
-        this.sendHtml(res, openAiPage(
-          openAiConfigured() || Boolean(await loadOpenAiCredentialFile(this.config.openaiCredentialFile)),
-          openAiConfigured()
-        ));
-        return;
-      }
-      if (req.method === "POST") {
-        await this.handleOpenAiPost(req, res);
-        return;
-      }
-    }
     await proxyHttp(req, res, this.config, { username: session.username });
   }
-  handleOauthLogin(res, next) {
-    if (!this.config.oauthClientId || !this.config.oauthClientSecret) {
-      this.sendHtml(res, loginPage(this.config, "Hugging Face OAuth is not configured.", normalizeNext(next)));
-      return;
-    }
-    const state = randomState();
-    const cookie = createSignedCookie({
-      name: STATE_COOKIE,
-      secret: this.config.sessionSecret,
-      maxAgeSeconds: STATE_TTL_SECONDS,
-      secure: this.config.cookieSecure
-    }, { state, next: normalizeNext(next) });
-    const redirectUri = `${this.config.publicUrl}/oauth/callback`;
-    res.writeHead(302, {
-      location: authorizeUrl({
-        clientId: this.config.oauthClientId,
-        clientSecret: this.config.oauthClientSecret,
-        providerUrl: this.config.providerUrl,
-        redirectUri
-      }, state),
-      "set-cookie": cookie
-    });
-    res.end();
-  }
-  async handleOauthCallback(req, res, url) {
-    const stateCookie = verifySignedCookie(req.headers.cookie, STATE_COOKIE, this.config.sessionSecret);
-    const state = url.searchParams.get("state");
-    const code = url.searchParams.get("code");
-    if (!stateCookie || !state || stateCookie.state !== state || !code || !this.config.oauthClientId || !this.config.oauthClientSecret) {
-      this.sendHtml(res, loginPage(this.config, "The Hugging Face sign-in attempt expired. Try again."), 401);
-      return;
-    }
-    const identity = await exchangeCodeForIdentity({
-      clientId: this.config.oauthClientId,
-      clientSecret: this.config.oauthClientSecret,
-      providerUrl: this.config.providerUrl,
-      redirectUri: `${this.config.publicUrl}/oauth/callback`
-    }, code);
-    if (!identity) {
-      this.sendHtml(res, loginPage(this.config, "Hugging Face sign-in failed. Try again."), 401);
-      return;
-    }
-    const sessionCookie = createSignedCookie({
-      name: SESSION_COOKIE,
-      secret: this.config.sessionSecret,
-      maxAgeSeconds: SESSION_TTL_SECONDS,
-      secure: this.config.cookieSecure
-    }, { username: identity.username });
-    res.writeHead(302, {
-      location: normalizeNext(typeof stateCookie.next === "string" ? stateCookie.next : "/"),
-      "set-cookie": [
-        sessionCookie,
-        clearCookie(STATE_COOKIE, this.config.cookieSecure)
-      ]
-    });
-    res.end();
-  }
-  async handleOpenAiPost(req, res) {
-    const body = await readBody(req, 2e4);
-    const params = new URLSearchParams(body);
-    const apiKey = validateOpenAiApiKey(params.get("apiKey"));
-    if (!apiKey) {
-      this.sendHtml(res, openAiPage(false, false), 400);
-      return;
-    }
-    await writeEphemeralOpenAiCredential(this.config.openaiCredentialFile, apiKey);
-    const persistent = await persistOpenAiCredentialToSpaceSecret(this.config, apiKey);
-    await this.restartOpenClawWithOpenAi(apiKey);
-    this.sendHtml(res, openAiPage(true, persistent));
+  shouldRouteToMlClaw(pathname) {
+    return pathname === "/health" || pathname === "/healthz" || pathname === "/assets/mlclaw.svg" || pathname === "/login" || pathname === "/logout" || pathname.startsWith("/oauth/") || pathname === "/mlclaw" || pathname.startsWith("/mlclaw/");
   }
   async startOpenClaw(extraEnv = {}) {
     if (this.openclawStarting || this.openclaw && !this.openclaw.killed) {
@@ -4901,6 +7397,7 @@ var SpaceRuntimeServer = class {
       const env = {
         ...process.env,
         OPENCLAW_GATEWAY_PORT: String(this.config.openclawPort),
+        OPENCLAW_MODEL: this.config.model,
         ...persistedOpenAiKey ? { OPENAI_API_KEY: persistedOpenAiKey } : {},
         ...extraEnv
       };
@@ -4925,22 +7422,8 @@ var SpaceRuntimeServer = class {
     await this.stop();
     await this.startOpenClaw({ OPENAI_API_KEY: apiKey });
   }
-  readSession(req) {
-    return verifySignedCookie(req.headers.cookie, SESSION_COOKIE, this.config.sessionSecret);
-  }
   isAllowed(username) {
     return this.config.allowAnySignedIn || this.config.allowedUsers.includes(username);
-  }
-  isAdmin(username) {
-    return this.config.adminUsers.includes(username);
-  }
-  async sendAsset(res, file) {
-    try {
-      res.writeHead(200, { "content-type": "image/svg+xml; charset=utf-8" });
-      res.end(await fs3.readFile(file, "utf8"));
-    } catch {
-      this.sendText(res, 404, "not found\n");
-    }
   }
   sendUnauthenticated(req, res, url) {
     const next = normalizeNext(`${url.pathname}${url.search}`);
@@ -4948,8 +7431,14 @@ var SpaceRuntimeServer = class {
       this.sendHtml(res, loginPage(this.config, void 0, next));
       return;
     }
-    if (isBrowserNavigation(req) && !isApiPath(url.pathname)) {
+    if (isBrowserNavigation2(req) && !isApiPath(url.pathname)) {
       this.sendRedirect(res, `/login?next=${encodeURIComponent(next)}`);
+      return;
+    }
+    if (isApiPath(url.pathname)) {
+      res.writeHead(401, { "content-type": "application/json; charset=utf-8" });
+      res.end(`${JSON.stringify({ ok: false, error: "authentication required" })}
+`);
       return;
     }
     this.sendHtml(res, loginPage(this.config, void 0, next), 401);
@@ -4962,46 +7451,70 @@ var SpaceRuntimeServer = class {
     res.writeHead(status, { "content-type": "text/html; charset=utf-8" });
     res.end(body);
   }
-  sendJson(res, status, body) {
-    res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
-    res.end(`${body}
-`);
-  }
-  sendText(res, status, body) {
-    res.writeHead(status, { "content-type": "text/plain; charset=utf-8" });
-    res.end(body);
-  }
 };
-function normalizeNext(value) {
-  if (!value.startsWith("/") || value.startsWith("//") || value.includes("\r") || value.includes("\n")) {
-    return "/";
+function nodeRequestToWebRequest(req, publicUrl) {
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        headers.append(key, item);
+      }
+    } else if (value !== void 0) {
+      headers.set(key, value);
+    }
   }
-  return value;
+  const init = {
+    method: req.method ?? "GET",
+    headers
+  };
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    init.body = Readable.toWeb(req);
+    init.duplex = "half";
+  }
+  return new Request(new URL(req.url ?? "/", publicUrl).toString(), init);
 }
-function isBrowserNavigation(req) {
+async function sendWebResponse(res, response) {
+  const headers = {};
+  response.headers.forEach((value, key) => {
+    if (key.toLowerCase() !== "set-cookie") {
+      headers[key] = value;
+    }
+  });
+  const setCookies = response.headers.getSetCookie?.() ?? (response.headers.get("set-cookie") ? [response.headers.get("set-cookie")] : []);
+  if (setCookies.length > 0) {
+    headers["set-cookie"] = setCookies;
+  }
+  res.writeHead(response.status, headers);
+  if (!response.body) {
+    res.end();
+    return;
+  }
+  const reader = response.body.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    if (!res.write(Buffer.from(value))) {
+      await new Promise((resolve) => res.once("drain", resolve));
+    }
+  }
+  res.end();
+}
+function isBrowserNavigation2(req) {
   if (req.method !== "GET" && req.method !== "HEAD") {
     return false;
   }
   return String(req.headers.accept ?? "").includes("text/html");
 }
 function isApiPath(pathname) {
-  return pathname === "/mlclaw/status";
+  return pathname.startsWith("/mlclaw/api/");
 }
-function formatError(err) {
+function isTemplateRuntimePath(pathname) {
+  return pathname === "/health" || pathname === "/healthz" || pathname === "/assets/mlclaw.svg";
+}
+function formatError2(err) {
   return err instanceof Error ? err.stack ?? err.message : String(err);
-}
-async function readBody(req, maxBytes) {
-  const chunks = [];
-  let size = 0;
-  for await (const chunk of req) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    size += buffer.length;
-    if (size > maxBytes) {
-      throw new Error("request body too large");
-    }
-    chunks.push(buffer);
-  }
-  return Buffer.concat(chunks).toString("utf8");
 }
 
 // src/mlclaw-space-runtime/cli.ts

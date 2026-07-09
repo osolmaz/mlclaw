@@ -23,6 +23,7 @@ describe("generated Space repository", () => {
       "Dockerfile",
       "README.md",
       "assets/mlclaw.svg",
+      "assets/mlclaw-control-ui/index.html",
       "assets/hf-tooling/manifest.json",
       "assets/hf-tooling/skills/hf-cli/SKILL.md",
     ];
@@ -30,6 +31,8 @@ describe("generated Space repository", () => {
     for (const file of required) {
       expect(files).toContain(file);
     }
+    expect(files.some((file) => /^assets\/mlclaw-control-ui\/assets\/.*\.js$/.test(file))).toBe(true);
+    expect(files.some((file) => /^assets\/mlclaw-control-ui\/assets\/.*\.css$/.test(file))).toBe(true);
     for (const file of files) {
       expect(
         file === ".gitattributes" ||
@@ -57,6 +60,7 @@ describe("generated Space repository", () => {
       "Dockerfile",
       "README.md",
       "assets/mlclaw.svg",
+      "assets/mlclaw-control-ui/index.html",
       "assets/hf-tooling/manifest.json",
       "assets/hf-tooling/skills/hf-cli/SKILL.md",
       "runtime/entrypoint.sh",
@@ -72,6 +76,8 @@ describe("generated Space repository", () => {
     for (const file of required) {
       expect(files).toContain(file);
     }
+    expect(files.some((file) => /^assets\/mlclaw-control-ui\/assets\/.*\.js$/.test(file))).toBe(true);
+    expect(files.some((file) => /^assets\/mlclaw-control-ui\/assets\/.*\.css$/.test(file))).toBe(true);
     for (const file of files) {
       expect(
         file === ".gitattributes" ||

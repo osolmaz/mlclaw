@@ -1,7 +1,7 @@
 # Stage 1: build the state-sync bundle so the runtime image needs no dev deps.
 FROM node:24-bookworm-slim AS sync-build
 WORKDIR /build
-COPY package.json package-lock.json tsconfig.json ./
+COPY package.json package-lock.json tsconfig.json vite.control-ui.config.ts ./
 COPY src ./src
 RUN npm ci --no-audit --no-fund && npm run build
 

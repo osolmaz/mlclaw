@@ -48,6 +48,9 @@ irm https://raw.githubusercontent.com/osolmaz/mlclaw/main/mlclaw.ps1 | iex
 After the command finishes, open the Space it created and sign in with your
 Hugging Face account.
 
+After sign-in, use `/mlclaw` for settings, status, credentials, and sign out.
+The OpenClaw gateway also shows a small ML Claw control link.
+
 Duplicating this Space manually is only useful for development or for people
 who already know how to configure the required secrets and variables.
 

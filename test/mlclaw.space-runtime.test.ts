@@ -36,19 +36,21 @@ describe("ML Claw Space runtime", () => {
     const server = await runtime.start();
     cleanups.push(() => closeServer(server), () => runtime.stop());
 
-    const anonymous = await fetch(`http://127.0.0.1:${config.port}/mlclaw/status`);
+    const anonymous = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/status`);
 
     expect(anonymous.status).toBe(401);
-    expect(anonymous.headers.get("content-type")).toContain("text/html");
-    expect(await anonymous.text()).toContain("Sign in with Hugging Face");
+    expect(anonymous.headers.get("content-type")).toContain("application/json");
+    expect(await anonymous.json()).toMatchObject({ ok: false, error: "authentication required" });
 
-    const cookie = createSignedCookie({
-      name: "mlclaw_session",
-      secret: config.sessionSecret,
-      maxAgeSeconds: 60,
-      secure: false,
-    }, { username: "alice" });
-    const authenticated = await fetch(`http://127.0.0.1:${config.port}/mlclaw/status`, {
+    const cookie = sessionCookie(config, "alice");
+    const statusPage = await fetch(`http://127.0.0.1:${config.port}/mlclaw/status`, {
+      headers: { cookie },
+    });
+    expect(statusPage.status).toBe(200);
+    expect(statusPage.headers.get("content-type")).toContain("text/html");
+    expect(await statusPage.text()).toContain('<div id="root">');
+
+    const authenticated = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/status`, {
       headers: { cookie },
     });
 
@@ -56,9 +58,11 @@ describe("ML Claw Space runtime", () => {
     expect(authenticated.headers.get("content-type")).toContain("application/json");
     expect(await authenticated.json()).toMatchObject({
       mode: "app",
+      model: "huggingface/google/gemma-4-26B-A4B-it",
       stateBucket: "alice/research-data",
       auth: {
         allowedUsers: ["alice"],
+        adminUsers: ["alice"],
       },
     });
   });
@@ -84,7 +88,7 @@ describe("ML Claw Space runtime", () => {
     expect(loginHtml).toContain('target="_blank"');
     expect(loginHtml).toContain('rel="noopener"');
 
-    const api = await fetch(`http://127.0.0.1:${config.port}/mlclaw/status`, {
+    const api = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/status`, {
       headers: { accept: "application/json" },
     });
     expect(api.status).toBe(401);
@@ -129,12 +133,7 @@ describe("ML Claw Space runtime", () => {
     const server = await runtime.start();
     cleanups.push(() => closeServer(server), () => runtime.stop());
 
-    const cookie = createSignedCookie({
-      name: "mlclaw_session",
-      secret: config.sessionSecret,
-      maxAgeSeconds: 60,
-      secure: false,
-    }, { username: "alice" });
+    const cookie = sessionCookie(config, "alice");
     const response = await fetch(`http://127.0.0.1:${config.port}/`, {
       headers: {
         cookie,
@@ -175,12 +174,7 @@ describe("ML Claw Space runtime", () => {
     const server = await runtime.start();
     cleanups.push(() => closeServer(server), () => runtime.stop());
 
-    const cookie = createSignedCookie({
-      name: "mlclaw_session",
-      secret: config.sessionSecret,
-      maxAgeSeconds: 60,
-      secure: false,
-    }, { username: "bob" });
+    const cookie = sessionCookie(config, "bob");
     const response = await fetch(`http://127.0.0.1:${config.port}/`, {
       headers: { cookie },
     });
@@ -194,12 +188,7 @@ describe("ML Claw Space runtime", () => {
     const runtime = new SpaceRuntimeServer(config);
     const server = await runtime.start();
     cleanups.push(() => closeServer(server), () => runtime.stop());
-    const cookie = createSignedCookie({
-      name: "mlclaw_session",
-      secret: config.sessionSecret,
-      maxAgeSeconds: 60,
-      secure: false,
-    }, { username: "alice" });
+    const cookie = sessionCookie(config, "alice");
 
     const response = await fetch(`http://127.0.0.1:${config.port}/`, {
       headers: { cookie },
@@ -236,27 +225,81 @@ describe("ML Claw Space runtime", () => {
     const runtime = new SpaceRuntimeServer(config);
     const server = await runtime.start();
     cleanups.push(() => closeServer(server), () => runtime.stop());
-    const cookie = createSignedCookie({
-      name: "mlclaw_session",
-      secret: config.sessionSecret,
-      maxAgeSeconds: 60,
-      secure: false,
-    }, { username: "alice" });
+    const cookie = sessionCookie(config, "alice");
+    const csrf = await csrfToken(config, cookie);
 
-    const response = await fetch(`http://127.0.0.1:${config.port}/mlclaw/openai`, {
+    const response = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/credentials/openai`, {
       method: "POST",
       headers: {
         cookie,
-        "content-type": "application/x-www-form-urlencoded",
+        "content-type": "application/json",
+        "x-mlclaw-csrf": csrf,
       },
-      body: new URLSearchParams({ apiKey: `sk-${"a".repeat(32)}` }),
+      body: JSON.stringify({ apiKey: `sk-${"a".repeat(32)}` }),
     });
 
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ ok: true, configured: true, persistent: true });
     expect(captured).toEqual([{ key: "OPENAI_API_KEY", value: `sk-${"a".repeat(32)}` }]);
     await expect(fs.readFile(config.openaiCredentialFile, "utf8")).resolves.toBe(`OPENAI_API_KEY=sk-${"a".repeat(32)}\n`);
     const mode = (await fs.stat(config.openaiCredentialFile)).mode & 0o777;
     expect(mode).toBe(0o600);
+  });
+
+  it("does not log OpenAI key material when Space Secret persistence fails", async () => {
+    const apiKey = `sk-${"b".repeat(32)}`;
+    const hubPort = await freePort();
+    const hub = http.createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += String(chunk);
+      });
+      req.on("end", () => {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "echo", request: body }));
+      });
+    });
+    await listen(hub, hubPort);
+    cleanups.push(() => closeServer(hub));
+
+    const config = await testConfig({
+      hfToken: "hf_test",
+      hubUrl: `http://127.0.0.1:${hubPort}`,
+      spaceId: "alice/research",
+    });
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(() => closeServer(server), () => runtime.stop());
+    const cookie = sessionCookie(config, "alice");
+    const csrf = await csrfToken(config, cookie);
+    const stderr: string[] = [];
+    const writeStderr = process.stderr.write;
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      stderr.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+      return true;
+    }) as typeof process.stderr.write;
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/credentials/openai`, {
+        method: "POST",
+        headers: {
+          cookie,
+          "content-type": "application/json",
+          "x-mlclaw-csrf": csrf,
+        },
+        body: JSON.stringify({ apiKey }),
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ ok: true, configured: true, persistent: false });
+    } finally {
+      process.stderr.write = writeStderr;
+    }
+
+    const log = stderr.join("");
+    expect(log).toContain("failed to persist OpenAI key as Space Secret");
+    expect(log).not.toContain(apiKey);
+    await expect(fs.readFile(config.openaiCredentialFile, "utf8")).resolves.toBe(`OPENAI_API_KEY=${apiKey}\n`);
   });
 
   it("requires an admin session before storing OpenAI credentials", async () => {
@@ -283,26 +326,222 @@ describe("ML Claw Space runtime", () => {
     const runtime = new SpaceRuntimeServer(config);
     const server = await runtime.start();
     cleanups.push(() => closeServer(server), () => runtime.stop());
-    const cookie = createSignedCookie({
-      name: "mlclaw_session",
-      secret: config.sessionSecret,
-      maxAgeSeconds: 60,
-      secure: false,
-    }, { username: "bob" });
+    const cookie = sessionCookie(config, "bob");
+    const csrf = await csrfToken(config, cookie);
 
-    const response = await fetch(`http://127.0.0.1:${config.port}/mlclaw/openai`, {
+    const response = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/credentials/openai`, {
       method: "POST",
       headers: {
         cookie,
-        "content-type": "application/x-www-form-urlencoded",
+        "content-type": "application/json",
+        "x-mlclaw-csrf": csrf,
       },
-      body: new URLSearchParams({ apiKey: `sk-${"a".repeat(32)}` }),
+      body: JSON.stringify({ apiKey: `sk-${"a".repeat(32)}` }),
     });
 
     expect(response.status).toBe(403);
-    expect(await response.text()).toContain("Admin required");
+    expect(await response.json()).toMatchObject({ ok: false, error: "admin required" });
     expect(captured).toEqual([]);
     await expect(fs.access(config.openaiCredentialFile)).rejects.toThrow();
+  });
+
+  it("requires CSRF before mutating model settings", async () => {
+    const config = await testConfig({
+      hfToken: "hf_test",
+      hubUrl: "http://127.0.0.1:1",
+      spaceId: "alice/research",
+    });
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(() => closeServer(server), () => runtime.stop());
+
+    const response = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/settings/model`, {
+      method: "POST",
+      headers: {
+        cookie: sessionCookie(config, "alice"),
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ model: "huggingface/Qwen/Qwen3-8B" }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ ok: false, error: "csrf token is invalid or missing" });
+  });
+
+  it("writes the model only to the current Space and requests restart", async () => {
+    const captured: Array<{ path: string; body: unknown; authorization: string | undefined }> = [];
+    const hubPort = await freePort();
+    const hub = http.createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += String(chunk);
+      });
+      req.on("end", () => {
+        captured.push({
+          path: req.url ?? "",
+          body: body ? JSON.parse(body) : undefined,
+          authorization: req.headers.authorization,
+        });
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end("{}");
+      });
+    });
+    await listen(hub, hubPort);
+    cleanups.push(() => closeServer(hub));
+
+    const config = await testConfig({
+      hfToken: "hf_test",
+      hubUrl: `http://127.0.0.1:${hubPort}`,
+      spaceId: "alice/research",
+    });
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(() => closeServer(server), () => runtime.stop());
+    const cookie = sessionCookie(config, "alice");
+    const csrf = await csrfToken(config, cookie);
+
+    const response = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/settings/model`, {
+      method: "POST",
+      headers: {
+        cookie,
+        "content-type": "application/json",
+        "x-mlclaw-csrf": csrf,
+      },
+      body: JSON.stringify({ model: "huggingface/Qwen/Qwen3-8B" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      model: "huggingface/Qwen/Qwen3-8B",
+      restartPending: true,
+    });
+    expect(captured).toEqual([
+      {
+        path: "/api/spaces/alice/research/variables",
+        body: { key: "OPENCLAW_MODEL", value: "huggingface/Qwen/Qwen3-8B" },
+        authorization: "Bearer hf_test",
+      },
+      {
+        path: "/api/spaces/alice/research/restart",
+        body: { factoryReboot: false },
+        authorization: "Bearer hf_test",
+      },
+    ]);
+  });
+
+  it("reports a saved model when the restart request fails", async () => {
+    const captured: Array<{ path: string; body: unknown }> = [];
+    const hubPort = await freePort();
+    const hub = http.createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += String(chunk);
+      });
+      req.on("end", () => {
+        captured.push({
+          path: req.url ?? "",
+          body: body ? JSON.parse(body) : undefined,
+        });
+        if (req.url?.endsWith("/restart")) {
+          res.writeHead(500, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: "restart failed" }));
+          return;
+        }
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end("{}");
+      });
+    });
+    await listen(hub, hubPort);
+    cleanups.push(() => closeServer(hub));
+
+    const config = await testConfig({
+      hfToken: "hf_test",
+      hubUrl: `http://127.0.0.1:${hubPort}`,
+      spaceId: "alice/research",
+    });
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(() => closeServer(server), () => runtime.stop());
+    const cookie = sessionCookie(config, "alice");
+    const csrf = await csrfToken(config, cookie);
+
+    const response = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/settings/model`, {
+      method: "POST",
+      headers: {
+        cookie,
+        "content-type": "application/json",
+        "x-mlclaw-csrf": csrf,
+      },
+      body: JSON.stringify({ model: "huggingface/Qwen/Qwen3-8B" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      model: "huggingface/Qwen/Qwen3-8B",
+      restartPending: false,
+    });
+    expect(captured.map((item) => item.path)).toEqual([
+      "/api/spaces/alice/research/variables",
+      "/api/spaces/alice/research/restart",
+    ]);
+  });
+
+  it("injects a small ML Claw shell into authenticated OpenClaw HTML", async () => {
+    const openclawPort = await freePort();
+    let capturedHeaders: http.IncomingHttpHeaders | undefined;
+    const upstream = http.createServer((req, res) => {
+      capturedHeaders = req.headers;
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end("<!doctype html><html><body><main>OpenClaw</main></body></html>");
+    });
+    await listen(upstream, openclawPort);
+    cleanups.push(() => closeServer(upstream));
+
+    const config = await testConfig({ openclawPort });
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(() => closeServer(server), () => runtime.stop());
+
+    const response = await fetch(`http://127.0.0.1:${config.port}/`, {
+      headers: {
+        cookie: sessionCookie(config, "alice"),
+        accept: "text/html",
+        "accept-encoding": "gzip, br",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(body).toContain("data-mlclaw-shell");
+    expect(body).toContain("/mlclaw/settings");
+    expect(capturedHeaders?.["accept-encoding"]).toBeUndefined();
+  });
+
+  it("does not inject the ML Claw shell into proxied JSON", async () => {
+    const openclawPort = await freePort();
+    const upstream = http.createServer((req, res) => {
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    await listen(upstream, openclawPort);
+    cleanups.push(() => closeServer(upstream));
+
+    const config = await testConfig({ openclawPort });
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(() => closeServer(server), () => runtime.stop());
+
+    const response = await fetch(`http://127.0.0.1:${config.port}/api/example`, {
+      headers: {
+        cookie: sessionCookie(config, "alice"),
+        accept: "application/json",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(JSON.stringify({ ok: true }));
   });
 
   it("exits the wrapper when OpenClaw exits unexpectedly", async () => {
@@ -431,6 +670,29 @@ describe("ML Claw Space runtime", () => {
 
     expect(config.mode).toBe("app");
   });
+
+  it("serves the template landing page on template-mode app paths", async () => {
+    const config = await testConfig({
+      mode: "template",
+      spaceId: "osolmaz/mlclaw",
+    });
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(() => closeServer(server), () => runtime.stop());
+
+    for (const pathname of ["/", "/login", "/oauth/login", "/mlclaw", "/mlclaw/settings"]) {
+      const response = await fetch(`http://127.0.0.1:${config.port}${pathname}`, {
+        headers: { accept: "text/html" },
+        redirect: "manual",
+      });
+      expect(response.status).toBe(200);
+      const body = await response.text();
+      expect(body).toContain("Do not set this up by only clicking Duplicate");
+    }
+
+    const health = await fetch(`http://127.0.0.1:${config.port}/health`);
+    expect(health.status).toBe(200);
+  });
 });
 
 async function testConfig(overrides: Partial<SpaceRuntimeConfig> = {}): Promise<SpaceRuntimeConfig> {
@@ -465,8 +727,14 @@ async function testConfig(overrides: Partial<SpaceRuntimeConfig> = {}): Promise<
     openclawCommand: process.execPath,
     openclawArgs: ["-e", "setInterval(() => undefined, 100000)"],
     agentName: "research",
+    model: "huggingface/google/gemma-4-26B-A4B-it",
     stateBucket: "alice/research-data",
+    statePrefix: undefined,
+    gatewayLocation: "space",
     runtimeImage: "example/runtime:test",
+    runtimeId: "test-runtime",
+    templateRev: "test-rev",
+    assetsDir: path.resolve("assets"),
     ...overrides,
   };
 }
@@ -510,6 +778,25 @@ async function closeServer(server: http.Server): Promise<void> {
   await new Promise<void>((resolve) => {
     server.close(() => resolve());
   });
+}
+
+function sessionCookie(config: SpaceRuntimeConfig, username: string): string {
+  return createSignedCookie({
+    name: "mlclaw_session",
+    secret: config.sessionSecret,
+    maxAgeSeconds: 60,
+    secure: false,
+  }, { username });
+}
+
+async function csrfToken(config: SpaceRuntimeConfig, cookie: string): Promise<string> {
+  const response = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/session`, {
+    headers: { cookie },
+  });
+  expect(response.status).toBe(200);
+  const body = await response.json() as { csrfToken?: string };
+  expect(body.csrfToken).toBeTruthy();
+  return body.csrfToken as string;
 }
 
 async function websocketUpgrade(port: number, request: string): Promise<string> {

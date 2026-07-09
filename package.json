@@ -39,7 +39,8 @@
     "tsconfig.json"
   ],
   "scripts": {
-    "build": "npm run build:state-sync && npm run build:hf-tooling && npm run build:space-runtime && npm run build:mlclaw",
+    "build": "npm run build:control-ui && npm run build:state-sync && npm run build:hf-tooling && npm run build:space-runtime && npm run build:mlclaw",
+    "build:control-ui": "vite build --config vite.control-ui.config.ts",
     "build:state-sync": "esbuild src/hf-state-sync/cli.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/hf-state-sync.js --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
     "build:hf-tooling": "esbuild src/hf-tooling/cli.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/hf-tooling-seed.js --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
     "build:space-runtime": "esbuild src/mlclaw-space-runtime/cli.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/mlclaw-space-runtime.js --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
@@ -56,13 +57,20 @@
     "@huggingface/splitmix64-wasm": "^0.0.1",
     "@huggingface/xetchunk-wasm": "^0.0.6",
     "commander": "^14.0.3",
+    "hono": "^4.12.28",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "skillflag": "^0.2.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
     "esbuild": "^0.25.0",
     "typescript": "^5.7.0",
+    "vite": "^7.3.6",
     "vitest": "^3.0.0"
   }
 }

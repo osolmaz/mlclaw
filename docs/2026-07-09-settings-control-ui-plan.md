@@ -1,6 +1,6 @@
 # Settings Control UI Plan
 
-Status: proposed
+Status: implemented
 
 ## Goal
 

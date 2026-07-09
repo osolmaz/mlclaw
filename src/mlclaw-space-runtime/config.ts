@@ -28,8 +28,14 @@ export type SpaceRuntimeConfig = {
   openclawCommand: string;
   openclawArgs: string[];
   agentName: string | undefined;
+  model: string;
   stateBucket: string | undefined;
+  statePrefix: string | undefined;
+  gatewayLocation: string | undefined;
   runtimeImage: string | undefined;
+  runtimeId: string | undefined;
+  templateRev: string | undefined;
+  assetsDir: string;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpaceRuntimeConfig {
@@ -88,8 +94,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpaceRuntimeCo
     openclawCommand,
     openclawArgs,
     agentName: trim(env.OPENCLAW_AGENT_NAME),
+    model: trim(env.OPENCLAW_MODEL) ?? "huggingface/google/gemma-4-26B-A4B-it",
     stateBucket: trim(env.OPENCLAW_HF_STATE_BUCKET),
+    statePrefix: trim(env.OPENCLAW_HF_STATE_PREFIX),
+    gatewayLocation: trim(env.MLCLAW_GATEWAY_LOCATION),
     runtimeImage: trim(env.MLCLAW_RUNTIME_IMAGE),
+    runtimeId: trim(env.MLCLAW_RUNTIME_ID),
+    templateRev: trim(env.MLCLAW_TEMPLATE_REV),
+    assetsDir: trim(env.MLCLAW_ASSETS_DIR) ?? "/app/assets",
   };
 }
 

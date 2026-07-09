@@ -1,36 +1,15 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import http from "node:http";
 import type net from "node:net";
-import fs from "node:fs/promises";
-import { clearCookie, createSignedCookie, randomState, verifySignedCookie } from "./cookies.js";
+import { Readable } from "node:stream";
+import type { Hono } from "hono";
+import { createSpaceRuntimeApp } from "./app.js";
 import type { SpaceRuntimeConfig } from "./config.js";
-import { authorizeUrl, exchangeCodeForIdentity } from "./oauth.js";
 import { configureOpenClawGateway } from "./openclaw-config.js";
-import {
-  loadOpenAiCredentialFile,
-  openAiConfigured,
-  persistOpenAiCredentialToSpaceSecret,
-  validateOpenAiApiKey,
-  writeEphemeralOpenAiCredential,
-} from "./openai-credentials.js";
-import { adminRequiredPage, loginPage, openAiPage, statusJson, templatePage, unauthorizedPage } from "./pages.js";
+import { loadOpenAiCredentialFile, openAiConfigured } from "./openai-credentials.js";
+import { loginPage, templatePage, unauthorizedPage } from "./pages.js";
 import { proxyHttp, proxyWebSocket, rejectWebSocket } from "./proxy.js";
-
-const SESSION_COOKIE = "mlclaw_session";
-const STATE_COOKIE = "mlclaw_oauth";
-const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
-const STATE_TTL_SECONDS = 60 * 10;
-
-type SessionPayload = {
-  username: string;
-  exp: number;
-};
-
-type StatePayload = {
-  state: string;
-  next?: string;
-  exp: number;
-};
+import { normalizeNext, readSession } from "./session.js";
 
 type SpaceRuntimeServerOptions = {
   exitProcess?: (code: number) => void;
@@ -40,10 +19,20 @@ export class SpaceRuntimeServer {
   private openclaw: ChildProcess | undefined;
   private openclawStarting = false;
   private openclawStopping = false;
+  private readonly app: Hono;
   private readonly exitProcess: (code: number) => void;
 
   constructor(private readonly config: SpaceRuntimeConfig, options: SpaceRuntimeServerOptions = {}) {
     this.exitProcess = options.exitProcess ?? ((code) => process.exit(code));
+    this.app = createSpaceRuntimeApp(config, {
+      openclawRunning: () => Boolean(this.openclaw && !this.openclaw.killed),
+      openAiConfigured: async () =>
+        openAiConfigured() || Boolean(await loadOpenAiCredentialFile(this.config.openaiCredentialFile)),
+      restartOpenClawWithOpenAi: (apiKey) => this.restartOpenClawWithOpenAi(apiKey),
+      setModel: (model) => {
+        this.config.model = model;
+      },
+    });
   }
 
   async start(): Promise<http.Server> {
@@ -63,7 +52,7 @@ export class SpaceRuntimeServer {
     server.on("upgrade", (req, socket, head) => {
       const netSocket = socket as net.Socket;
       try {
-        const session = this.readSession(req);
+        const session = readSession(req.headers.cookie, this.config.sessionSecret);
         if (!session || !this.isAllowed(session.username)) {
           rejectWebSocket(netSocket);
           return;
@@ -119,40 +108,19 @@ export class SpaceRuntimeServer {
 
   private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const url = new URL(req.url ?? "/", this.config.publicUrl);
-    if (url.pathname === "/health" || url.pathname === "/healthz") {
-      const healthy = this.config.mode !== "app" || Boolean(this.openclaw && !this.openclaw.killed);
-      this.sendText(res, healthy ? 200 : 503, healthy ? "ok\n" : "openclaw is not running\n");
-      return;
-    }
-    if (url.pathname === "/assets/mlclaw.svg") {
-      await this.sendAsset(res, "/app/assets/mlclaw.svg");
-      return;
-    }
-    if (this.config.mode === "template") {
+    if (this.config.mode === "template" && !isTemplateRuntimePath(url.pathname)) {
       this.sendHtml(res, templatePage(this.config));
       return;
     }
-    if (url.pathname === "/oauth/login") {
-      this.handleOauthLogin(res, url.searchParams.get("next") ?? "/");
-      return;
+    if (this.shouldRouteToMlClaw(url.pathname)) {
+      const response = await this.app.fetch(nodeRequestToWebRequest(req, this.config.publicUrl));
+      if (!response.headers.has("x-mlclaw-fallback")) {
+        await sendWebResponse(res, response);
+        return;
+      }
     }
-    if (url.pathname === "/oauth/callback") {
-      await this.handleOauthCallback(req, res, url);
-      return;
-    }
-    if (url.pathname === "/login") {
-      this.sendHtml(res, loginPage(this.config, undefined, normalizeNext(url.searchParams.get("next") ?? "/")));
-      return;
-    }
-    if (url.pathname === "/logout" || url.pathname === "/mlclaw/logout") {
-      res.writeHead(302, {
-        location: "/",
-        "set-cookie": clearCookie(SESSION_COOKIE, this.config.cookieSecure),
-      });
-      res.end();
-      return;
-    }
-    const session = this.readSession(req);
+
+    const session = readSession(req.headers.cookie, this.config.sessionSecret);
     if (!session) {
       this.sendUnauthenticated(req, res, url);
       return;
@@ -161,109 +129,18 @@ export class SpaceRuntimeServer {
       this.sendHtml(res, unauthorizedPage(session.username), 403);
       return;
     }
-    if (url.pathname === "/mlclaw/status") {
-      this.sendJson(res, 200, statusJson({
-        config: this.config,
-        openclawRunning: Boolean(this.openclaw && !this.openclaw.killed),
-        openAiConfigured: openAiConfigured() || Boolean(await loadOpenAiCredentialFile(this.config.openaiCredentialFile)),
-      }));
-      return;
-    }
-    if (url.pathname === "/mlclaw/openai") {
-      if (!this.isAdmin(session.username)) {
-        this.sendHtml(res, adminRequiredPage(session.username), 403);
-        return;
-      }
-      if (req.method === "GET") {
-        this.sendHtml(res, openAiPage(
-          openAiConfigured() || Boolean(await loadOpenAiCredentialFile(this.config.openaiCredentialFile)),
-          openAiConfigured(),
-        ));
-        return;
-      }
-      if (req.method === "POST") {
-        await this.handleOpenAiPost(req, res);
-        return;
-      }
-    }
     await proxyHttp(req, res, this.config, { username: session.username });
   }
 
-  private handleOauthLogin(res: http.ServerResponse, next: string): void {
-    if (!this.config.oauthClientId || !this.config.oauthClientSecret) {
-      this.sendHtml(res, loginPage(this.config, "Hugging Face OAuth is not configured.", normalizeNext(next)));
-      return;
-    }
-    const state = randomState();
-    const cookie = createSignedCookie({
-      name: STATE_COOKIE,
-      secret: this.config.sessionSecret,
-      maxAgeSeconds: STATE_TTL_SECONDS,
-      secure: this.config.cookieSecure,
-    }, { state, next: normalizeNext(next) });
-    const redirectUri = `${this.config.publicUrl}/oauth/callback`;
-    res.writeHead(302, {
-      location: authorizeUrl({
-        clientId: this.config.oauthClientId,
-        clientSecret: this.config.oauthClientSecret,
-        providerUrl: this.config.providerUrl,
-        redirectUri,
-      }, state),
-      "set-cookie": cookie,
-    });
-    res.end();
-  }
-
-  private async handleOauthCallback(
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-    url: URL,
-  ): Promise<void> {
-    const stateCookie = verifySignedCookie<StatePayload>(req.headers.cookie, STATE_COOKIE, this.config.sessionSecret);
-    const state = url.searchParams.get("state");
-    const code = url.searchParams.get("code");
-    if (!stateCookie || !state || stateCookie.state !== state || !code || !this.config.oauthClientId || !this.config.oauthClientSecret) {
-      this.sendHtml(res, loginPage(this.config, "The Hugging Face sign-in attempt expired. Try again."), 401);
-      return;
-    }
-    const identity = await exchangeCodeForIdentity({
-      clientId: this.config.oauthClientId,
-      clientSecret: this.config.oauthClientSecret,
-      providerUrl: this.config.providerUrl,
-      redirectUri: `${this.config.publicUrl}/oauth/callback`,
-    }, code);
-    if (!identity) {
-      this.sendHtml(res, loginPage(this.config, "Hugging Face sign-in failed. Try again."), 401);
-      return;
-    }
-    const sessionCookie = createSignedCookie({
-      name: SESSION_COOKIE,
-      secret: this.config.sessionSecret,
-      maxAgeSeconds: SESSION_TTL_SECONDS,
-      secure: this.config.cookieSecure,
-    }, { username: identity.username });
-    res.writeHead(302, {
-      location: normalizeNext(typeof stateCookie.next === "string" ? stateCookie.next : "/"),
-      "set-cookie": [
-        sessionCookie,
-        clearCookie(STATE_COOKIE, this.config.cookieSecure),
-      ],
-    });
-    res.end();
-  }
-
-  private async handleOpenAiPost(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    const body = await readBody(req, 20_000);
-    const params = new URLSearchParams(body);
-    const apiKey = validateOpenAiApiKey(params.get("apiKey"));
-    if (!apiKey) {
-      this.sendHtml(res, openAiPage(false, false), 400);
-      return;
-    }
-    await writeEphemeralOpenAiCredential(this.config.openaiCredentialFile, apiKey);
-    const persistent = await persistOpenAiCredentialToSpaceSecret(this.config, apiKey);
-    await this.restartOpenClawWithOpenAi(apiKey);
-    this.sendHtml(res, openAiPage(true, persistent));
+  private shouldRouteToMlClaw(pathname: string): boolean {
+    return pathname === "/health" ||
+      pathname === "/healthz" ||
+      pathname === "/assets/mlclaw.svg" ||
+      pathname === "/login" ||
+      pathname === "/logout" ||
+      pathname.startsWith("/oauth/") ||
+      pathname === "/mlclaw" ||
+      pathname.startsWith("/mlclaw/");
   }
 
   private async startOpenClaw(extraEnv: Record<string, string> = {}): Promise<void> {
@@ -277,6 +154,7 @@ export class SpaceRuntimeServer {
       const env = {
         ...process.env,
         OPENCLAW_GATEWAY_PORT: String(this.config.openclawPort),
+        OPENCLAW_MODEL: this.config.model,
         ...(persistedOpenAiKey ? { OPENAI_API_KEY: persistedOpenAiKey } : {}),
         ...extraEnv,
       };
@@ -302,25 +180,8 @@ export class SpaceRuntimeServer {
     await this.startOpenClaw({ OPENAI_API_KEY: apiKey });
   }
 
-  private readSession(req: http.IncomingMessage): SessionPayload | undefined {
-    return verifySignedCookie<SessionPayload>(req.headers.cookie, SESSION_COOKIE, this.config.sessionSecret);
-  }
-
   private isAllowed(username: string): boolean {
     return this.config.allowAnySignedIn || this.config.allowedUsers.includes(username);
-  }
-
-  private isAdmin(username: string): boolean {
-    return this.config.adminUsers.includes(username);
-  }
-
-  private async sendAsset(res: http.ServerResponse, file: string): Promise<void> {
-    try {
-      res.writeHead(200, { "content-type": "image/svg+xml; charset=utf-8" });
-      res.end(await fs.readFile(file, "utf8"));
-    } catch {
-      this.sendText(res, 404, "not found\n");
-    }
   }
 
   private sendUnauthenticated(req: http.IncomingMessage, res: http.ServerResponse, url: URL): void {
@@ -331,6 +192,11 @@ export class SpaceRuntimeServer {
     }
     if (isBrowserNavigation(req) && !isApiPath(url.pathname)) {
       this.sendRedirect(res, `/login?next=${encodeURIComponent(next)}`);
+      return;
+    }
+    if (isApiPath(url.pathname)) {
+      res.writeHead(401, { "content-type": "application/json; charset=utf-8" });
+      res.end(`${JSON.stringify({ ok: false, error: "authentication required" })}\n`);
       return;
     }
     this.sendHtml(res, loginPage(this.config, undefined, next), 401);
@@ -345,23 +211,58 @@ export class SpaceRuntimeServer {
     res.writeHead(status, { "content-type": "text/html; charset=utf-8" });
     res.end(body);
   }
-
-  private sendJson(res: http.ServerResponse, status: number, body: string): void {
-    res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
-    res.end(`${body}\n`);
-  }
-
-  private sendText(res: http.ServerResponse, status: number, body: string): void {
-    res.writeHead(status, { "content-type": "text/plain; charset=utf-8" });
-    res.end(body);
-  }
 }
 
-function normalizeNext(value: string): string {
-  if (!value.startsWith("/") || value.startsWith("//") || value.includes("\r") || value.includes("\n")) {
-    return "/";
+function nodeRequestToWebRequest(req: http.IncomingMessage, publicUrl: string): Request {
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        headers.append(key, item);
+      }
+    } else if (value !== undefined) {
+      headers.set(key, value);
+    }
   }
-  return value;
+  const init: RequestInit & { duplex?: "half" } = {
+    method: req.method ?? "GET",
+    headers,
+  };
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    init.body = Readable.toWeb(req) as ReadableStream<Uint8Array>;
+    init.duplex = "half";
+  }
+  return new Request(new URL(req.url ?? "/", publicUrl).toString(), init);
+}
+
+async function sendWebResponse(res: http.ServerResponse, response: Response): Promise<void> {
+  const headers: http.OutgoingHttpHeaders = {};
+  response.headers.forEach((value, key) => {
+    if (key.toLowerCase() !== "set-cookie") {
+      headers[key] = value;
+    }
+  });
+  const setCookies = (response.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ??
+    (response.headers.get("set-cookie") ? [response.headers.get("set-cookie") as string] : []);
+  if (setCookies.length > 0) {
+    headers["set-cookie"] = setCookies;
+  }
+  res.writeHead(response.status, headers);
+  if (!response.body) {
+    res.end();
+    return;
+  }
+  const reader = response.body.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    if (!res.write(Buffer.from(value))) {
+      await new Promise<void>((resolve) => res.once("drain", resolve));
+    }
+  }
+  res.end();
 }
 
 function isBrowserNavigation(req: http.IncomingMessage): boolean {
@@ -372,23 +273,15 @@ function isBrowserNavigation(req: http.IncomingMessage): boolean {
 }
 
 function isApiPath(pathname: string): boolean {
-  return pathname === "/mlclaw/status";
+  return pathname.startsWith("/mlclaw/api/");
+}
+
+function isTemplateRuntimePath(pathname: string): boolean {
+  return pathname === "/health" ||
+    pathname === "/healthz" ||
+    pathname === "/assets/mlclaw.svg";
 }
 
 function formatError(err: unknown): string {
   return err instanceof Error ? err.stack ?? err.message : String(err);
-}
-
-async function readBody(req: http.IncomingMessage, maxBytes: number): Promise<string> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    size += buffer.length;
-    if (size > maxBytes) {
-      throw new Error("request body too large");
-    }
-    chunks.push(buffer);
-  }
-  return Buffer.concat(chunks).toString("utf8");
 }

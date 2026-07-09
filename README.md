@@ -53,7 +53,8 @@ This creates:
 - a local deployment manifest under `~/.config/mlclaw`.
 
 Open the Space, sign in with your Hugging Face account, and use the OpenClaw
-browser gateway directly.
+browser gateway directly. The gateway includes a small ML Claw control link
+for settings, status, credentials, and sign out.
 
 Create a public Space only when you explicitly want a public demo or template:
 
@@ -151,12 +152,30 @@ It never reads secret values and never modifies bucket contents.
 `mlclaw update` also refreshes the generated Space runtime files, so older
 Spaces can move to the current implementation without recreating their bucket.
 
+## Browser Settings
+
+After signing into the Space, open:
+
+```text
+/mlclaw
+```
+
+Use the browser control UI for:
+
+- `/mlclaw/settings`: change `OPENCLAW_MODEL` and request a Space restart.
+- `/mlclaw/status`: inspect runtime, bucket, model, and OAuth status.
+- `/mlclaw/credentials`: submit an OpenAI API key.
+- `/mlclaw/logout`: clear the ML Claw session cookie.
+
+The same control UI is linked from the OpenClaw gateway. Settings changes
+mutate only the current Space, inferred from `SPACE_ID`.
+
 ## OpenAI Credentials
 
 After signing into the Space, open:
 
 ```text
-/mlclaw/openai
+/mlclaw/credentials
 ```
 
 Submit an OpenAI API key there if you want OpenClaw to use OpenAI-compatible

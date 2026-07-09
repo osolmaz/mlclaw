@@ -39,6 +39,7 @@ const required = [
   "openclaw.default.json",
   "tsconfig.json",
   "assets/mlclaw.svg",
+  "assets/mlclaw-control-ui/index.html",
   "assets/hf-tooling/manifest.json",
   "assets/hf-tooling/skills/hf-cli/SKILL.md",
   "assets/hf-tooling/skills/hf-mem/SKILL.md",
@@ -65,6 +66,13 @@ for (const file of required) {
   if (!files.has(file)) {
     throw new Error(`npm package is missing required file: ${file}`);
   }
+}
+
+if (!Array.from(files).some((file) => /^assets\/mlclaw-control-ui\/assets\/.*\.js$/.test(file))) {
+  throw new Error("npm package is missing built ML Claw control UI JavaScript");
+}
+if (!Array.from(files).some((file) => /^assets\/mlclaw-control-ui\/assets\/.*\.css$/.test(file))) {
+  throw new Error("npm package is missing built ML Claw control UI CSS");
 }
 
 for (const file of files) {
