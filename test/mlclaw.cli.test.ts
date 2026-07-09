@@ -729,10 +729,7 @@ describe("mlclaw CLI", () => {
         },
       ],
     });
-    expect(hub.calls).toContainEqual({
-      name: "requestSpaceHardware",
-      args: ["alice/research", "cpu-upgrade", -1],
-    });
+    expect(hub.calls.some((call) => call.name === "requestSpaceHardware")).toBe(false);
     expect(hub.calls).toContainEqual({
       name: "addSpaceVariable",
       args: ["alice/research", "MLCLAW_GATEWAY_LOCATION", "space"],
@@ -793,7 +790,7 @@ describe("mlclaw CLI", () => {
 
   it("runs non-interactive browser Space bootstrap without Telegram", async () => {
     const hub = createFakeHub();
-    const { prompt } = createPrompt([], false);
+    const { prompt, notes } = createPrompt([], false);
     const stderr: string[] = [];
     const output: string[] = [];
     const runtime = {
@@ -814,12 +811,17 @@ describe("mlclaw CLI", () => {
 
     expect(code).toBe(0);
     expect(stderr.join("\n")).toBe("");
+    expect(notes).toContainEqual(expect.objectContaining({
+      title: "Bootstrap plan",
+      message: expect.stringContaining("Hardware: default free CPU"),
+    }));
     expect(output.join("\n")).toContain("Agent URL: https://alice-research.hf.space");
     expect(output.join("\n")).toContain("Your agent will soon be available at https://alice-research.hf.space.");
     expect(hub.calls).toContainEqual({
       name: "createDockerSpace",
-      args: ["alice/research", { private: true, hardware: "cpu-basic" }],
+      args: ["alice/research", { private: true }],
     });
+    expect(hub.calls.some((call) => call.name === "requestSpaceHardware")).toBe(false);
     expect(hub.calls).toContainEqual({
       name: "addSpaceVariable",
       args: ["alice/research", "MLCLAW_ALLOWED_USERS", "alice"],
@@ -868,6 +870,10 @@ describe("mlclaw CLI", () => {
     }));
     expect(notes).toContainEqual(expect.objectContaining({
       title: "Bootstrap plan",
+      message: expect.stringContaining("Hardware: unchanged Space hardware"),
+    }));
+    expect(notes).toContainEqual(expect.objectContaining({
+      title: "Bootstrap plan",
       message: expect.stringContaining("Fresh deployment: use a different name, for example --name mlclaw-2"),
     }));
     expect(stdout.join("\n")).toContain("Using existing private bucket alice/mlclaw-data");
@@ -877,8 +883,9 @@ describe("mlclaw CLI", () => {
     expect(hub.calls).not.toContainEqual({ name: "createBucket", args: ["alice/mlclaw-data", true] });
     expect(hub.calls).toContainEqual({
       name: "createDockerSpace",
-      args: ["alice/mlclaw", { private: true, hardware: "cpu-basic" }],
+      args: ["alice/mlclaw", { private: true }],
     });
+    expect(hub.calls.some((call) => call.name === "requestSpaceHardware")).toBe(false);
   });
 
   it("lets the user enter an alternative name when bootstrap resources already exist", async () => {
@@ -911,8 +918,9 @@ describe("mlclaw CLI", () => {
     expect(hub.calls).toContainEqual({ name: "createBucket", args: ["alice/mlclaw-fresh-data", true] });
     expect(hub.calls).toContainEqual({
       name: "createDockerSpace",
-      args: ["alice/mlclaw-fresh", { private: true, hardware: "cpu-basic" }],
+      args: ["alice/mlclaw-fresh", { private: true }],
     });
+    expect(hub.calls.some((call) => call.name === "requestSpaceHardware")).toBe(false);
     await expect(readManifest(runtime.configRoot, "mlclaw-fresh")).resolves.toMatchObject({
       agent: "mlclaw-fresh",
       bucket: "alice/mlclaw-fresh-data",
@@ -935,8 +943,9 @@ describe("mlclaw CLI", () => {
     expect(code).toBe(0);
     expect(hub.calls).toContainEqual({
       name: "createDockerSpace",
-      args: ["alice/research", { private: false, hardware: "cpu-basic" }],
+      args: ["alice/research", { private: false }],
     });
+    expect(hub.calls.some((call) => call.name === "requestSpaceHardware")).toBe(false);
   });
 
   it("allowlists the authenticated user for org-owned browser Spaces", async () => {
@@ -955,8 +964,9 @@ describe("mlclaw CLI", () => {
     expect(code).toBe(0);
     expect(hub.calls).toContainEqual({
       name: "createDockerSpace",
-      args: ["research-org/research", { private: true, hardware: "cpu-basic" }],
+      args: ["research-org/research", { private: true }],
     });
+    expect(hub.calls.some((call) => call.name === "requestSpaceHardware")).toBe(false);
     expect(hub.calls).toContainEqual({
       name: "addSpaceVariable",
       args: ["research-org/research", "MLCLAW_ALLOWED_USERS", "alice"],
@@ -985,6 +995,79 @@ describe("mlclaw CLI", () => {
     expect(hub.calls).toContainEqual({
       name: "requestSpaceHardware",
       args: ["alice/research", "cpu-upgrade", -1],
+    });
+  });
+
+  it("requests explicit bootstrap hardware when updating an existing Space", async () => {
+    const hub = createFakeHub({
+      existingBuckets: ["alice/research-data"],
+      existingSpaces: ["alice/research"],
+    });
+    hub.bucketObjects.set("openclaw-state/runtime/status.json", JSON.stringify({
+      schemaVersion: 1,
+      agent: "research",
+      runtimeId: "space-research",
+      gatewayLocation: "space",
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      startedAt: "2026-06-16T00:00:00.000Z",
+      lastHeartbeatAt: "2026-06-16T00:00:01.000Z",
+    }) + "\n");
+    const { prompt } = createPrompt([], false);
+
+    const code = await main([
+      "bootstrap",
+      "--name",
+      "research",
+      "--hardware",
+      "cpu-upgrade",
+      "--yes",
+    ], await createRuntime(hub, prompt));
+
+    expect(code).toBe(0);
+    expect(hub.calls).toContainEqual({
+      name: "createDockerSpace",
+      args: ["alice/research", { private: true, sleepTimeSeconds: -1 }],
+    });
+    expect(hub.calls).toContainEqual({
+      name: "requestSpaceHardware",
+      args: ["alice/research", "cpu-upgrade", -1],
+    });
+  });
+
+  it("updates explicit bootstrap sleep time without requesting hardware", async () => {
+    const hub = createFakeHub({
+      existingBuckets: ["alice/research-data"],
+      existingSpaces: ["alice/research"],
+    });
+    hub.bucketObjects.set("openclaw-state/runtime/status.json", JSON.stringify({
+      schemaVersion: 1,
+      agent: "research",
+      runtimeId: "space-research",
+      gatewayLocation: "space",
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      startedAt: "2026-06-16T00:00:00.000Z",
+      lastHeartbeatAt: "2026-06-16T00:00:01.000Z",
+    }) + "\n");
+    const { prompt } = createPrompt([], false);
+
+    const code = await main([
+      "bootstrap",
+      "--name",
+      "research",
+      "--sleep-time",
+      "-1",
+      "--yes",
+    ], await createRuntime(hub, prompt));
+
+    expect(code).toBe(0);
+    expect(hub.calls).toContainEqual({
+      name: "createDockerSpace",
+      args: ["alice/research", { private: true, sleepTimeSeconds: -1 }],
+    });
+    expect(hub.calls.some((call) => call.name === "requestSpaceHardware")).toBe(false);
+    expect(hub.calls).toContainEqual({
+      name: "setSpaceSleepTime",
+      args: ["alice/research", -1],
     });
   });
 
@@ -1277,6 +1360,37 @@ describe("mlclaw CLI", () => {
     expect(stderr.join("\n")).toContain("Telegram requires upgraded paid Space hardware");
     expect(hub.calls.some((call) => call.name === "createDockerSpace")).toBe(false);
     expect(runtime.dockerRunner.calls.some((call) => call.name === "stop")).toBe(false);
+  });
+
+  it("requests explicit hardware when migrating back to an existing Space", async () => {
+    const hub = createFakeHub({ existingSpaces: ["alice/research"] });
+    const { prompt } = createPrompt([]);
+    const runtime = await createRuntime(hub, prompt);
+
+    await expect(main(["bootstrap", "--gateway", "local", "--name", "research", "--no-pull"], runtime)).resolves.toBe(0);
+    hub.calls.length = 0;
+    runtime.dockerRunner.calls.length = 0;
+
+    await expect(main([
+      "gateway",
+      "migrate",
+      "research",
+      "--to",
+      "space",
+      "--hardware",
+      "cpu-upgrade",
+      "--yes",
+    ], runtime)).resolves.toBe(0);
+
+    expect(hub.calls).toContainEqual({ name: "spaceExists", args: ["alice/research"] });
+    expect(hub.calls).toContainEqual({
+      name: "createDockerSpace",
+      args: ["alice/research", { private: true, sleepTimeSeconds: -1 }],
+    });
+    expect(hub.calls).toContainEqual({
+      name: "requestSpaceHardware",
+      args: ["alice/research", "cpu-upgrade", -1],
+    });
   });
 
   it("migrates from Space to an explicit local Docker context when the previous context is stale", async () => {

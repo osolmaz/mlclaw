@@ -15404,8 +15404,9 @@ async function bootstrap(opts, runtime) {
       throw new Error("internal error: Space plan was not resolved");
     }
     const paidHardware = await resolveHardware({
-      requestedHardware: opts.hardware ?? (telegramToken ? TELEGRAM_HARDWARE : DEFAULT_HARDWARE),
+      ...opts.hardware ? { requestedHardware: opts.hardware } : {},
       ...typeof opts.sleepTime === "number" ? { requestedSleepTime: opts.sleepTime } : telegramToken ? { requestedSleepTime: TELEGRAM_SLEEP_TIME } : {},
+      defaultLabel: spacePlan.exists ? "unchanged Space hardware" : "default free CPU",
       requiresMessagingEgress: Boolean(telegramToken),
       yes: Boolean(opts.yes),
       runtime
@@ -15415,7 +15416,7 @@ async function bootstrap(opts, runtime) {
       bucketPlan,
       spacePlan,
       hasExistingManifest: plan.hasExistingManifest,
-      hardware: paidHardware.hardware,
+      hardware: paidHardware.label,
       ...typeof paidHardware.sleepTime === "number" ? { sleepTime: paidHardware.sleepTime } : {},
       yes: Boolean(opts.yes),
       runtime
@@ -15435,9 +15436,9 @@ async function bootstrap(opts, runtime) {
       manifest,
       secrets,
       allowedUsers: me2.name,
-      hardware: paidHardware.hardware,
       spaceExists: spacePlan.exists,
       publicSpace: Boolean(opts.publicSpace),
+      ...paidHardware.kind === "explicit" ? { hardware: paidHardware.hardware } : {},
       ...typeof paidHardware.sleepTime === "number" ? { sleepTime: paidHardware.sleepTime } : {},
       ...templateRuntimeImage ? { templateRuntimeImage } : {}
     });
@@ -15815,10 +15816,14 @@ async function deploySpaceGateway(params) {
   runtime.stdout.log(params.spaceExists ? `Updating existing Space ${manifest.space}` : `Creating ${params.publicSpace ? "public" : "private"} Space ${manifest.space}`);
   await hub.createDockerSpace(manifest.space, {
     private: !params.publicSpace,
-    hardware: params.hardware,
+    ...params.hardware && !params.spaceExists ? { hardware: params.hardware } : {},
     ...typeof params.sleepTime === "number" ? { sleepTimeSeconds: params.sleepTime } : {}
   });
-  await hub.requestSpaceHardware(manifest.space, params.hardware, params.sleepTime);
+  if (params.hardware && params.spaceExists) {
+    await hub.requestSpaceHardware(manifest.space, params.hardware, params.sleepTime);
+  } else if (!params.hardware && params.spaceExists && typeof params.sleepTime === "number") {
+    await hub.setSpaceSleepTime(manifest.space, params.sleepTime);
+  }
   runtime.stdout.log(params.templateRuntimeImage ? "Generating Space files from prebuilt runtime image" : "Generating bundled Space runtime files");
   const { templateRev } = await runtime.pushTemplateToSpace({
     targetRepo: manifest.space,
@@ -16005,8 +16010,9 @@ async function gatewayMigrate(agent, opts, runtime) {
   };
   if (target === "space") {
     const paidHardware = await resolveHardware({
-      requestedHardware: opts.hardware ?? (secrets.TELEGRAM_BOT_TOKEN ? TELEGRAM_HARDWARE : DEFAULT_HARDWARE),
+      ...opts.hardware ? { requestedHardware: opts.hardware } : {},
       ...typeof opts.sleepTime === "number" ? { requestedSleepTime: opts.sleepTime } : secrets.TELEGRAM_BOT_TOKEN ? { requestedSleepTime: TELEGRAM_SLEEP_TIME } : {},
+      defaultLabel: "unchanged Space hardware",
       requiresMessagingEgress: Boolean(secrets.TELEGRAM_BOT_TOKEN),
       yes: Boolean(opts.yes),
       runtime
@@ -16021,6 +16027,7 @@ async function gatewayMigrate(agent, opts, runtime) {
     await handoffAndStopLocalGateway({ manifest: current, hub, runtime, bucketPrefix });
     const me2 = await hub.whoami();
     const templateRuntimeImage = resolveSpaceRuntimeImage(opts, runtime.env);
+    const spaceExists = await hub.spaceExists(updated.space);
     await deploySpaceGateway({
       hub,
       runtime,
@@ -16032,8 +16039,9 @@ async function gatewayMigrate(agent, opts, runtime) {
         MLCLAW_RUNTIME_IMAGE: updated.runtimeImage
       },
       allowedUsers: me2.name,
-      hardware: paidHardware.hardware,
       publicSpace: Boolean(opts.publicSpace),
+      spaceExists,
+      ...paidHardware.kind === "explicit" ? { hardware: paidHardware.hardware } : {},
       ...typeof paidHardware.sleepTime === "number" ? { sleepTime: paidHardware.sleepTime } : {},
       ...templateRuntimeImage ? { templateRuntimeImage } : {}
     });
@@ -16648,21 +16656,26 @@ async function promptAgentName(runtime) {
   return readPromptValue(value, "Agent name");
 }
 async function resolveHardware(params) {
-  const hardware = params.requestedHardware;
-  const sleepTime = params.requestedSleepTime ?? TELEGRAM_SLEEP_TIME;
+  const hardware = params.requestedHardware ?? (params.requiresMessagingEgress ? TELEGRAM_HARDWARE : void 0);
+  if (!hardware) {
+    const label = params.defaultLabel ?? "default free CPU";
+    return typeof params.requestedSleepTime === "number" ? { kind: "default", label, sleepTime: params.requestedSleepTime } : { kind: "default", label };
+  }
+  const sleepTime = isPaidHardware(hardware) ? params.requestedSleepTime ?? TELEGRAM_SLEEP_TIME : params.requestedSleepTime;
   if (params.requiresMessagingEgress && !isPaidHardware(hardware)) {
     throw new Error(`Telegram requires upgraded paid Space hardware today; use --hardware ${TELEGRAM_HARDWARE} or --gateway local`);
   }
   if (isPaidHardware(hardware)) {
+    const paidSleepTime = params.requestedSleepTime ?? TELEGRAM_SLEEP_TIME;
     await confirmPaidHardware({
       hardware,
-      sleepTime,
+      sleepTime: paidSleepTime,
       yes: params.yes,
       runtime: params.runtime
     });
-    return { hardware, sleepTime };
+    return { kind: "explicit", hardware, label: hardware, sleepTime: paidSleepTime };
   }
-  return typeof params.requestedSleepTime === "number" ? { hardware, sleepTime: params.requestedSleepTime } : { hardware };
+  return typeof sleepTime === "number" ? { kind: "explicit", hardware, label: hardware, sleepTime } : { kind: "explicit", hardware, label: hardware };
 }
 async function confirmPaidHardware(params) {
   if (params.yes) {

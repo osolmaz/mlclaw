@@ -47,6 +47,8 @@ This creates:
 
 - a private Storage Bucket for OpenClaw state;
 - a private Docker Space for the browser gateway;
+- no explicit Space hardware request; Hugging Face uses the default free CPU
+  hardware unless you pass `--hardware`;
 - a Docker Space that starts from the prebuilt `ghcr.io/osolmaz/mlclaw` image;
 - Hugging Face OAuth metadata in the Space README;
 - Space variables and write-only secrets for state sync and session signing;

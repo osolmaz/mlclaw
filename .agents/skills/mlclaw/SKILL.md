@@ -20,6 +20,9 @@ An ML Claw deployment has:
 
 - a private Hugging Face Storage Bucket for durable OpenClaw state snapshots;
 - a private Hugging Face Docker Space for the default browser gateway;
+- no explicit Space hardware request by default; Hugging Face assigns the
+  default free CPU hardware unless `--hardware` or a feature requiring paid
+  hardware is used;
 - a prebuilt `ghcr.io/osolmaz/mlclaw` runtime image by default;
 - Hugging Face OAuth enabled on the Space;
 - a local deployment manifest under `~/.config/mlclaw/deployments/`;
