@@ -1060,7 +1060,7 @@ async function deploySpaceGateway(params: {
     MLCLAW_OPENCLAW_PORT: String(DEFAULT_SPACE_OPENCLAW_PORT),
     OPENCLAW_GATEWAY_PORT: String(DEFAULT_SPACE_OPENCLAW_PORT),
   });
-  await ensureSpaceStateVolume(hub, manifest.space, manifest.bucket);
+  await ensureSpaceStateVolume(hub, manifest.space, manifest.bucket, { allowMissingVolumes: !params.spaceExists });
   await clearSpaceGatewayDisabled(hub, manifest.space);
   await setDeploymentSecrets(hub, manifest.space, {
     MLCLAW_SESSION_SECRET: requiredSecret(secrets, "MLCLAW_SESSION_SECRET"),
@@ -2049,9 +2049,17 @@ function hasRouterTokenSecretMap(secrets: Map<string, { key: string }>): boolean
   return secrets.has("MLCLAW_ROUTER_TOKEN") || secrets.has("HF_ROUTER_TOKEN");
 }
 
-async function ensureSpaceStateVolume(hub: HubApi, repoId: string, bucket: string): Promise<void> {
+async function ensureSpaceStateVolume(
+  hub: HubApi,
+  repoId: string,
+  bucket: string,
+  opts: { allowMissingVolumes?: boolean } = {},
+): Promise<void> {
   const runtime = await hub.getSpaceRuntime(repoId);
-  await hub.setSpaceVolumes(repoId, mergeStateVolume(requireRuntimeVolumes(runtime, repoId), bucket));
+  const volumes = Array.isArray(runtime.volumes)
+    ? runtime.volumes
+    : opts.allowMissingVolumes ? [] : requireRuntimeVolumes(runtime, repoId);
+  await hub.setSpaceVolumes(repoId, mergeStateVolume(volumes, bucket));
 }
 
 function requireRuntimeVolumes(runtime: SpaceRuntime, repoId: string): SpaceVolume[] {

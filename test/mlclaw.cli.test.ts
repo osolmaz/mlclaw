@@ -945,6 +945,7 @@ describe("mlclaw CLI", () => {
   it("does not overwrite Space volumes when runtime volume metadata is omitted", async () => {
     const hub = createFakeHub({
       spaceRuntime: { stage: "RUNNING", hardware: "cpu-basic", requested_hardware: "cpu-basic", sleep_time: -1 },
+      existingSpaces: ["alice/research"],
     });
     const { prompt } = createPrompt([], false);
     const stderr: string[] = [];
@@ -960,6 +961,31 @@ describe("mlclaw CLI", () => {
     expect(code).toBe(1);
     expect(stderr.join("\n")).toContain("did not include volumes");
     expect(hub.calls.some((call) => call.name === "setSpaceVolumes")).toBe(false);
+  });
+
+  it("sets the first Space volume when a new Space omits runtime volume metadata", async () => {
+    const hub = createFakeHub({
+      spaceRuntime: { stage: "RUNNING", hardware: "cpu-basic", requested_hardware: "cpu-basic", sleep_time: -1 },
+    });
+    const { prompt } = createPrompt([], false);
+    const stderr: string[] = [];
+    const runtime = await createRuntime(hub, prompt, stderr);
+
+    const code = await main([
+      "bootstrap",
+      "--name",
+      "research",
+      "--yes",
+    ], runtime);
+
+    expect(code).toBe(0);
+    expect(stderr.join("\n")).toBe("");
+    expect(hub.calls).toContainEqual({
+      name: "setSpaceVolumes",
+      args: ["alice/research", [
+        { type: "bucket", source: "alice/research-data", mountPath: "/data/mlclaw-state", readOnly: false },
+      ]],
+    });
   });
 
   it("shows existing bucket and Space actions before bootstrap updates resources", async () => {
