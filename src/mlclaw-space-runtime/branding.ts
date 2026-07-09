@@ -20,6 +20,7 @@ const DEFAULT_BRAND_NAME = "ML Claw";
 const DEFAULT_THEME_COLOR = "#111827";
 const DEFAULT_LOGO_ASSET = "mlclaw.svg";
 const DEFAULT_HUGGING_FACE_ASSET = "hf-logo.svg";
+const DEFAULT_ASSISTANT_AVATAR_ASSET = "assistant-avatar.svg";
 
 export function resolveBranding(
   env: NodeJS.ProcessEnv,
@@ -45,8 +46,8 @@ export function resolveBranding(
       DEFAULT_HUGGING_FACE_ASSET,
     ),
     appleTouchIconAsset: normalizeAssetRef(
-      env.MLCLAW_BRAND_APPLE_TOUCH_ICON ?? env.MLCLAW_BRAND_FAVICON_PNG ?? env.MLCLAW_BRAND_FAVICON,
-      DEFAULT_HUGGING_FACE_ASSET,
+      env.MLCLAW_BRAND_APPLE_TOUCH_ICON ?? env.MLCLAW_BRAND_ASSISTANT_AVATAR,
+      DEFAULT_ASSISTANT_AVATAR_ASSET,
     ),
   };
 }

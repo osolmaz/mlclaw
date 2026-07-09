@@ -43,6 +43,7 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
   app.get("/healthz", (c) => health(c, config, controls));
   app.get("/assets/mlclaw.svg", async () => serveFile(path.join(config.assetsDir, "mlclaw.svg"), "image/svg+xml; charset=utf-8"));
   app.get("/assets/hf-logo.svg", async () => serveFile(path.join(config.assetsDir, "hf-logo.svg"), "image/svg+xml; charset=utf-8"));
+  app.get("/assets/assistant-avatar.svg", async () => serveFile(path.join(config.assetsDir, "assistant-avatar.svg"), "image/svg+xml; charset=utf-8"));
   app.get("/assets/mlclaw-control-branding.js", () => staticScript(CONTROL_BRANDING_SCRIPT));
   app.get("/assets/brand/logo", async () => serveBrandAsset(config, config.branding.logoAsset));
   app.get("/favicon.svg", async () => serveBrandAsset(config, config.branding.faviconSvgAsset));
@@ -411,11 +412,11 @@ async function serveFile(file: string, contentTypeHeader: string, immutable = fa
 }
 
 async function serveBrandAsset(config: SpaceRuntimeConfig, asset: string): Promise<Response> {
-  const response = await serveFile(path.join(config.assetsDir, asset), contentType(asset), true);
+  const response = await serveFile(path.join(config.assetsDir, asset), contentType(asset));
   if (response.status !== 404 || asset === "mlclaw.svg") {
     return response;
   }
-  return serveFile(path.join(config.assetsDir, "mlclaw.svg"), "image/svg+xml; charset=utf-8", true);
+  return serveFile(path.join(config.assetsDir, "mlclaw.svg"), "image/svg+xml; charset=utf-8");
 }
 
 function safeRelativePath(value: string): string | undefined {

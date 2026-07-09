@@ -17,7 +17,7 @@ OpenClaw on loopback using OpenClaw trusted-proxy auth.
 With Node.js:
 
 ```bash
-npx mlclaw bootstrap
+npx mlclaw@latest bootstrap
 ```
 
 Without Node.js, the launcher fetches a pinned Node runtime into your user
@@ -40,7 +40,7 @@ token into someone else's app; the bootstrapper runs locally.
 ## Default Flow
 
 ```bash
-npx mlclaw bootstrap --name mlclaw
+npx mlclaw@latest bootstrap --name mlclaw
 ```
 
 This creates:
@@ -59,13 +59,13 @@ for settings, status, credentials, and sign out.
 Create a public Space only when you explicitly want a public demo or template:
 
 ```bash
-npx mlclaw bootstrap --name mlclaw --public-space
+npx mlclaw@latest bootstrap --name mlclaw --public-space
 ```
 
 Choose a Hugging Face Router model with `--model`:
 
 ```bash
-npx mlclaw bootstrap \
+npx mlclaw@latest bootstrap \
   --name mlclaw \
   --model huggingface/google/gemma-4-26B-A4B-it:deepinfra
 ```
@@ -90,7 +90,7 @@ Telegram `getMe`, removes a trailing `_bot` from the username, and can derive
 the Space and bucket names from the bot username.
 
 ```bash
-npx mlclaw bootstrap \
+npx mlclaw@latest bootstrap \
   --telegram-token-file ~/secrets/mlclaw_bot.env \
   --telegram-user-id 1234567890 \
   --hardware cpu-upgrade \
@@ -107,7 +107,7 @@ only for automation.
 You can run the gateway locally instead of inside a Space:
 
 ```bash
-npx mlclaw bootstrap --gateway local --name mlclaw
+npx mlclaw@latest bootstrap --gateway local --name mlclaw
 ```
 
 Local mode uses Docker on your machine and the same private Storage Bucket.
@@ -182,10 +182,11 @@ mutate only the current Space, inferred from `SPACE_ID`.
 ## Branding
 
 ML Claw white-labels the browser-facing gateway by default. App Spaces use the
-agent name as the browser title, PWA name, login heading, assistant fallback
-avatar, and ML Claw control link label. The ML Claw logo is reserved for the
-control UI brand mark. The gateway shortcut, login logo, and default browser
-icons use the Hugging Face logo.
+agent name as the browser title, PWA name, login heading, and ML Claw control
+link label. The ML Claw logo is reserved for the control UI brand mark. The
+gateway shortcut, login logo, and default browser icons use the Hugging Face
+logo. The OpenClaw assistant fallback avatar defaults to a neutral assistant
+icon.
 
 Override branding with Space variables:
 
@@ -197,7 +198,8 @@ MLCLAW_BRAND_LOGO=mlclaw.svg
 MLCLAW_BRAND_FAVICON=hf-logo.svg
 MLCLAW_BRAND_FAVICON_32=hf-logo.svg
 MLCLAW_BRAND_FAVICON_ICO=hf-logo.svg
-MLCLAW_BRAND_APPLE_TOUCH_ICON=hf-logo.svg
+MLCLAW_BRAND_APPLE_TOUCH_ICON=assistant-avatar.svg
+MLCLAW_BRAND_ASSISTANT_AVATAR=assistant-avatar.svg
 ```
 
 Brand asset paths are relative to the Space `assets/` directory. ML Claw serves

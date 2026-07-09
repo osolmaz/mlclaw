@@ -53,7 +53,7 @@ describe("mlclaw bundle", () => {
 
     const show = await execFileAsync("node", ["dist/mlclaw.mjs", "--skill", "show", "mlclaw"]);
     expect(show.stdout).toContain("# ML Claw");
-    expect(show.stdout).toContain("npx mlclaw bootstrap");
+    expect(show.stdout).toContain("npx mlclaw@latest bootstrap");
   });
 
   it("runs the shell launcher from inside the repository checkout", async () => {

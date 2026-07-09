@@ -64,7 +64,7 @@ Space names from that.
 With Node.js:
 
 ```bash
-npx mlclaw bootstrap --name mlclaw
+npx mlclaw@latest bootstrap --name mlclaw
 ```
 
 Without Node.js on macOS/Linux:
@@ -92,13 +92,13 @@ node dist/mlclaw.mjs --help
 Interactive:
 
 ```bash
-npx mlclaw bootstrap --name mlclaw
+npx mlclaw@latest bootstrap --name mlclaw
 ```
 
 Automation:
 
 ```bash
-npx mlclaw bootstrap \
+npx mlclaw@latest bootstrap \
   --name mlclaw \
   --model huggingface/google/gemma-4-26B-A4B-it:deepinfra \
   --yes
@@ -118,7 +118,7 @@ Create a public Space only when the user explicitly asks for a public demo or
 template-style deployment:
 
 ```bash
-npx mlclaw bootstrap --name mlclaw --public-space
+npx mlclaw@latest bootstrap --name mlclaw --public-space
 ```
 
 ## Optional Telegram
@@ -126,7 +126,7 @@ npx mlclaw bootstrap --name mlclaw --public-space
 Telegram is optional and should not be required for the default setup.
 
 ```bash
-npx mlclaw bootstrap \
+npx mlclaw@latest bootstrap \
   --telegram-token-file ~/secrets/mlclaw_bot.env \
   --telegram-user-id 1234567890 \
   --hardware cpu-upgrade \
@@ -143,13 +143,13 @@ restriction because messaging traffic originates from the user's machine.
 Use local gateway mode when the user wants the gateway on their machine:
 
 ```bash
-npx mlclaw bootstrap --gateway local --name mlclaw
+npx mlclaw@latest bootstrap --gateway local --name mlclaw
 ```
 
 If the user has multiple Docker engines, pin the intended context:
 
 ```bash
-npx mlclaw bootstrap \
+npx mlclaw@latest bootstrap \
   --gateway local \
   --name mlclaw \
   --docker-context desktop-linux
@@ -167,7 +167,7 @@ models, use the `huggingface/` prefix.
 Default/recommended:
 
 ```bash
-npx mlclaw bootstrap \
+npx mlclaw@latest bootstrap \
   --name mlclaw \
   --model huggingface/google/gemma-4-26B-A4B-it:deepinfra
 ```
@@ -236,10 +236,11 @@ to the browser.
 ## Branding
 
 ML Claw white-labels the browser gateway at the proxy layer. App Spaces default
-the browser title, PWA manifest, assistant fallback avatar, login heading, and
-ML Claw control link to the agent name. The ML Claw logo is reserved for the
-control UI brand mark. The gateway shortcut, login logo, and default browser
-icons use the Hugging Face logo.
+the browser title, PWA manifest, login heading, and ML Claw control link to the
+agent name. The ML Claw logo is reserved for the control UI brand mark. The
+gateway shortcut, login logo, and default browser icons use the Hugging Face
+logo. The OpenClaw assistant fallback avatar defaults to a neutral assistant
+icon.
 
 Use Space variables for explicit branding:
 
@@ -251,7 +252,8 @@ MLCLAW_BRAND_LOGO="mlclaw.svg"
 MLCLAW_BRAND_FAVICON="hf-logo.svg"
 MLCLAW_BRAND_FAVICON_32="hf-logo.svg"
 MLCLAW_BRAND_FAVICON_ICO="hf-logo.svg"
-MLCLAW_BRAND_APPLE_TOUCH_ICON="hf-logo.svg"
+MLCLAW_BRAND_APPLE_TOUCH_ICON="assistant-avatar.svg"
+MLCLAW_BRAND_ASSISTANT_AVATAR="assistant-avatar.svg"
 ```
 
 Brand asset paths are relative to the Space `assets/` directory. ML Claw serves

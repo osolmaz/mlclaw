@@ -144,6 +144,7 @@ export class SpaceRuntimeServer {
       pathname === "/sw.js" ||
       pathname === "/assets/hf-logo.svg" ||
       pathname === "/assets/mlclaw.svg" ||
+      pathname === "/assets/assistant-avatar.svg" ||
       pathname === "/assets/mlclaw-control-branding.js" ||
       pathname === "/assets/brand/logo" ||
       pathname === "/login" ||
@@ -296,6 +297,7 @@ function isTemplateRuntimePath(pathname: string): boolean {
     pathname === "/manifest.webmanifest" ||
     pathname === "/assets/hf-logo.svg" ||
     pathname === "/assets/mlclaw.svg" ||
+    pathname === "/assets/assistant-avatar.svg" ||
     pathname === "/assets/brand/logo";
 }
 

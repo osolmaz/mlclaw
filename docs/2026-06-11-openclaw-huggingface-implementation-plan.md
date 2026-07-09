@@ -20,7 +20,7 @@ files to the user's Space repo, sets variables/secrets, and restarts the Space.
 The canonical distribution is the npm package:
 
 ```bash
-npx mlclaw bootstrap
+npx mlclaw@latest bootstrap
 ```
 
 The npm package name is `mlclaw`. It exposes both CLI binary names:
@@ -33,7 +33,7 @@ mlclaw
 Users with Node installed can use npm directly:
 
 ```bash
-npx mlclaw bootstrap
+npx mlclaw@latest bootstrap
 npm install -g mlclaw
 mlclaw bootstrap
 ```
@@ -173,7 +173,7 @@ Launcher rules:
 User-facing commands:
 
 ```bash
-npx mlclaw bootstrap
+npx mlclaw@latest bootstrap
 mlclaw bootstrap
 bash <(curl -fsSL https://raw.githubusercontent.com/osolmaz/mlclaw/main/mlclaw.sh) bootstrap
 ```
@@ -402,7 +402,7 @@ Live:
 
 1. Wipe old `alice/research-archive` Space and `alice/research-archive-data`
    bucket when explicitly authorized.
-2. Run `npx mlclaw bootstrap` using the saved Telegram token file and
+2. Run `npx mlclaw@latest bootstrap` using the saved Telegram token file and
    allowed user.
 3. Confirm the Space repo was generated from `mlclaw`, not from a template
    Space.

@@ -41,7 +41,7 @@ Use these names consistently:
 | Docker container prefix | `mlclaw-<agent>` |
 | Docker volume prefix | `mlclaw-<agent>-live` |
 | Space template repo | `osolmaz/mlclaw` |
-| Main command docs | `npx mlclaw bootstrap` |
+| Main command docs | `npx mlclaw@latest bootstrap` |
 
 Avoid introducing a second public product name. Hugging Face-specific internals
 can still be named directly, for example `hf-bucket-client`,
@@ -272,7 +272,7 @@ Primary public path is duplicate-and-use in the Space. The CLI remains the
 automation and local-operations path:
 
 ```bash
-npx mlclaw bootstrap
+npx mlclaw@latest bootstrap
 ```
 
 Shell launchers:
@@ -418,7 +418,7 @@ node dist/mlclaw.mjs --skill export mlclaw
 
 Cutover tests:
 
-- verify `npx mlclaw` exposes the CLI;
+- verify `npx mlclaw@latest` exposes the CLI;
 - verify no `mlclaw` binary is published by `mlclaw`;
 - verify package files do not contain old `mlclaw` command examples;
 - verify new deployments write only to `~/.config/mlclaw`;

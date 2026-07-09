@@ -730,10 +730,17 @@ describe("ML Claw Space runtime", () => {
       ],
     });
 
-    for (const pathname of ["/assets/brand/logo", "/favicon.svg", "/favicon-32.png", "/favicon.ico", "/apple-touch-icon.png"]) {
+    for (const pathname of [
+      "/assets/brand/logo",
+      "/favicon.svg",
+      "/favicon-32.png",
+      "/favicon.ico",
+      "/apple-touch-icon.png",
+      "/assets/assistant-avatar.svg",
+    ]) {
       const response = await fetch(`http://127.0.0.1:${config.port}${pathname}`);
       expect(response.status, pathname).toBe(200);
-      expect(response.headers.get("cache-control"), pathname).toContain("immutable");
+      expect(response.headers.get("cache-control"), pathname).toBeNull();
       expect(await response.text(), pathname).toContain("<svg");
     }
   });
@@ -910,7 +917,7 @@ describe("ML Claw Space runtime", () => {
       faviconSvgAsset: "hf-logo.svg",
       favicon32Asset: "hf-logo.svg",
       faviconIcoAsset: "hf-logo.svg",
-      appleTouchIconAsset: "hf-logo.svg",
+      appleTouchIconAsset: "assistant-avatar.svg",
     });
 
     const explicit = loadConfig({
@@ -955,6 +962,10 @@ describe("ML Claw Space runtime", () => {
     const logo = await fetch(`http://127.0.0.1:${config.port}/assets/hf-logo.svg`);
     expect(logo.status).toBe(200);
     expect(logo.headers.get("content-type")).toBe("image/svg+xml; charset=utf-8");
+
+    const avatar = await fetch(`http://127.0.0.1:${config.port}/assets/assistant-avatar.svg`);
+    expect(avatar.status).toBe(200);
+    expect(avatar.headers.get("content-type")).toBe("image/svg+xml; charset=utf-8");
   });
 });
 

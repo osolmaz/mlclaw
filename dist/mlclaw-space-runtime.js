@@ -17,6 +17,7 @@ var DEFAULT_BRAND_NAME = "ML Claw";
 var DEFAULT_THEME_COLOR = "#111827";
 var DEFAULT_LOGO_ASSET = "mlclaw.svg";
 var DEFAULT_HUGGING_FACE_ASSET = "hf-logo.svg";
+var DEFAULT_ASSISTANT_AVATAR_ASSET = "assistant-avatar.svg";
 function resolveBranding(env, agentName) {
   const defaultName = defaultBrandName(agentName);
   const name = cleanText(env.MLCLAW_BRAND_NAME) ?? defaultName;
@@ -38,8 +39,8 @@ function resolveBranding(env, agentName) {
       DEFAULT_HUGGING_FACE_ASSET
     ),
     appleTouchIconAsset: normalizeAssetRef(
-      env.MLCLAW_BRAND_APPLE_TOUCH_ICON ?? env.MLCLAW_BRAND_FAVICON_PNG ?? env.MLCLAW_BRAND_FAVICON,
-      DEFAULT_HUGGING_FACE_ASSET
+      env.MLCLAW_BRAND_APPLE_TOUCH_ICON ?? env.MLCLAW_BRAND_ASSISTANT_AVATAR,
+      DEFAULT_ASSISTANT_AVATAR_ASSET
     )
   };
 }
@@ -7088,7 +7089,7 @@ function templatePage(config2) {
       <p>Run the local bootstrapper to create a Hugging Face hosted OpenClaw agent for ML workflows.</p>
       <p class="notice">Do not set this up by only clicking Duplicate. The bootstrapper creates the private Space, private Storage Bucket, OAuth settings, secrets, model configuration, and local manifest.</p>
       <h2>With Node.js</h2>
-      <pre><code>npx mlclaw bootstrap --name mlclaw</code></pre>
+      <pre><code>npx mlclaw@latest bootstrap --name mlclaw</code></pre>
       <h2>macOS or Linux without Node.js</h2>
       <pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/osolmaz/mlclaw/main/mlclaw.sh) --name mlclaw</code></pre>
       <h2>Windows PowerShell</h2>
@@ -7644,6 +7645,7 @@ function createSpaceRuntimeApp(config2, controls) {
   app.get("/healthz", (c) => health(c, config2, controls));
   app.get("/assets/mlclaw.svg", async () => serveFile(path3.join(config2.assetsDir, "mlclaw.svg"), "image/svg+xml; charset=utf-8"));
   app.get("/assets/hf-logo.svg", async () => serveFile(path3.join(config2.assetsDir, "hf-logo.svg"), "image/svg+xml; charset=utf-8"));
+  app.get("/assets/assistant-avatar.svg", async () => serveFile(path3.join(config2.assetsDir, "assistant-avatar.svg"), "image/svg+xml; charset=utf-8"));
   app.get("/assets/mlclaw-control-branding.js", () => staticScript(CONTROL_BRANDING_SCRIPT));
   app.get("/assets/brand/logo", async () => serveBrandAsset(config2, config2.branding.logoAsset));
   app.get("/favicon.svg", async () => serveBrandAsset(config2, config2.branding.faviconSvgAsset));
@@ -7981,11 +7983,11 @@ async function serveFile(file, contentTypeHeader, immutable = false) {
   }
 }
 async function serveBrandAsset(config2, asset) {
-  const response = await serveFile(path3.join(config2.assetsDir, asset), contentType(asset), true);
+  const response = await serveFile(path3.join(config2.assetsDir, asset), contentType(asset));
   if (response.status !== 404 || asset === "mlclaw.svg") {
     return response;
   }
-  return serveFile(path3.join(config2.assetsDir, "mlclaw.svg"), "image/svg+xml; charset=utf-8", true);
+  return serveFile(path3.join(config2.assetsDir, "mlclaw.svg"), "image/svg+xml; charset=utf-8");
 }
 function safeRelativePath(value) {
   let decoded;
@@ -8300,7 +8302,7 @@ var SpaceRuntimeServer = class {
     await proxyHttp(req, res, this.config, { username: session.username });
   }
   shouldRouteToMlClaw(pathname) {
-    return pathname === "/health" || pathname === "/healthz" || pathname === "/favicon.svg" || pathname === "/favicon-32.png" || pathname === "/favicon.ico" || pathname === "/apple-touch-icon.png" || pathname === "/manifest.webmanifest" || pathname === "/sw.js" || pathname === "/assets/hf-logo.svg" || pathname === "/assets/mlclaw.svg" || pathname === "/assets/mlclaw-control-branding.js" || pathname === "/assets/brand/logo" || pathname === "/login" || pathname === "/logout" || pathname.startsWith("/oauth/") || pathname === "/mlclaw" || pathname.startsWith("/mlclaw/");
+    return pathname === "/health" || pathname === "/healthz" || pathname === "/favicon.svg" || pathname === "/favicon-32.png" || pathname === "/favicon.ico" || pathname === "/apple-touch-icon.png" || pathname === "/manifest.webmanifest" || pathname === "/sw.js" || pathname === "/assets/hf-logo.svg" || pathname === "/assets/mlclaw.svg" || pathname === "/assets/assistant-avatar.svg" || pathname === "/assets/mlclaw-control-branding.js" || pathname === "/assets/brand/logo" || pathname === "/login" || pathname === "/logout" || pathname.startsWith("/oauth/") || pathname === "/mlclaw" || pathname.startsWith("/mlclaw/");
   }
   async startOpenClaw(extraEnv = {}) {
     if (this.openclawStarting || this.openclaw && !this.openclaw.killed) {
@@ -8427,7 +8429,7 @@ function isApiPath(pathname) {
   return pathname.startsWith("/mlclaw/api/");
 }
 function isTemplateRuntimePath(pathname) {
-  return pathname === "/health" || pathname === "/healthz" || pathname === "/favicon.svg" || pathname === "/favicon-32.png" || pathname === "/favicon.ico" || pathname === "/apple-touch-icon.png" || pathname === "/manifest.webmanifest" || pathname === "/assets/hf-logo.svg" || pathname === "/assets/mlclaw.svg" || pathname === "/assets/brand/logo";
+  return pathname === "/health" || pathname === "/healthz" || pathname === "/favicon.svg" || pathname === "/favicon-32.png" || pathname === "/favicon.ico" || pathname === "/apple-touch-icon.png" || pathname === "/manifest.webmanifest" || pathname === "/assets/hf-logo.svg" || pathname === "/assets/mlclaw.svg" || pathname === "/assets/assistant-avatar.svg" || pathname === "/assets/brand/logo";
 }
 function formatError2(err) {
   return err instanceof Error ? err.stack ?? err.message : String(err);
