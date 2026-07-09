@@ -589,6 +589,7 @@ async function resolveBootstrapPlan(params: {
   const routerToken = await resolveRouterToken({
     opts,
     runtime,
+    existingSecrets,
     gatewayLocation,
     model,
   });
@@ -1227,6 +1228,7 @@ async function gatewayMigrate(agent: string, opts: GatewayCommandOptions, runtim
     const routerToken = await resolveRouterToken({
       opts,
       runtime,
+      existingSecrets: secrets,
       gatewayLocation: "space",
       model: updated.model,
     });
@@ -2086,12 +2088,17 @@ async function readOptionalTelegramToken(opts: BootstrapOptions, runtime: Requir
 }
 
 async function resolveRouterToken(params: {
-  opts: Pick<BootstrapOptions, "routerToken" | "routerTokenFile">;
+  opts: { routerToken?: string; routerTokenFile?: string };
   runtime: Required<CliRuntime>;
+  existingSecrets?: Record<string, string>;
   gatewayLocation: GatewayLocation;
   model: string;
 }): Promise<string | undefined> {
-  const direct = params.opts.routerToken ?? params.runtime.env.MLCLAW_ROUTER_TOKEN ?? params.runtime.env.HF_ROUTER_TOKEN;
+  const direct = params.opts.routerToken ??
+    params.runtime.env.MLCLAW_ROUTER_TOKEN ??
+    params.runtime.env.HF_ROUTER_TOKEN ??
+    params.existingSecrets?.MLCLAW_ROUTER_TOKEN ??
+    params.existingSecrets?.HF_ROUTER_TOKEN;
   const fromFile = direct ? undefined : await readOptionalRouterTokenFile(params.opts.routerTokenFile);
   const existing = nonEmpty(direct) ?? fromFile;
   if (existing) {

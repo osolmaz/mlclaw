@@ -829,6 +829,44 @@ describe("ML Claw Space runtime", () => {
     });
   });
 
+  it("preserves legacy broad Hub tokens when no Router token exists", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "mlclaw-legacy-hub-token-"));
+    cleanups.push(() => fs.rm(root, { recursive: true, force: true }));
+    const envFile = path.join(root, "env.json");
+    const previousHfToken = process.env.HF_TOKEN;
+    const previousHubToken = process.env.HUGGINGFACE_HUB_TOKEN;
+    process.env.HF_TOKEN = "hf_legacy";
+    process.env.HUGGINGFACE_HUB_TOKEN = "hf_legacy";
+    cleanups.push(() => {
+      if (previousHfToken === undefined) {
+        delete process.env.HF_TOKEN;
+      } else {
+        process.env.HF_TOKEN = previousHfToken;
+      }
+      if (previousHubToken === undefined) {
+        delete process.env.HUGGINGFACE_HUB_TOKEN;
+      } else {
+        process.env.HUGGINGFACE_HUB_TOKEN = previousHubToken;
+      }
+    });
+    const config = await testConfig({
+      openclawArgs: [
+        "-e",
+        `require("fs").writeFileSync(${JSON.stringify(envFile)},JSON.stringify({HF_TOKEN:process.env.HF_TOKEN,HUGGINGFACE_HUB_TOKEN:process.env.HUGGINGFACE_HUB_TOKEN}));setInterval(()=>undefined,100000)`,
+      ],
+    });
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(() => closeServer(server), () => runtime.stop());
+
+    await waitFor(async () => fileExists(envFile));
+    const env = JSON.parse(await fs.readFile(envFile, "utf8")) as Record<string, string>;
+    expect(env).toEqual({
+      HF_TOKEN: "hf_legacy",
+      HUGGINGFACE_HUB_TOKEN: "hf_legacy",
+    });
+  });
+
   it("restarts only the OpenClaw child when runtime restart has no Hub token", async () => {
     const config = await testConfig({ hfToken: undefined });
     let restartCount = 0;

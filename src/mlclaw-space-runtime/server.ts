@@ -170,10 +170,6 @@ export class SpaceRuntimeServer {
         ...(persistedOpenAiKey ? { OPENAI_API_KEY: persistedOpenAiKey } : {}),
         ...extraEnv,
       };
-      if (process.env.MLCLAW_PASS_HF_TOKEN_TO_OPENCLAW !== "1") {
-        delete env.HF_TOKEN;
-        delete env.HUGGINGFACE_HUB_TOKEN;
-      }
       if (this.config.routerToken) {
         env.HF_TOKEN = this.config.routerToken;
         env.HUGGINGFACE_HUB_TOKEN = this.config.routerToken;
