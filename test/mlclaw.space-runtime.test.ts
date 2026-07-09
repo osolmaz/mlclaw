@@ -626,13 +626,38 @@ describe("ML Claw Space runtime", () => {
     expect(body).toContain("<title>Research Control</title>");
     expect(body).toContain('name="application-name" content="Research"');
     expect(body).toContain("data-mlclaw-shell");
+    expect(body).toContain("data-mlclaw-control-branding");
+    expect(body).toContain("src=\"/assets/mlclaw-control-branding.js\"");
     expect(body).toContain("href=\"/mlclaw\"");
-    expect(body).toContain("src=\"/assets/hf-logo.svg\"");
+    expect(body).toContain("width:34px;height:34px");
+    expect(body).toContain("<svg aria-hidden=\"true\" viewBox=\"0 0 24 24\"");
+    expect(body).toContain("<circle cx=\"12\" cy=\"12\" r=\"3\"></circle>");
+    expect(body).not.toContain("src=\"/assets/hf-logo.svg\"");
+    expect(body).not.toContain("var productName = \"ML Claw\"");
     expect(body).toContain("title=\"Research\"");
-    expect(body).toContain("left:max(16px,env(safe-area-inset-left))");
+    expect(body).toContain("left:max(12px,env(safe-area-inset-left))");
     expect(body).not.toContain(">Settings</a>");
     expect(body).not.toContain(">Sign out</a>");
     expect(capturedHeaders?.["accept-encoding"]).toBeUndefined();
+  });
+
+  it("serves CSP-compatible branding and service worker reset scripts", async () => {
+    const config = await testConfig();
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(() => closeServer(server), () => runtime.stop());
+
+    const branding = await fetch(`http://127.0.0.1:${config.port}/assets/mlclaw-control-branding.js`);
+    expect(branding.status).toBe(200);
+    expect(branding.headers.get("content-type")).toContain("text/javascript");
+    expect(branding.headers.get("cache-control")).toContain("no-store");
+    expect(await branding.text()).toContain('var productName = "ML Claw"');
+
+    const sw = await fetch(`http://127.0.0.1:${config.port}/sw.js`);
+    expect(sw.status).toBe(200);
+    expect(sw.headers.get("content-type")).toContain("text/javascript");
+    expect(sw.headers.get("cache-control")).toContain("no-store");
+    expect(await sw.text()).toContain("registration.unregister");
   });
 
   it("does not inject the ML Claw shell into proxied JSON", async () => {

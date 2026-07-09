@@ -27,6 +27,7 @@ import {
   readSession,
   type SessionPayload,
 } from "./session.js";
+import { CONTROL_BRANDING_SCRIPT, SERVICE_WORKER_RESET_SCRIPT } from "./shell.js";
 
 export type RuntimeControls = {
   openclawRunning(): boolean;
@@ -42,11 +43,13 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
   app.get("/healthz", (c) => health(c, config, controls));
   app.get("/assets/mlclaw.svg", async () => serveFile(path.join(config.assetsDir, "mlclaw.svg"), "image/svg+xml; charset=utf-8"));
   app.get("/assets/hf-logo.svg", async () => serveFile(path.join(config.assetsDir, "hf-logo.svg"), "image/svg+xml; charset=utf-8"));
+  app.get("/assets/mlclaw-control-branding.js", () => staticScript(CONTROL_BRANDING_SCRIPT));
   app.get("/assets/brand/logo", async () => serveBrandAsset(config, config.branding.logoAsset));
   app.get("/favicon.svg", async () => serveBrandAsset(config, config.branding.faviconSvgAsset));
   app.get("/favicon-32.png", async () => serveBrandAsset(config, config.branding.favicon32Asset));
   app.get("/favicon.ico", async () => serveBrandAsset(config, config.branding.faviconIcoAsset));
   app.get("/apple-touch-icon.png", async () => serveBrandAsset(config, config.branding.appleTouchIconAsset));
+  app.get("/sw.js", () => staticScript(SERVICE_WORKER_RESET_SCRIPT));
   app.get("/manifest.webmanifest", () => new Response(brandingManifest(config.branding), {
     headers: {
       "cache-control": "no-cache",
@@ -368,6 +371,16 @@ async function statusPayload(config: SpaceRuntimeConfig, controls: RuntimeContro
     },
     branding: publicBranding(config.branding),
   };
+}
+
+function staticScript(body: string): Response {
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "cache-control": "no-store",
+      "content-type": "text/javascript; charset=utf-8",
+    },
+  });
 }
 
 async function readJson(c: Context): Promise<Record<string, unknown> | undefined> {

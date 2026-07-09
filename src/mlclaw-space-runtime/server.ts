@@ -141,8 +141,10 @@ export class SpaceRuntimeServer {
       pathname === "/favicon.ico" ||
       pathname === "/apple-touch-icon.png" ||
       pathname === "/manifest.webmanifest" ||
+      pathname === "/sw.js" ||
       pathname === "/assets/hf-logo.svg" ||
       pathname === "/assets/mlclaw.svg" ||
+      pathname === "/assets/mlclaw-control-branding.js" ||
       pathname === "/assets/brand/logo" ||
       pathname === "/login" ||
       pathname === "/logout" ||
