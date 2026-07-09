@@ -16,8 +16,10 @@ type SpaceVariable = { key: string; value?: string; updatedAt?: string };
 export type SpaceVolume = {
   type: "bucket" | "model" | "dataset" | "space";
   source: string;
-  mountPath: string;
+  mountPath?: string;
+  mount_path?: string;
   readOnly?: boolean;
+  read_only?: boolean;
   revision?: string;
   path?: string;
 };

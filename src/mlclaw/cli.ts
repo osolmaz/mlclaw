@@ -2071,7 +2071,9 @@ function requireRuntimeVolumes(runtime: SpaceRuntime, repoId: string): SpaceVolu
 
 export function mergeStateVolume(existing: SpaceVolume[], bucket: string): SpaceVolume[] {
   return [
-    ...existing.filter((volume) => volume.mountPath !== SPACE_STATE_MOUNT_DIR),
+    ...existing
+      .filter((volume) => volumeMountPath(volume) !== SPACE_STATE_MOUNT_DIR)
+      .map(normalizeSpaceVolume),
     {
       type: "bucket",
       source: bucket,
@@ -2085,9 +2087,30 @@ function hasStateVolume(volumes: SpaceVolume[] | null | undefined, bucket: strin
   return Boolean(volumes?.some((volume) =>
     volume.type === "bucket" &&
     volume.source === bucket &&
-    volume.mountPath === SPACE_STATE_MOUNT_DIR &&
-    volume.readOnly !== true
+    volumeMountPath(volume) === SPACE_STATE_MOUNT_DIR &&
+    volumeReadOnly(volume) !== true
   ));
+}
+
+function normalizeSpaceVolume(volume: SpaceVolume): SpaceVolume {
+  const normalized = { ...volume };
+  const mountPath = volumeMountPath(volume);
+  if (mountPath) {
+    normalized.mountPath = mountPath;
+  }
+  const readOnly = volumeReadOnly(volume);
+  if (typeof readOnly === "boolean") {
+    normalized.readOnly = readOnly;
+  }
+  return normalized;
+}
+
+function volumeMountPath(volume: SpaceVolume): string | undefined {
+  return volume.mountPath ?? volume.mount_path;
+}
+
+function volumeReadOnly(volume: SpaceVolume): boolean | undefined {
+  return volume.readOnly ?? volume.read_only;
 }
 
 async function clearSpaceGatewayDisabled(hub: HubApi, repoId: string): Promise<void> {

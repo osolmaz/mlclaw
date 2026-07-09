@@ -16761,7 +16761,7 @@ function requireRuntimeVolumes(runtime, repoId) {
 }
 function mergeStateVolume(existing, bucket) {
   return [
-    ...existing.filter((volume) => volume.mountPath !== SPACE_STATE_MOUNT_DIR),
+    ...existing.filter((volume) => volumeMountPath(volume) !== SPACE_STATE_MOUNT_DIR).map(normalizeSpaceVolume),
     {
       type: "bucket",
       source: bucket,
@@ -16772,8 +16772,26 @@ function mergeStateVolume(existing, bucket) {
 }
 function hasStateVolume(volumes, bucket) {
   return Boolean(volumes?.some(
-    (volume) => volume.type === "bucket" && volume.source === bucket && volume.mountPath === SPACE_STATE_MOUNT_DIR && volume.readOnly !== true
+    (volume) => volume.type === "bucket" && volume.source === bucket && volumeMountPath(volume) === SPACE_STATE_MOUNT_DIR && volumeReadOnly(volume) !== true
   ));
+}
+function normalizeSpaceVolume(volume) {
+  const normalized = { ...volume };
+  const mountPath = volumeMountPath(volume);
+  if (mountPath) {
+    normalized.mountPath = mountPath;
+  }
+  const readOnly = volumeReadOnly(volume);
+  if (typeof readOnly === "boolean") {
+    normalized.readOnly = readOnly;
+  }
+  return normalized;
+}
+function volumeMountPath(volume) {
+  return volume.mountPath ?? volume.mount_path;
+}
+function volumeReadOnly(volume) {
+  return volume.readOnly ?? volume.read_only;
 }
 async function clearSpaceGatewayDisabled(hub, repoId) {
   try {
