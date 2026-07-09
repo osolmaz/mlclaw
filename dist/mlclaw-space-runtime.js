@@ -6808,9 +6808,8 @@ function createSpaceRuntimeApp(config2, controls) {
       try {
         await setCurrentSpaceSecret(config2, "OPENAI_API_KEY", apiKey);
         persistent = true;
-      } catch (err) {
-        process.stderr.write(`[mlclaw] failed to persist OpenAI key as Space Secret: ${formatError(err)}
-`);
+      } catch {
+        process.stderr.write("[mlclaw] failed to persist OpenAI key as Space Secret\n");
       }
     }
     await writeEphemeralOpenAiCredential(config2.openaiCredentialFile, apiKey);

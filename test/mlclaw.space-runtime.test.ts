@@ -246,6 +246,62 @@ describe("ML Claw Space runtime", () => {
     expect(mode).toBe(0o600);
   });
 
+  it("does not log OpenAI key material when Space Secret persistence fails", async () => {
+    const apiKey = `sk-${"b".repeat(32)}`;
+    const hubPort = await freePort();
+    const hub = http.createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += String(chunk);
+      });
+      req.on("end", () => {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "echo", request: body }));
+      });
+    });
+    await listen(hub, hubPort);
+    cleanups.push(() => closeServer(hub));
+
+    const config = await testConfig({
+      hfToken: "hf_test",
+      hubUrl: `http://127.0.0.1:${hubPort}`,
+      spaceId: "alice/research",
+    });
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(() => closeServer(server), () => runtime.stop());
+    const cookie = sessionCookie(config, "alice");
+    const csrf = await csrfToken(config, cookie);
+    const stderr: string[] = [];
+    const writeStderr = process.stderr.write;
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      stderr.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+      return true;
+    }) as typeof process.stderr.write;
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/credentials/openai`, {
+        method: "POST",
+        headers: {
+          cookie,
+          "content-type": "application/json",
+          "x-mlclaw-csrf": csrf,
+        },
+        body: JSON.stringify({ apiKey }),
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ ok: true, configured: true, persistent: false });
+    } finally {
+      process.stderr.write = writeStderr;
+    }
+
+    const log = stderr.join("");
+    expect(log).toContain("failed to persist OpenAI key as Space Secret");
+    expect(log).not.toContain(apiKey);
+    await expect(fs.readFile(config.openaiCredentialFile, "utf8")).resolves.toBe(`OPENAI_API_KEY=${apiKey}\n`);
+  });
+
   it("requires an admin session before storing OpenAI credentials", async () => {
     const captured: unknown[] = [];
     const hubPort = await freePort();
