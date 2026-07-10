@@ -3,10 +3,11 @@
 Date: 2026-07-10
 
 Status: ML Claw integration implemented and under validation. The verified
-hf-broker operator surface is integrated, but live rollout remains blocked on
-the broker's typed `/v1/models` and `/v1/chat/completions` inference routes.
-ML Claw deliberately reports unhealthy until those routes exist rather than
-falling back to a directly exposed Hugging Face token.
+Brokerkit operator surface is integrated through the generic operator broker
+registry. Live rollout remains blocked on HF Broker's typed `/v1/models` and
+`/v1/chat/completions` inference routes. ML Claw deliberately reports unhealthy
+until those routes exist rather than falling back to a directly exposed Hugging
+Face token.
 
 ## Goal
 
@@ -34,7 +35,7 @@ browser owner
     v
 ML Claw control plane (trusted Unix user)
     |
-    | operator-only Unix socket
+    | dedicated operator HTTP listener and credential
     v
 hf-broker (broker Unix user) ---- real HF token ----> Hugging Face
     ^
@@ -85,7 +86,7 @@ viewport width.
 The drawer has two views:
 
 - `Pending`: newest requests first;
-- `History`: approved, rejected, expired, revoked, consumed, and failed
+- `History`: approved, denied, expired, revoked, consumed, and failed
   requests.
 
 Each compact request row shows:
@@ -106,8 +107,8 @@ Expanding a row shows:
 - broker policy that allowed the request to be proposed;
 - audit events already recorded for the request.
 
-Pending rows provide inline `Approve` and `Reject` actions. Approval requires a
-brief confirmation that repeats the exact target and effect. Rejection may
+Pending rows provide inline `Approve` and `Deny` actions. Approval requires a
+brief confirmation that repeats the exact target and effect. Denial may
 optionally include a short reason that is returned to the agent.
 
 The drawer updates in place after a decision. It must not remove failed or
@@ -146,9 +147,10 @@ Required boundaries:
   its environment.
 - OpenClaw receives an explicit environment allowlist. It must not inherit the
   ML Claw control-plane environment.
-- The agent broker secret is readable by `node`; the operator credential and
-  operator socket are not.
-- The operator Unix socket is owned by the broker and an operator-only group.
+- The agent broker secret is readable by `node`; the operator credential is
+  not.
+- The operator listener is bound to a dedicated loopback endpoint and requires
+  a separate operator credential held only by the control plane.
 - OpenClaw can reach only the authenticated agent-facing localhost listener.
 - `hf-broker doctor` must verify the live boundary before the Space reports
   healthy.
@@ -232,19 +234,21 @@ consumption and private-data exfiltration must remain documented.
 
 ### Operator Surface
 
-The operator surface is available only through the protected Unix socket. It
-must not be reachable through the agent-facing listener.
+The operator surface is available only through the broker's separately
+authenticated operator listener. It must not be reachable through the
+agent-facing listener.
 
 Required operations:
 
 ```text
-GET  /operator/requests?status=pending
-GET  /operator/requests?status=history
-GET  /operator/requests/{id}
-GET  /operator/events
-POST /operator/requests/{id}/approve
-POST /operator/requests/{id}/reject
-POST /operator/requests/{id}/revoke
+GET  /api/grants?status=pending
+GET  /api/grants?status=history
+GET  /api/grants/{id}
+GET  /api/grants/events
+POST /api/grants/{id}/approve
+POST /api/grants/{id}/deny
+POST /api/grants/{id}/cancel
+POST /api/grants/{id}/revoke
 ```
 
 `/operator/events` is an SSE stream carrying request creation and lifecycle
@@ -259,19 +263,22 @@ supply a replacement operation, target, ref, duration, or plan body.
 The trusted ML Claw control plane exposes owner-only browser routes:
 
 ```text
-GET  /mlclaw/api/approvals
-GET  /mlclaw/api/approvals/events
-GET  /mlclaw/api/approvals/{id}
-POST /mlclaw/api/approvals/{id}/approve
-POST /mlclaw/api/approvals/{id}/reject
-POST /mlclaw/api/approvals/{id}/revoke
+GET  /mlclaw/api/approvals/brokers
+GET  /mlclaw/api/approvals?broker={broker}
+GET  /mlclaw/api/approvals/events?broker={broker}
+GET  /mlclaw/api/approvals/{broker}/{id}
+POST /mlclaw/api/approvals/{broker}/{id}/approve
+POST /mlclaw/api/approvals/{broker}/{id}/deny
+POST /mlclaw/api/approvals/{broker}/{id}/cancel
+POST /mlclaw/api/approvals/{broker}/{id}/revoke
 ```
 
 Requirements:
 
 - Hugging Face OAuth identifies the Space owner or configured ML Claw admin.
 - Mutating routes require the signed ML Claw session and CSRF token.
-- The control plane forwards fixed operator commands over the Unix socket.
+- The control plane forwards fixed operator commands to the selected dedicated
+  operator listener.
 - It never accepts arbitrary broker paths or methods from the browser.
 - It never returns operator credentials, broker secrets, or upstream tokens.
 - SSE reconnect uses event IDs so the drawer can recover missed updates.
@@ -320,7 +327,7 @@ Update `hf-broker` in sympathy with its existing invariants:
 - add read-only Hub classifications required by HF tooling;
 - separate agent and operator listeners;
 - expose grant listing, detail, decision, revoke, and SSE operations only on
-  the operator socket;
+  the dedicated operator listener;
 - replace Telegram notifier coupling with a notification event interface;
 - retain Telegram as an optional standalone broker integration only if the
   repository still wants it, but ML Claw must not configure or depend on it;
@@ -379,7 +386,7 @@ to OpenClaw.
 - agent is root or root-equivalent;
 - agent can read or modify the broker token file;
 - agent can read broker or control-plane process environments;
-- agent can connect to the operator socket;
+- agent can authenticate to the operator listener;
 - agent can modify broker, control-plane, or UI files;
 - broker agent or operator surface is unhealthy;
 - Router inference through the broker fails;
@@ -417,7 +424,7 @@ checks pass.
 - read-only Hub route classification;
 - generic Hub API paths remain refused;
 - agent listener cannot access operator routes;
-- operator socket list, detail, approve, reject, revoke, and SSE behavior;
+- operator listener list, detail, approve, deny, revoke, and SSE behavior;
 - canonical plan cannot be replaced by approval input;
 - idempotent request IDs and duplicate notification prevention;
 - expiry, use-budget, reservation, and ambiguous-execution behavior;
@@ -445,11 +452,11 @@ Use `osolmaz/mlclaw-test` and its disposable test bucket.
 2. Verify normal Router inference succeeds through the broker.
 3. From an OpenClaw shell, confirm the real token is absent from `env`, files,
    process environments, diagnostics, and `/proc` paths available to `node`.
-4. Confirm the agent cannot connect to the operator socket.
+4. Confirm the agent cannot authenticate to the operator listener.
 5. Perform a permitted read and append-only Git push.
 6. Attempt a force-push and confirm it creates a pending request.
 7. Confirm the toast and unread badge appear without a page reload.
-8. Reject the request and confirm the agent receives the rejection.
+8. Deny the request and confirm the agent receives the denial.
 9. Create a second request, inspect its exact plan, and approve it.
 10. Confirm only the approved target and use budget become available.
 11. Restart the Space and verify request history and OpenClaw state survive.
@@ -462,7 +469,7 @@ Use `osolmaz/mlclaw-test` and its disposable test bucket.
 - Existing allowed read and reversible-write workflows remain usable.
 - Approval requests appear as live toasts and in a collapsible notification
   drawer.
-- The signed-in owner can approve, reject, review history, and revoke active
+- The signed-in owner can approve, deny, review history, and revoke active
   grants without leaving ML Claw.
 - The agent can request approval but cannot approve its own request.
 - No Telegram token, bot, webhook, polling loop, or Telegram UI is required.

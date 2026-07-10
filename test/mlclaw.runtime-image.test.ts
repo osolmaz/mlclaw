@@ -51,6 +51,11 @@ describe("runtime image Dockerfile", () => {
     expect(entrypoint).toContain('node /app/hf-state-sync.js prepare-restore');
     expect(entrypoint).toContain('export MLCLAW_OPENCLAW_UID="$OPENCLAW_UID"');
     expect(entrypoint).toContain('export MLCLAW_OPENCLAW_GID="$OPENCLAW_GID"');
+    expect(entrypoint).toContain('if [ -z "${MLCLAW_OPERATOR_BROKERS_FILE:-}" ]; then');
+    expect(entrypoint).toContain('export MLCLAW_OPERATOR_BROKERS_FILE="$operator_brokers_file"');
+    expect(entrypoint).toContain('"id":"hf-broker"');
+    expect(entrypoint).toContain('"token_file":"%s"');
+    expect(entrypoint).not.toContain("MLCLAW_HF_BROKER_OPERATOR_SECRET_FILE");
     for (const secret of [
       "MLCLAW_CREDENTIAL_KEY",
       "MLCLAW_SESSION_SECRET",

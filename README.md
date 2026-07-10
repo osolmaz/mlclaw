@@ -205,9 +205,12 @@ Use the browser control UI for:
 - `/mlclaw/status`: inspect runtime, bucket, model, OAuth, and integration status.
 
 Administrators also get an approval bell and drawer. Requests for brokered
-operations can be inspected, approved, rejected, or revoked there; every
-decision is authenticated, CSRF-protected, and sent through fixed operator API
-routes.
+operations can be inspected, approved, denied, canceled, or revoked there.
+The inbox merges every Brokerkit-compatible backend configured in
+`MLCLAW_OPERATOR_BROKERS_FILE`; every decision is authenticated,
+CSRF-protected, and sent through fixed broker-scoped API routes. Operator
+tokens remain in backend-only files and are never sent to the browser or
+OpenClaw. See [Operator Broker Configuration](docs/operator-brokers-config.md).
 - `/mlclaw/credentials`: connect or disconnect Hugging Face MCP and Research
   Agent access, or submit an OpenAI API key.
 - `/mlclaw/logout`: clear the ML Claw session cookie.

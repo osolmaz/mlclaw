@@ -4,17 +4,28 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { brandingManifest, publicBranding } from "./branding.js";
 import { integrationCredentialSlot, type SpaceRuntimeConfig } from "./config.js";
-import { brokerOperatorConfigured, HfBrokerOperatorClient } from "./hf-broker.js";
+import {
+  BrokerOperatorError,
+  OperatorBrokerRegistry,
+  type BrokerOperatorClient,
+  type OperatorBrokerSummary,
+} from "./operator-brokers.js";
 import type { McpCredentialStatus } from "./mcp-credentials.js";
 import { createCsrfToken, verifyCsrfToken } from "./csrf.js";
-import { normalizeModel, restartCurrentSpace, runtimeSettings, setCurrentSpaceSecret, setCurrentSpaceVariable } from "./hub-settings.js";
-import { normalizeModelChoices, parseOpenClawModelRef, serializeModelChoices, type ModelChoice } from "./model-choices.js";
 import {
-  authorizeUrl,
-  exchangeCodeForIdentity,
-  HF_MCP_OAUTH_SCOPES,
-  type OAuthIdentity,
-} from "./oauth.js";
+  normalizeModel,
+  restartCurrentSpace,
+  runtimeSettings,
+  setCurrentSpaceSecret,
+  setCurrentSpaceVariable,
+} from "./hub-settings.js";
+import {
+  normalizeModelChoices,
+  parseOpenClawModelRef,
+  serializeModelChoices,
+  type ModelChoice,
+} from "./model-choices.js";
+import { authorizeUrl, exchangeCodeForIdentity, HF_MCP_OAUTH_SCOPES, type OAuthIdentity } from "./oauth.js";
 import { configureOpenClawGateway } from "./openclaw-config.js";
 import {
   loadOpenAiCredentialFile,
@@ -50,18 +61,19 @@ export type RuntimeControls = {
 
 export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: RuntimeControls): Hono {
   const app = new Hono();
-  const broker = brokerOperatorConfigured(config)
-    ? new HfBrokerOperatorClient({
-      baseUrl: config.brokerOperatorUrl as string,
-      token: config.brokerOperatorToken as string,
-    })
-    : undefined;
+  const operatorBrokers = new OperatorBrokerRegistry(config.operatorBrokers);
 
   app.get("/health", (c) => health(c, config, controls));
   app.get("/healthz", (c) => health(c, config, controls));
-  app.get("/assets/mlclaw.svg", async () => serveFile(path.join(config.assetsDir, "mlclaw.svg"), "image/svg+xml; charset=utf-8"));
-  app.get("/assets/hf-logo.svg", async () => serveFile(path.join(config.assetsDir, "hf-logo.svg"), "image/svg+xml; charset=utf-8"));
-  app.get("/assets/assistant-avatar.svg", async () => serveFile(path.join(config.assetsDir, "assistant-avatar.svg"), "image/svg+xml; charset=utf-8"));
+  app.get("/assets/mlclaw.svg", async () =>
+    serveFile(path.join(config.assetsDir, "mlclaw.svg"), "image/svg+xml; charset=utf-8"),
+  );
+  app.get("/assets/hf-logo.svg", async () =>
+    serveFile(path.join(config.assetsDir, "hf-logo.svg"), "image/svg+xml; charset=utf-8"),
+  );
+  app.get("/assets/assistant-avatar.svg", async () =>
+    serveFile(path.join(config.assetsDir, "assistant-avatar.svg"), "image/svg+xml; charset=utf-8"),
+  );
   app.get("/assets/mlclaw-control-branding.js", () => staticScript(CONTROL_BRANDING_SCRIPT));
   app.get("/assets/brand/logo", async () => serveBrandAsset(config, config.branding.logoAsset));
   app.get("/favicon.svg", async () => serveBrandAsset(config, config.branding.faviconSvgAsset));
@@ -69,12 +81,16 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
   app.get("/favicon.ico", async () => serveBrandAsset(config, config.branding.faviconIcoAsset));
   app.get("/apple-touch-icon.png", async () => serveBrandAsset(config, config.branding.appleTouchIconAsset));
   app.get("/sw.js", () => staticScript(SERVICE_WORKER_RESET_SCRIPT));
-  app.get("/manifest.webmanifest", () => new Response(brandingManifest(config.branding), {
-    headers: {
-      "cache-control": "no-cache",
-      "content-type": "application/manifest+json; charset=utf-8",
-    },
-  }));
+  app.get(
+    "/manifest.webmanifest",
+    () =>
+      new Response(brandingManifest(config.branding), {
+        headers: {
+          "cache-control": "no-cache",
+          "content-type": "application/manifest+json; charset=utf-8",
+        },
+      }),
+  );
 
   app.get("/oauth/login", (c) => handleOauthLogin(c, config));
   app.get("/oauth/callback", (c) => handleOauthCallback(c, config, controls));
@@ -117,21 +133,29 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
     return c.json(await statusPayload(config, controls));
   });
 
+  app.get("/mlclaw/api/approvals/brokers", (c) => {
+    const auth = requireAdmin(c, config);
+    if (auth instanceof Response) {
+      return auth;
+    }
+    return c.json({ brokers: operatorBrokers.list() });
+  });
+
   app.get("/mlclaw/api/approvals", async (c) => {
     const auth = requireAdmin(c, config);
     if (auth instanceof Response) {
       return auth;
     }
-    if (!broker) {
-      return c.json({ ok: false, error: "HF Broker operator inbox is not configured" }, 503);
+    const broker = selectedOperatorBroker(c, operatorBrokers);
+    if (broker instanceof Response) {
+      return broker;
     }
     const rawStatus = c.req.query("status");
     if (rawStatus && rawStatus !== "pending" && rawStatus !== "history") {
       return c.json({ ok: false, error: "status must be pending or history" }, 400);
     }
-    const status: "pending" | "history" | undefined = rawStatus === "pending" || rawStatus === "history"
-      ? rawStatus
-      : undefined;
+    const status: "pending" | "history" | undefined =
+      rawStatus === "pending" || rawStatus === "history" ? rawStatus : undefined;
     const cursor = c.req.query("cursor");
     try {
       const page = await broker.list({
@@ -139,9 +163,9 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
         ...(cursor ? { cursor } : {}),
         limit: boundedInteger(c.req.query("limit"), 50, 100),
       });
-      return c.json(page);
+      return c.json({ broker: broker.summary(), ...page });
     } catch (err) {
-      return brokerUnavailable(c, err);
+      return brokerFailure(c, err, broker.summary());
     }
   });
 
@@ -150,11 +174,12 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
     if (auth instanceof Response) {
       return auth;
     }
-    if (!broker) {
-      return c.json({ ok: false, error: "HF Broker operator inbox is not configured" }, 503);
+    const broker = selectedOperatorBroker(c, operatorBrokers);
+    if (broker instanceof Response) {
+      return broker;
     }
     try {
-      const upstream = await broker.events(c.req.header("last-event-id"));
+      const upstream = await broker.events(c.req.header("last-event-id"), c.req.raw.signal);
       return new Response(upstream.body, {
         status: 200,
         headers: {
@@ -164,31 +189,33 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
         },
       });
     } catch (err) {
-      return brokerUnavailable(c, err);
+      return brokerFailure(c, err, broker.summary());
     }
   });
 
-  app.get("/mlclaw/api/approvals/:id", async (c) => {
+  app.get("/mlclaw/api/approvals/:broker/:id", async (c) => {
     const auth = requireAdmin(c, config);
     if (auth instanceof Response) {
       return auth;
     }
+    const broker = operatorBrokers.get(c.req.param("broker"));
     if (!broker) {
-      return c.json({ ok: false, error: "HF Broker operator inbox is not configured" }, 503);
+      return c.json({ ok: false, error: "operator broker is not configured" }, 404);
     }
     try {
-      return c.json(await broker.get(c.req.param("id")));
+      return c.json({ broker: broker.summary(), item: await broker.get(c.req.param("id")) });
     } catch (err) {
-      return brokerUnavailable(c, err);
+      return brokerFailure(c, err, broker.summary());
     }
   });
 
   for (const [browserAction, brokerAction] of [
     ["approve", "approve"],
-    ["reject", "deny"],
+    ["deny", "deny"],
+    ["cancel", "cancel"],
     ["revoke", "revoke"],
   ] as const) {
-    app.post(`/mlclaw/api/approvals/:id/${browserAction}`, async (c) => {
+    app.post(`/mlclaw/api/approvals/:broker/:id/${browserAction}`, async (c) => {
       const auth = requireAdmin(c, config);
       if (auth instanceof Response) {
         return auth;
@@ -197,8 +224,9 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
       if (csrf) {
         return csrf;
       }
+      const broker = operatorBrokers.get(c.req.param("broker"));
       if (!broker) {
-        return c.json({ ok: false, error: "HF Broker operator inbox is not configured" }, 503);
+        return c.json({ ok: false, error: "operator broker is not configured" }, 404);
       }
       const body = await readJson(c);
       const expectedRevision = boundedInteger(body?.expectedRevision, 0, Number.MAX_SAFE_INTEGER);
@@ -206,17 +234,20 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
         return c.json({ ok: false, error: "expectedRevision is required" }, 400);
       }
       try {
-        return c.json(await broker.decide(c.req.param("id"), brokerAction, {
+        const item = await broker.decide(c.req.param("id"), brokerAction, {
           expectedRevision,
           ...(typeof body?.expectedStatus === "string" ? { expectedStatus: body.expectedStatus } : {}),
           ...(typeof body?.reason === "string" ? { reason: body.reason.slice(0, 2_000) } : {}),
-          ...(browserAction === "approve" ? {
-            durationSeconds: boundedInteger(body?.durationSeconds, 0, 86_400),
-            maxUses: boundedInteger(body?.maxUses, 0, 100),
-          } : {}),
-        }));
+          ...(browserAction === "approve"
+            ? {
+                durationSeconds: boundedInteger(body?.durationSeconds, 0, 86_400),
+                maxUses: boundedInteger(body?.maxUses, 0, 100),
+              }
+            : {}),
+        });
+        return c.json({ broker: broker.summary(), item });
       } catch (err) {
-        return brokerUnavailable(c, err);
+        return brokerFailure(c, err, broker.summary());
       }
     });
   }
@@ -231,10 +262,13 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
       return csrf;
     }
     if (config.gatewayLocation === "local") {
-      return c.json({
-        ok: false,
-        error: "Local integrations use the local Hugging Face token; manage that credential with the ML Claw CLI",
-      }, 409);
+      return c.json(
+        {
+          ok: false,
+          error: "Local integrations use the local Hugging Face token; manage that credential with the ML Claw CLI",
+        },
+        409,
+      );
     }
     const credentialSlot = integrationCredentialSlot(config) ?? auth.username;
     await controls.clearMcpCredentials(credentialSlot);
@@ -283,7 +317,10 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
       return c.json({ ok: false, error: "active model must be included in model choices" }, 400);
     }
     if (parseOpenClawModelRef(model) && !config.brokerAgentSecret && !config.routerToken && !config.hfToken) {
-      return c.json({ ok: false, error: "Hugging Face broker credential is required before selecting a Hugging Face Router model" }, 400);
+      return c.json(
+        { ok: false, error: "Hugging Face broker credential is required before selecting a Hugging Face Router model" },
+        400,
+      );
     }
     let persistent = false;
     if (config.spaceId && config.hfToken) {
@@ -394,9 +431,7 @@ function handleOauthLogin(c: Context, config: SpaceRuntimeConfig): Response {
   }
   const session = readSession(c.req.header("cookie"), config.sessionSecret);
   const integrationsRequested = c.req.query("intent") === "integrations";
-  const intent = integrationsRequested && session && isAdmin(config, session.username)
-    ? "integrations"
-    : "login";
+  const intent = integrationsRequested && session && isAdmin(config, session.username) ? "integrations" : "login";
   const { state, cookie } = createOauthStateCookie({
     next,
     intent,
@@ -404,29 +439,49 @@ function handleOauthLogin(c: Context, config: SpaceRuntimeConfig): Response {
     secure: config.cookieSecure,
   });
   const redirectUri = `${config.publicUrl}/oauth/callback`;
-  const headers = new Headers({ location: authorizeUrl({
-    clientId: config.oauthClientId,
-    clientSecret: config.oauthClientSecret,
-    providerUrl: config.providerUrl,
-    redirectUri,
-  }, state, intent === "integrations" ? HF_MCP_OAUTH_SCOPES : undefined) });
+  const headers = new Headers({
+    location: authorizeUrl(
+      {
+        clientId: config.oauthClientId,
+        clientSecret: config.oauthClientSecret,
+        providerUrl: config.providerUrl,
+        redirectUri,
+      },
+      state,
+      intent === "integrations" ? HF_MCP_OAUTH_SCOPES : undefined,
+    ),
+  });
   headers.append("set-cookie", cookie);
   return new Response(null, { status: 302, headers });
 }
 
-async function handleOauthCallback(c: Context, config: SpaceRuntimeConfig, controls: RuntimeControls): Promise<Response> {
+async function handleOauthCallback(
+  c: Context,
+  config: SpaceRuntimeConfig,
+  controls: RuntimeControls,
+): Promise<Response> {
   const stateCookie = readOauthState(c.req.header("cookie"), config.sessionSecret);
   const state = c.req.query("state");
   const code = c.req.query("code");
-  if (!stateCookie || !state || stateCookie.state !== state || !code || !config.oauthClientId || !config.oauthClientSecret) {
+  if (
+    !stateCookie ||
+    !state ||
+    stateCookie.state !== state ||
+    !code ||
+    !config.oauthClientId ||
+    !config.oauthClientSecret
+  ) {
     return c.html(loginPage(config, "The Hugging Face sign-in attempt expired. Try again."), 401);
   }
-  const identity = await exchangeCodeForIdentity({
-    clientId: config.oauthClientId,
-    clientSecret: config.oauthClientSecret,
-    providerUrl: config.providerUrl,
-    redirectUri: `${config.publicUrl}/oauth/callback`,
-  }, code);
+  const identity = await exchangeCodeForIdentity(
+    {
+      clientId: config.oauthClientId,
+      clientSecret: config.oauthClientSecret,
+      providerUrl: config.providerUrl,
+      redirectUri: `${config.publicUrl}/oauth/callback`,
+    },
+    code,
+  );
   if (!identity) {
     return c.html(loginPage(config, "Hugging Face sign-in failed. Try again."), 401);
   }
@@ -439,15 +494,23 @@ async function handleOauthCallback(c: Context, config: SpaceRuntimeConfig, contr
       await controls.saveMcpCredentials(identity);
     } catch (err) {
       process.stderr.write(`[mlclaw] failed to store MCP authorization: ${formatError(err)}\n`);
-      return c.html(loginPage(config, "Hugging Face sign-in succeeded, but MCP authorization could not be stored."), 500);
+      return c.html(
+        loginPage(config, "Hugging Face sign-in succeeded, but MCP authorization could not be stored."),
+        500,
+      );
     }
   }
-  const headers = new Headers({ location: normalizeNext(typeof stateCookie.next === "string" ? stateCookie.next : "/") });
-  headers.append("set-cookie", createSessionCookie({
-    username: identity.username,
-    sessionSecret: config.sessionSecret,
-    secure: config.cookieSecure,
-  }));
+  const headers = new Headers({
+    location: normalizeNext(typeof stateCookie.next === "string" ? stateCookie.next : "/"),
+  });
+  headers.append(
+    "set-cookie",
+    createSessionCookie({
+      username: identity.username,
+      sessionSecret: config.sessionSecret,
+      secure: config.cookieSecure,
+    }),
+  );
   headers.append("set-cookie", clearOauthStateCookie(config.cookieSecure));
   return new Response(null, { status: 302, headers });
 }
@@ -494,11 +557,13 @@ function requireAdmin(c: Context, config: SpaceRuntimeConfig): SessionPayload | 
 }
 
 function requireCsrf(c: Context, config: SpaceRuntimeConfig, username: string): Response | undefined {
-  if (verifyCsrfToken({
-    token: c.req.header("x-mlclaw-csrf"),
-    username,
-    sessionSecret: config.sessionSecret,
-  })) {
+  if (
+    verifyCsrfToken({
+      token: c.req.header("x-mlclaw-csrf"),
+      username,
+      sessionSecret: config.sessionSecret,
+    })
+  ) {
     return undefined;
   }
   return c.json({ ok: false, error: "csrf token is invalid or missing" }, 403);
@@ -512,9 +577,20 @@ function boundedInteger(value: unknown, fallback: number, maximum: number): numb
   return parsed;
 }
 
-function brokerUnavailable(c: Context, err: unknown): Response {
-  process.stderr.write(`[mlclaw] HF Broker operator request failed: ${formatError(err)}\n`);
-  return c.json({ ok: false, error: "HF Broker operator request failed" }, 502);
+function selectedOperatorBroker(c: Context, registry: OperatorBrokerRegistry): BrokerOperatorClient | Response {
+  const id = c.req.query("broker");
+  if (!id) {
+    return c.json({ ok: false, error: "broker is required" }, 400);
+  }
+  return registry.get(id) ?? c.json({ ok: false, error: "operator broker is not configured" }, 404);
+}
+
+function brokerFailure(c: Context, err: unknown, broker: OperatorBrokerSummary): Response {
+  process.stderr.write(`[mlclaw] ${broker.id} operator request failed: ${formatError(err)}\n`);
+  if (err instanceof BrokerOperatorError && err.status >= 400 && err.status < 500) {
+    return c.json({ ok: false, error: err.message, ...(err.code ? { code: err.code } : {}) }, err.status as 400);
+  }
+  return c.json({ ok: false, error: `${broker.label} operator API is unavailable` }, 502);
 }
 
 function unauthenticated(c: Context, config: SpaceRuntimeConfig): Response {
@@ -530,8 +606,7 @@ function unauthenticated(c: Context, config: SpaceRuntimeConfig): Response {
 
 function isBrowserNavigation(c: Context): boolean {
   const method = c.req.method;
-  return (method === "GET" || method === "HEAD") &&
-    (c.req.header("accept") ?? "").includes("text/html");
+  return (method === "GET" || method === "HEAD") && (c.req.header("accept") ?? "").includes("text/html");
 }
 
 function isAllowed(config: SpaceRuntimeConfig, username: string): boolean {
@@ -604,6 +679,7 @@ async function brokerStatus(config: SpaceRuntimeConfig): Promise<{
   agentHealthy: boolean;
   inferenceReady: boolean;
   operatorConfigured: boolean;
+  operatorBrokers: number;
 }> {
   const configured = Boolean(config.brokerAgentUrl && config.brokerAgentSecret);
   if (!configured) {
@@ -611,7 +687,8 @@ async function brokerStatus(config: SpaceRuntimeConfig): Promise<{
       configured: false,
       agentHealthy: false,
       inferenceReady: false,
-      operatorConfigured: brokerOperatorConfigured(config),
+      operatorConfigured: config.operatorBrokers.some((broker) => broker.id === "hf-broker"),
+      operatorBrokers: config.operatorBrokers.length,
     };
   }
   const baseUrl = (config.brokerAgentUrl as string).replace(/\/+$/, "");
@@ -624,7 +701,8 @@ async function brokerStatus(config: SpaceRuntimeConfig): Promise<{
     configured: true,
     agentHealthy,
     inferenceReady,
-    operatorConfigured: brokerOperatorConfigured(config),
+    operatorConfigured: config.operatorBrokers.some((broker) => broker.id === "hf-broker"),
+    operatorBrokers: config.operatorBrokers.length,
   };
 }
 
@@ -655,9 +733,7 @@ function staticScript(body: string): Response {
 async function readJson(c: Context): Promise<Record<string, unknown> | undefined> {
   try {
     const value = await c.req.json();
-    return value && typeof value === "object" && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : undefined;
+    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
   } catch {
     return undefined;
   }
@@ -669,12 +745,20 @@ async function writeRuntimeSettingsFile(
   choices: ModelChoice[],
 ): Promise<void> {
   await fs.mkdir(path.dirname(config.runtimeSettingsFile), { recursive: true });
-  await fs.writeFile(config.runtimeSettingsFile, `${JSON.stringify({
-    version: 1,
-    model,
-    modelChoices: choices,
-    updatedAt: new Date().toISOString(),
-  }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  await fs.writeFile(
+    config.runtimeSettingsFile,
+    `${JSON.stringify(
+      {
+        version: 1,
+        model,
+        modelChoices: choices,
+        updatedAt: new Date().toISOString(),
+      },
+      null,
+      2,
+    )}\n`,
+    { encoding: "utf8", mode: 0o600 },
+  );
   await fs.chmod(config.runtimeSettingsFile, 0o600);
   if (process.getuid?.() === 0) {
     await fs.chown(config.runtimeSettingsFile, config.openclawUid, config.openclawGid);
@@ -720,7 +804,7 @@ function safeRelativePath(value: string): string | undefined {
 }
 
 function formatError(err: unknown): string {
-  return err instanceof Error ? err.stack ?? err.message : String(err);
+  return err instanceof Error ? (err.stack ?? err.message) : String(err);
 }
 
 function contentType(file: string): string {

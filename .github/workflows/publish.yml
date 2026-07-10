@@ -63,8 +63,14 @@ jobs:
           echo "runtime_tag=${version}-openclaw-${openclaw_version}" >> "$GITHUB_OUTPUT"
       - run: npm ci
       - run: npm run build
+      - run: npm run format
+      - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      - run: npm run coverage
+      - run: npm run dry
+      - run: npm run mutate
+      - run: npm run slophammer
       - run: npm run check:secrets
       - run: npm run pack:check
       - name: Check Hugging Face token for template update

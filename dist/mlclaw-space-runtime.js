@@ -11,7 +11,7 @@ import { spawn as spawn2 } from "node:child_process";
 import process2 from "node:process";
 
 // src/mlclaw-space-runtime/config.ts
-import { readFileSync } from "node:fs";
+import { readFileSync as readFileSync2 } from "node:fs";
 import { randomBytes } from "node:crypto";
 
 // src/hf-state-sync/paths.ts
@@ -632,6 +632,254 @@ function positiveNumber(value) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : void 0;
 }
 
+// src/mlclaw-space-runtime/operator-brokers.ts
+import { isAbsolute } from "node:path";
+import { readFileSync } from "node:fs";
+var MAX_CONFIG_BYTES = 64 * 1024;
+var MAX_TOKEN_BYTES = 4096;
+var MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+var BROKER_ID = /^[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
+var BrokerOperatorError = class extends Error {
+  constructor(broker, status, code, message) {
+    super(message);
+    this.broker = broker;
+    this.status = status;
+    this.code = code;
+  }
+};
+var BrokerOperatorClient = class {
+  constructor(options) {
+    this.options = options;
+    this.baseUrl = options.baseUrl.replace(/\/+$/, "");
+    this.fetchImpl = options.fetch ?? fetch;
+  }
+  fetchImpl;
+  baseUrl;
+  summary() {
+    return { id: this.options.id, label: this.options.label };
+  }
+  list(params = {}) {
+    const query = new URLSearchParams();
+    if (params.status) {
+      query.set("status", params.status);
+    }
+    if (params.cursor) {
+      query.set("cursor", params.cursor);
+    }
+    if (params.limit) {
+      query.set("limit", String(params.limit));
+    }
+    const suffix = query.size > 0 ? `?${query}` : "";
+    return this.request(`/api/grants${suffix}`);
+  }
+  get(id) {
+    return this.request(`/api/grants/${approvalId(id)}`);
+  }
+  decide(id, action, decision) {
+    return this.request(`/api/grants/${approvalId(id)}/${action}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        expected_revision: decision.expectedRevision,
+        ...decision.expectedStatus ? { expected_status: decision.expectedStatus } : {},
+        ...decision.reason ? { reason: decision.reason } : {},
+        ...decision.durationSeconds ? { duration_seconds: decision.durationSeconds } : {},
+        ...decision.maxUses ? { max_uses: decision.maxUses } : {}
+      })
+    });
+  }
+  async events(lastEventId, signal) {
+    const headers = {
+      accept: "text/event-stream",
+      authorization: `Bearer ${this.options.token}`
+    };
+    if (lastEventId) {
+      headers["last-event-id"] = lastEventId;
+    }
+    const response = await this.fetchImpl(`${this.baseUrl}/api/grants/events`, {
+      headers,
+      redirect: "error",
+      ...signal ? { signal } : {}
+    });
+    if (!response.ok) {
+      throw await this.operatorError(response);
+    }
+    if (!response.headers.get("content-type")?.toLowerCase().startsWith("text/event-stream")) {
+      await response.body?.cancel();
+      throw new BrokerOperatorError(
+        this.summary(),
+        502,
+        "invalid_event_stream",
+        "Broker returned an invalid event stream"
+      );
+    }
+    return response;
+  }
+  async request(pathname, init = {}) {
+    const headers = new Headers(init.headers);
+    headers.set("accept", "application/json");
+    headers.set("authorization", `Bearer ${this.options.token}`);
+    const response = await this.fetchImpl(`${this.baseUrl}${pathname}`, {
+      ...init,
+      headers,
+      redirect: "error"
+    });
+    if (!response.ok) {
+      throw await this.operatorError(response);
+    }
+    return await boundedJson(response);
+  }
+  async operatorError(response) {
+    const fallback = `${this.options.label} operator request failed`;
+    try {
+      const value = await boundedJson(response);
+      const message = value.error?.message?.trim() || fallback;
+      const code = value.error?.code?.trim();
+      return new BrokerOperatorError(this.summary(), response.status, code, message);
+    } catch {
+      return new BrokerOperatorError(this.summary(), response.status, void 0, fallback);
+    }
+  }
+};
+var OperatorBrokerRegistry = class {
+  clients;
+  constructor(configs, fetchImpl) {
+    this.clients = new Map(
+      configs.map((config2) => [
+        config2.id,
+        new BrokerOperatorClient({ ...config2, ...fetchImpl ? { fetch: fetchImpl } : {} })
+      ])
+    );
+  }
+  list() {
+    return [...this.clients.values()].map((client) => client.summary());
+  }
+  get(id) {
+    return this.clients.get(id);
+  }
+};
+function loadOperatorBrokers(file) {
+  if (!file) {
+    return [];
+  }
+  if (!isAbsolute(file)) {
+    throw new Error("MLCLAW_OPERATOR_BROKERS_FILE must be absolute");
+  }
+  const raw2 = readBoundedFile(file, MAX_CONFIG_BYTES, "operator broker configuration");
+  let parsed;
+  try {
+    parsed = JSON.parse(raw2);
+  } catch {
+    throw new Error("operator broker configuration must be valid JSON");
+  }
+  const root = strictRecord(parsed, ["version", "brokers"], "operator broker configuration");
+  if (root.version !== 1) {
+    throw new Error("operator broker configuration version must be 1");
+  }
+  if (!Array.isArray(root.brokers) || root.brokers.length > 16) {
+    throw new Error("operator broker configuration must contain at most 16 brokers");
+  }
+  const ids = /* @__PURE__ */ new Set();
+  const urls = /* @__PURE__ */ new Set();
+  return root.brokers.map((value, index) => {
+    const entry = strictRecord(value, ["id", "label", "url", "token_file"], `broker ${index}`);
+    const id = requiredString(entry.id, `broker ${index} id`);
+    if (!BROKER_ID.test(id) || ids.has(id)) {
+      throw new Error(`broker ${index} id is invalid or duplicated`);
+    }
+    ids.add(id);
+    const label = requiredString(entry.label, `broker ${index} label`);
+    if ([...label].length > 80 || new RegExp("\\p{Cc}", "u").test(label)) {
+      throw new Error(`broker ${index} label is invalid`);
+    }
+    const baseUrl = operatorOrigin(requiredString(entry.url, `broker ${index} url`));
+    if (urls.has(baseUrl)) {
+      throw new Error(`broker ${index} URL is duplicated`);
+    }
+    urls.add(baseUrl);
+    const tokenFile = requiredString(entry.token_file, `broker ${index} token_file`);
+    if (!isAbsolute(tokenFile)) {
+      throw new Error(`broker ${index} token_file must be absolute`);
+    }
+    const token = readBoundedFile(tokenFile, MAX_TOKEN_BYTES, `broker ${id} token`).trim();
+    if (!/^[\x21-\x7e]{24,4096}$/u.test(token)) {
+      throw new Error(`broker ${id} token is invalid`);
+    }
+    return { id, label, baseUrl, token };
+  });
+}
+function operatorOrigin(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("broker URL must be an absolute HTTP URL");
+  }
+  const supportedProtocol = (/* @__PURE__ */ new Set(["http:", "https:"])).has(url.protocol);
+  const hasAuthorityOrSuffix = [url.username, url.password, url.search, url.hash].some(Boolean);
+  const hasPath = !["", "/"].includes(url.pathname);
+  if (!supportedProtocol || hasAuthorityOrSuffix || hasPath) {
+    throw new Error("broker URL must be one HTTP origin without credentials, path, query, or fragment");
+  }
+  return url.origin;
+}
+function strictRecord(value, keys, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  const record = value;
+  if (Object.keys(record).some((key) => !keys.includes(key)) || keys.some((key) => !(key in record))) {
+    throw new Error(`${label} has missing or unknown fields`);
+  }
+  return record;
+}
+function requiredString(value, label) {
+  if (typeof value !== "string" || !value || value !== value.trim()) {
+    throw new Error(`${label} must be a non-empty trimmed string`);
+  }
+  return value;
+}
+function readBoundedFile(file, maximum, label) {
+  let value;
+  try {
+    value = readFileSync(file, "utf8");
+  } catch {
+    throw new Error(`${label} could not be read`);
+  }
+  if (Buffer.byteLength(value) > maximum) {
+    throw new Error(`${label} is too large`);
+  }
+  return value;
+}
+function approvalId(id) {
+  const normalized = id.trim();
+  if (!normalized || normalized.length > 200 || normalized.includes("/") || normalized.includes("\\")) {
+    throw new Error("invalid approval request id");
+  }
+  return encodeURIComponent(normalized);
+}
+async function boundedJson(response) {
+  if (!response.body) {
+    throw new Error("broker response body is empty");
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    size += value.byteLength;
+    if (size > MAX_RESPONSE_BYTES) {
+      await reader.cancel();
+      throw new Error("broker response is too large");
+    }
+    chunks.push(value);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
 // src/mlclaw-space-runtime/config.ts
 function loadConfig(env = process.env) {
   const port = integer(env.PORT ?? env.MLCLAW_SPACE_PORT, 7860);
@@ -651,12 +899,10 @@ function loadConfig(env = process.env) {
   const owner = ownerFromSpaceId(spaceId);
   const configuredAllowedUsers = splitUsers(env.MLCLAW_ALLOWED_USERS ?? env.ALLOWED_USERS);
   const configuredAdmins = splitUsers(env.MLCLAW_ADMINS);
-  const resolvedAdmins = uniqueUsers(configuredAdmins.length > 0 ? configuredAdmins : owner ? [owner] : configuredAllowedUsers.slice(0, 1));
-  const allowedUsers = uniqueUsers([
-    ...configuredAllowedUsers,
-    ...resolvedAdmins,
-    ...owner ? [owner] : []
-  ]);
+  const resolvedAdmins = uniqueUsers(
+    configuredAdmins.length > 0 ? configuredAdmins : owner ? [owner] : configuredAllowedUsers.slice(0, 1)
+  );
+  const allowedUsers = uniqueUsers([...configuredAllowedUsers, ...resolvedAdmins, ...owner ? [owner] : []]);
   const publicUrl = publicUrlFromEnv(env, port);
   const sessionSecret = trim(env.MLCLAW_SESSION_SECRET ?? env.SESSION_SECRET) ?? randomBytes(48).toString("base64url");
   const configuredCredentialKey = trim(env.MLCLAW_CREDENTIAL_KEY);
@@ -701,8 +947,7 @@ function loadConfig(env = process.env) {
     routerToken: trim(env.MLCLAW_ROUTER_TOKEN ?? env.HF_ROUTER_TOKEN),
     brokerAgentUrl: trim(env.MLCLAW_HF_BROKER_URL),
     brokerAgentSecret: readOptionalSecret(trim(env.MLCLAW_HF_BROKER_AGENT_SECRET_FILE)),
-    brokerOperatorUrl: trim(env.MLCLAW_HF_BROKER_OPERATOR_URL),
-    brokerOperatorToken: readOptionalSecret(trim(env.MLCLAW_HF_BROKER_OPERATOR_SECRET_FILE)),
+    operatorBrokers: loadOperatorBrokers(trim(env.MLCLAW_OPERATOR_BROKERS_FILE)),
     hubUrl: trim(env.HF_ENDPOINT) ?? "https://huggingface.co",
     openaiCredentialFile: trim(env.MLCLAW_OPENAI_CREDENTIAL_FILE) ?? "/tmp/mlclaw-secrets/openai.env",
     mcpCredentialFile,
@@ -734,7 +979,7 @@ function readOptionalSecret(file) {
     return void 0;
   }
   try {
-    return trim(readFileSync(file, "utf8"));
+    return trim(readFileSync2(file, "utf8"));
   } catch {
     return void 0;
   }
@@ -796,7 +1041,7 @@ function trim(value) {
 }
 function readRuntimeSettings(file) {
   try {
-    const parsed = JSON.parse(readFileSync(file, "utf8"));
+    const parsed = JSON.parse(readFileSync2(file, "utf8"));
     const model = typeof parsed.model === "string" ? parsed.model.trim() : void 0;
     if (!model) {
       return {};
@@ -2911,99 +3156,6 @@ var Hono2 = class extends Hono {
     });
   }
 };
-
-// src/mlclaw-space-runtime/hf-broker.ts
-var HfBrokerOperatorClient = class {
-  constructor(options) {
-    this.options = options;
-    this.baseUrl = options.baseUrl.replace(/\/+$/, "");
-    this.fetchImpl = options.fetch ?? fetch;
-  }
-  fetchImpl;
-  baseUrl;
-  list(params = {}) {
-    const query = new URLSearchParams();
-    if (params.status) {
-      query.set("status", params.status);
-    }
-    if (params.cursor) {
-      query.set("cursor", params.cursor);
-    }
-    if (params.limit) {
-      query.set("limit", String(params.limit));
-    }
-    const suffix = query.size > 0 ? `?${query}` : "";
-    return this.request(`/api/grants${suffix}`);
-  }
-  get(id) {
-    return this.request(`/api/grants/${approvalId(id)}`);
-  }
-  decide(id, action, decision) {
-    return this.request(`/api/grants/${approvalId(id)}/${action}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        expected_revision: decision.expectedRevision,
-        ...decision.expectedStatus ? { expected_status: decision.expectedStatus } : {},
-        ...decision.reason ? { reason: decision.reason } : {},
-        ...decision.durationSeconds ? { duration_seconds: decision.durationSeconds } : {},
-        ...decision.maxUses ? { max_uses: decision.maxUses } : {}
-      })
-    });
-  }
-  async events(lastEventId) {
-    const headers = {
-      accept: "text/event-stream",
-      authorization: `Bearer ${this.options.token}`
-    };
-    if (lastEventId) {
-      headers["last-event-id"] = lastEventId;
-    }
-    const response = await this.fetchImpl(`${this.baseUrl}/api/grants/events`, {
-      headers,
-      redirect: "error"
-    });
-    if (!response.ok) {
-      throw await brokerError(response);
-    }
-    return response;
-  }
-  async request(pathname, init = {}) {
-    const headers = new Headers(init.headers);
-    headers.set("accept", "application/json");
-    headers.set("authorization", `Bearer ${this.options.token}`);
-    const response = await this.fetchImpl(`${this.baseUrl}${pathname}`, {
-      ...init,
-      headers,
-      redirect: "error"
-    });
-    if (!response.ok) {
-      throw await brokerError(response);
-    }
-    return await response.json();
-  }
-};
-function brokerOperatorConfigured(config2) {
-  return Boolean(config2.brokerOperatorUrl && config2.brokerOperatorToken);
-}
-function approvalId(id) {
-  const normalized = id.trim();
-  if (!normalized || normalized.length > 200 || normalized.includes("/") || normalized.includes("\\")) {
-    throw new Error("invalid approval request id");
-  }
-  return encodeURIComponent(normalized);
-}
-async function brokerError(response) {
-  const fallback = `HF Broker request failed with HTTP ${response.status}`;
-  try {
-    const value = await response.json();
-    const message = value.error?.message?.trim() || fallback;
-    const code = value.error?.code?.trim();
-    return new Error(code ? `${message} (${code})` : message);
-  } catch {
-    return new Error(fallback);
-  }
-}
 
 // src/mlclaw-space-runtime/csrf.ts
 import { createHmac, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
@@ -8465,22 +8617,36 @@ var CONTROL_BRANDING_SCRIPT = `(function () {
       }
     });
     function refresh() {
-      fetch("/mlclaw/api/approvals?status=pending&limit=100", { credentials: "same-origin" })
-        .then(function (response) { return response.ok ? response.json() : null; })
-        .then(function (page) {
-          var count = page && Array.isArray(page.items) ? page.items.length : 0;
+      listBrokers().then(function (brokers) {
+        return Promise.all(brokers.map(function (broker) {
+          return fetch("/mlclaw/api/approvals?broker=" + encodeURIComponent(broker.id) + "&status=pending&limit=100", { credentials: "same-origin" })
+            .then(function (response) { return response.ok ? response.json() : null; })
+            .catch(function () { return null; });
+        }));
+      }).then(function (pages) {
+          var count = pages.reduce(function (total, page) {
+            return total + (page && Array.isArray(page.items) ? page.items.length : 0);
+          }, 0);
           if (!badge) return;
           badge.textContent = count > 99 ? "99" : String(count);
           badge.style.display = count > 0 ? "grid" : "none";
         }).catch(function () {});
     }
+    function listBrokers() {
+      return fetch("/mlclaw/api/approvals/brokers", { credentials: "same-origin" })
+        .then(function (response) { return response.ok ? response.json() : { brokers: [] }; })
+        .then(function (value) { return value && Array.isArray(value.brokers) ? value.brokers : []; });
+    }
     refresh();
-    var events = new EventSource("/mlclaw/api/approvals/events", { withCredentials: true });
-    events.onmessage = refresh;
-    ["request.created", "request.updated", "request.decided"].forEach(function (kind) {
-      events.addEventListener(kind, refresh);
+    listBrokers().then(function (brokers) {
+      brokers.forEach(function (broker) {
+        var events = new EventSource("/mlclaw/api/approvals/events?broker=" + encodeURIComponent(broker.id), { withCredentials: true });
+        events.onmessage = refresh;
+        ["request.created", "request.updated", "request.decided"].forEach(function (kind) {
+          events.addEventListener(kind, refresh);
+        });
+      });
     });
-    events.onerror = function () { events.close(); };
   }
   if (!document.documentElement.hasAttribute(marker)) {
     document.documentElement.setAttribute(marker, "1");
@@ -8535,7 +8701,10 @@ function injectMlClawShell(html, branding) {
       <circle cx="12" cy="12" r="3"></circle>
     </svg>
   </a>
-  <button data-mlclaw-approvals-button type="button" aria-label="Open approval requests" aria-expanded="false" style="position:relative;box-sizing:border-box;display:grid;width:34px;height:34px;place-items:center;border:1px solid rgba(15,23,42,.16);border-radius:8px;background:rgba(255,255,255,.94);box-shadow:0 8px 18px rgba(15,23,42,.14);color:#111827;cursor:pointer;font-size:19px;">\u2662<span data-mlclaw-approvals-badge style="position:absolute;display:none;place-items:center;min-width:17px;height:17px;right:-6px;top:-7px;padding:0 4px;border:2px solid white;border-radius:999px;background:#dc2626;color:white;font:700 9px system-ui;"></span></button>
+  <button data-mlclaw-approvals-button type="button" aria-label="Open approval requests" aria-expanded="false" style="position:relative;box-sizing:border-box;display:grid;width:34px;height:34px;place-items:center;border:1px solid rgba(15,23,42,.16);border-radius:8px;background:rgba(255,255,255,.94);box-shadow:0 8px 18px rgba(15,23,42,.14);color:#111827;cursor:pointer;">
+    <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"></path><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"></path></svg>
+    <span data-mlclaw-approvals-badge style="position:absolute;display:none;place-items:center;min-width:17px;height:17px;right:-6px;top:-7px;padding:0 4px;border:2px solid white;border-radius:999px;background:#dc2626;color:white;font:700 9px system-ui;"></span>
+  </button>
   </div>
 </div>
 <iframe data-mlclaw-approvals-frame src="/mlclaw?embed=approvals" title="Approval requests" style="display:none;position:fixed;z-index:2147483646;right:0;top:0;width:min(460px,100vw);height:100dvh;border:0;background:white;box-shadow:-12px 0 36px rgba(15,23,42,.22);"></iframe>
@@ -8576,15 +8745,21 @@ function escapeHtml2(value) {
 // src/mlclaw-space-runtime/app.ts
 function createSpaceRuntimeApp(config2, controls) {
   const app = new Hono2();
-  const broker = brokerOperatorConfigured(config2) ? new HfBrokerOperatorClient({
-    baseUrl: config2.brokerOperatorUrl,
-    token: config2.brokerOperatorToken
-  }) : void 0;
+  const operatorBrokers = new OperatorBrokerRegistry(config2.operatorBrokers);
   app.get("/health", (c) => health(c, config2, controls));
   app.get("/healthz", (c) => health(c, config2, controls));
-  app.get("/assets/mlclaw.svg", async () => serveFile(path3.join(config2.assetsDir, "mlclaw.svg"), "image/svg+xml; charset=utf-8"));
-  app.get("/assets/hf-logo.svg", async () => serveFile(path3.join(config2.assetsDir, "hf-logo.svg"), "image/svg+xml; charset=utf-8"));
-  app.get("/assets/assistant-avatar.svg", async () => serveFile(path3.join(config2.assetsDir, "assistant-avatar.svg"), "image/svg+xml; charset=utf-8"));
+  app.get(
+    "/assets/mlclaw.svg",
+    async () => serveFile(path3.join(config2.assetsDir, "mlclaw.svg"), "image/svg+xml; charset=utf-8")
+  );
+  app.get(
+    "/assets/hf-logo.svg",
+    async () => serveFile(path3.join(config2.assetsDir, "hf-logo.svg"), "image/svg+xml; charset=utf-8")
+  );
+  app.get(
+    "/assets/assistant-avatar.svg",
+    async () => serveFile(path3.join(config2.assetsDir, "assistant-avatar.svg"), "image/svg+xml; charset=utf-8")
+  );
   app.get("/assets/mlclaw-control-branding.js", () => staticScript(CONTROL_BRANDING_SCRIPT));
   app.get("/assets/brand/logo", async () => serveBrandAsset(config2, config2.branding.logoAsset));
   app.get("/favicon.svg", async () => serveBrandAsset(config2, config2.branding.faviconSvgAsset));
@@ -8592,12 +8767,15 @@ function createSpaceRuntimeApp(config2, controls) {
   app.get("/favicon.ico", async () => serveBrandAsset(config2, config2.branding.faviconIcoAsset));
   app.get("/apple-touch-icon.png", async () => serveBrandAsset(config2, config2.branding.appleTouchIconAsset));
   app.get("/sw.js", () => staticScript(SERVICE_WORKER_RESET_SCRIPT));
-  app.get("/manifest.webmanifest", () => new Response(brandingManifest(config2.branding), {
-    headers: {
-      "cache-control": "no-cache",
-      "content-type": "application/manifest+json; charset=utf-8"
-    }
-  }));
+  app.get(
+    "/manifest.webmanifest",
+    () => new Response(brandingManifest(config2.branding), {
+      headers: {
+        "cache-control": "no-cache",
+        "content-type": "application/manifest+json; charset=utf-8"
+      }
+    })
+  );
   app.get("/oauth/login", (c) => handleOauthLogin(c, config2));
   app.get("/oauth/callback", (c) => handleOauthCallback(c, config2, controls));
   app.get("/login", (c) => c.html(loginPage(config2, void 0, normalizeNext(c.req.query("next") ?? "/"))));
@@ -8634,13 +8812,21 @@ function createSpaceRuntimeApp(config2, controls) {
     }
     return c.json(await statusPayload(config2, controls));
   });
+  app.get("/mlclaw/api/approvals/brokers", (c) => {
+    const auth = requireAdmin(c, config2);
+    if (auth instanceof Response) {
+      return auth;
+    }
+    return c.json({ brokers: operatorBrokers.list() });
+  });
   app.get("/mlclaw/api/approvals", async (c) => {
     const auth = requireAdmin(c, config2);
     if (auth instanceof Response) {
       return auth;
     }
-    if (!broker) {
-      return c.json({ ok: false, error: "HF Broker operator inbox is not configured" }, 503);
+    const broker = selectedOperatorBroker(c, operatorBrokers);
+    if (broker instanceof Response) {
+      return broker;
     }
     const rawStatus = c.req.query("status");
     if (rawStatus && rawStatus !== "pending" && rawStatus !== "history") {
@@ -8654,9 +8840,9 @@ function createSpaceRuntimeApp(config2, controls) {
         ...cursor ? { cursor } : {},
         limit: boundedInteger(c.req.query("limit"), 50, 100)
       });
-      return c.json(page2);
+      return c.json({ broker: broker.summary(), ...page2 });
     } catch (err) {
-      return brokerUnavailable(c, err);
+      return brokerFailure(c, err, broker.summary());
     }
   });
   app.get("/mlclaw/api/approvals/events", async (c) => {
@@ -8664,11 +8850,12 @@ function createSpaceRuntimeApp(config2, controls) {
     if (auth instanceof Response) {
       return auth;
     }
-    if (!broker) {
-      return c.json({ ok: false, error: "HF Broker operator inbox is not configured" }, 503);
+    const broker = selectedOperatorBroker(c, operatorBrokers);
+    if (broker instanceof Response) {
+      return broker;
     }
     try {
-      const upstream = await broker.events(c.req.header("last-event-id"));
+      const upstream = await broker.events(c.req.header("last-event-id"), c.req.raw.signal);
       return new Response(upstream.body, {
         status: 200,
         headers: {
@@ -8678,29 +8865,31 @@ function createSpaceRuntimeApp(config2, controls) {
         }
       });
     } catch (err) {
-      return brokerUnavailable(c, err);
+      return brokerFailure(c, err, broker.summary());
     }
   });
-  app.get("/mlclaw/api/approvals/:id", async (c) => {
+  app.get("/mlclaw/api/approvals/:broker/:id", async (c) => {
     const auth = requireAdmin(c, config2);
     if (auth instanceof Response) {
       return auth;
     }
+    const broker = operatorBrokers.get(c.req.param("broker"));
     if (!broker) {
-      return c.json({ ok: false, error: "HF Broker operator inbox is not configured" }, 503);
+      return c.json({ ok: false, error: "operator broker is not configured" }, 404);
     }
     try {
-      return c.json(await broker.get(c.req.param("id")));
+      return c.json({ broker: broker.summary(), item: await broker.get(c.req.param("id")) });
     } catch (err) {
-      return brokerUnavailable(c, err);
+      return brokerFailure(c, err, broker.summary());
     }
   });
   for (const [browserAction, brokerAction] of [
     ["approve", "approve"],
-    ["reject", "deny"],
+    ["deny", "deny"],
+    ["cancel", "cancel"],
     ["revoke", "revoke"]
   ]) {
-    app.post(`/mlclaw/api/approvals/:id/${browserAction}`, async (c) => {
+    app.post(`/mlclaw/api/approvals/:broker/:id/${browserAction}`, async (c) => {
       const auth = requireAdmin(c, config2);
       if (auth instanceof Response) {
         return auth;
@@ -8709,8 +8898,9 @@ function createSpaceRuntimeApp(config2, controls) {
       if (csrf) {
         return csrf;
       }
+      const broker = operatorBrokers.get(c.req.param("broker"));
       if (!broker) {
-        return c.json({ ok: false, error: "HF Broker operator inbox is not configured" }, 503);
+        return c.json({ ok: false, error: "operator broker is not configured" }, 404);
       }
       const body = await readJson(c);
       const expectedRevision = boundedInteger(body?.expectedRevision, 0, Number.MAX_SAFE_INTEGER);
@@ -8718,7 +8908,7 @@ function createSpaceRuntimeApp(config2, controls) {
         return c.json({ ok: false, error: "expectedRevision is required" }, 400);
       }
       try {
-        return c.json(await broker.decide(c.req.param("id"), brokerAction, {
+        const item = await broker.decide(c.req.param("id"), brokerAction, {
           expectedRevision,
           ...typeof body?.expectedStatus === "string" ? { expectedStatus: body.expectedStatus } : {},
           ...typeof body?.reason === "string" ? { reason: body.reason.slice(0, 2e3) } : {},
@@ -8726,9 +8916,10 @@ function createSpaceRuntimeApp(config2, controls) {
             durationSeconds: boundedInteger(body?.durationSeconds, 0, 86400),
             maxUses: boundedInteger(body?.maxUses, 0, 100)
           } : {}
-        }));
+        });
+        return c.json({ broker: broker.summary(), item });
       } catch (err) {
-        return brokerUnavailable(c, err);
+        return brokerFailure(c, err, broker.summary());
       }
     });
   }
@@ -8742,10 +8933,13 @@ function createSpaceRuntimeApp(config2, controls) {
       return csrf;
     }
     if (config2.gatewayLocation === "local") {
-      return c.json({
-        ok: false,
-        error: "Local integrations use the local Hugging Face token; manage that credential with the ML Claw CLI"
-      }, 409);
+      return c.json(
+        {
+          ok: false,
+          error: "Local integrations use the local Hugging Face token; manage that credential with the ML Claw CLI"
+        },
+        409
+      );
     }
     const credentialSlot = integrationCredentialSlot(config2) ?? auth.username;
     await controls.clearMcpCredentials(credentialSlot);
@@ -8791,7 +8985,10 @@ function createSpaceRuntimeApp(config2, controls) {
       return c.json({ ok: false, error: "active model must be included in model choices" }, 400);
     }
     if (parseOpenClawModelRef(model) && !config2.brokerAgentSecret && !config2.routerToken && !config2.hfToken) {
-      return c.json({ ok: false, error: "Hugging Face broker credential is required before selecting a Hugging Face Router model" }, 400);
+      return c.json(
+        { ok: false, error: "Hugging Face broker credential is required before selecting a Hugging Face Router model" },
+        400
+      );
     }
     let persistent = false;
     if (config2.spaceId && config2.hfToken) {
@@ -8904,12 +9101,18 @@ function handleOauthLogin(c, config2) {
     secure: config2.cookieSecure
   });
   const redirectUri = `${config2.publicUrl}/oauth/callback`;
-  const headers = new Headers({ location: authorizeUrl({
-    clientId: config2.oauthClientId,
-    clientSecret: config2.oauthClientSecret,
-    providerUrl: config2.providerUrl,
-    redirectUri
-  }, state, intent === "integrations" ? HF_MCP_OAUTH_SCOPES : void 0) });
+  const headers = new Headers({
+    location: authorizeUrl(
+      {
+        clientId: config2.oauthClientId,
+        clientSecret: config2.oauthClientSecret,
+        providerUrl: config2.providerUrl,
+        redirectUri
+      },
+      state,
+      intent === "integrations" ? HF_MCP_OAUTH_SCOPES : void 0
+    )
+  });
   headers.append("set-cookie", cookie);
   return new Response(null, { status: 302, headers });
 }
@@ -8920,12 +9123,15 @@ async function handleOauthCallback(c, config2, controls) {
   if (!stateCookie || !state || stateCookie.state !== state || !code || !config2.oauthClientId || !config2.oauthClientSecret) {
     return c.html(loginPage(config2, "The Hugging Face sign-in attempt expired. Try again."), 401);
   }
-  const identity = await exchangeCodeForIdentity({
-    clientId: config2.oauthClientId,
-    clientSecret: config2.oauthClientSecret,
-    providerUrl: config2.providerUrl,
-    redirectUri: `${config2.publicUrl}/oauth/callback`
-  }, code);
+  const identity = await exchangeCodeForIdentity(
+    {
+      clientId: config2.oauthClientId,
+      clientSecret: config2.oauthClientSecret,
+      providerUrl: config2.providerUrl,
+      redirectUri: `${config2.publicUrl}/oauth/callback`
+    },
+    code
+  );
   if (!identity) {
     return c.html(loginPage(config2, "Hugging Face sign-in failed. Try again."), 401);
   }
@@ -8939,15 +9145,23 @@ async function handleOauthCallback(c, config2, controls) {
     } catch (err) {
       process.stderr.write(`[mlclaw] failed to store MCP authorization: ${formatError(err)}
 `);
-      return c.html(loginPage(config2, "Hugging Face sign-in succeeded, but MCP authorization could not be stored."), 500);
+      return c.html(
+        loginPage(config2, "Hugging Face sign-in succeeded, but MCP authorization could not be stored."),
+        500
+      );
     }
   }
-  const headers = new Headers({ location: normalizeNext(typeof stateCookie.next === "string" ? stateCookie.next : "/") });
-  headers.append("set-cookie", createSessionCookie({
-    username: identity.username,
-    sessionSecret: config2.sessionSecret,
-    secure: config2.cookieSecure
-  }));
+  const headers = new Headers({
+    location: normalizeNext(typeof stateCookie.next === "string" ? stateCookie.next : "/")
+  });
+  headers.append(
+    "set-cookie",
+    createSessionCookie({
+      username: identity.username,
+      sessionSecret: config2.sessionSecret,
+      secure: config2.cookieSecure
+    })
+  );
   headers.append("set-cookie", clearOauthStateCookie(config2.cookieSecure));
   return new Response(null, { status: 302, headers });
 }
@@ -9006,10 +9220,20 @@ function boundedInteger(value, fallback, maximum) {
   }
   return parsed;
 }
-function brokerUnavailable(c, err) {
-  process.stderr.write(`[mlclaw] HF Broker operator request failed: ${formatError(err)}
+function selectedOperatorBroker(c, registry) {
+  const id = c.req.query("broker");
+  if (!id) {
+    return c.json({ ok: false, error: "broker is required" }, 400);
+  }
+  return registry.get(id) ?? c.json({ ok: false, error: "operator broker is not configured" }, 404);
+}
+function brokerFailure(c, err, broker) {
+  process.stderr.write(`[mlclaw] ${broker.id} operator request failed: ${formatError(err)}
 `);
-  return c.json({ ok: false, error: "HF Broker operator request failed" }, 502);
+  if (err instanceof BrokerOperatorError && err.status >= 400 && err.status < 500) {
+    return c.json({ ok: false, error: err.message, ...err.code ? { code: err.code } : {} }, err.status);
+  }
+  return c.json({ ok: false, error: `${broker.label} operator API is unavailable` }, 502);
 }
 function unauthenticated(c, config2) {
   const next = normalizeNext(c.req.path + new URL(c.req.url).search);
@@ -9094,7 +9318,8 @@ async function brokerStatus(config2) {
       configured: false,
       agentHealthy: false,
       inferenceReady: false,
-      operatorConfigured: brokerOperatorConfigured(config2)
+      operatorConfigured: config2.operatorBrokers.some((broker) => broker.id === "hf-broker"),
+      operatorBrokers: config2.operatorBrokers.length
     };
   }
   const baseUrl = config2.brokerAgentUrl.replace(/\/+$/, "");
@@ -9107,7 +9332,8 @@ async function brokerStatus(config2) {
     configured: true,
     agentHealthy,
     inferenceReady,
-    operatorConfigured: brokerOperatorConfigured(config2)
+    operatorConfigured: config2.operatorBrokers.some((broker) => broker.id === "hf-broker"),
+    operatorBrokers: config2.operatorBrokers.length
   };
 }
 async function brokerProbe(url, token) {
@@ -9142,13 +9368,21 @@ async function readJson(c) {
 }
 async function writeRuntimeSettingsFile(config2, model, choices) {
   await fs3.mkdir(path3.dirname(config2.runtimeSettingsFile), { recursive: true });
-  await fs3.writeFile(config2.runtimeSettingsFile, `${JSON.stringify({
-    version: 1,
-    model,
-    modelChoices: choices,
-    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-  }, null, 2)}
-`, { encoding: "utf8", mode: 384 });
+  await fs3.writeFile(
+    config2.runtimeSettingsFile,
+    `${JSON.stringify(
+      {
+        version: 1,
+        model,
+        modelChoices: choices,
+        updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+      },
+      null,
+      2
+    )}
+`,
+    { encoding: "utf8", mode: 384 }
+  );
   await fs3.chmod(config2.runtimeSettingsFile, 384);
   if (process.getuid?.() === 0) {
     await fs3.chown(config2.runtimeSettingsFile, config2.openclawUid, config2.openclawGid);

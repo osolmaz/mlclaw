@@ -22,6 +22,7 @@ start_hf_broker() {
   local operator_secret_file="$run_dir/operator-secret"
   local broker_agent_secrets="$run_dir/agent-secrets.conf"
   local broker_operator_secrets="$run_dir/operator-secrets.conf"
+  local operator_brokers_file="$run_dir/operator-brokers.json"
   local agent_secret operator_secret
 
   install -d -m 0750 -o root -g hf-broker "$run_dir"
@@ -33,8 +34,9 @@ start_hf_broker() {
   printf '%s\n' "$operator_secret" > "$operator_secret_file"
   printf 'default = %s\n' "$agent_secret" > "$broker_agent_secrets"
   printf 'mlclaw-control = %s\n' "$operator_secret" > "$broker_operator_secrets"
+  printf '{"version":1,"brokers":[{"id":"hf-broker","label":"Hugging Face","url":"http://127.0.0.1:7864","token_file":"%s"}]}\n' "$operator_secret_file" > "$operator_brokers_file"
   chown hf-broker:hf-broker "$token_file" "$broker_agent_secrets" "$broker_operator_secrets"
-  chmod 0600 "$token_file" "$agent_secret_file" "$operator_secret_file" "$broker_agent_secrets" "$broker_operator_secrets"
+  chmod 0600 "$token_file" "$agent_secret_file" "$operator_secret_file" "$broker_agent_secrets" "$broker_operator_secrets" "$operator_brokers_file"
 
   HF_BROKER_HF_TOKEN_FILE="$token_file" \
   HF_BROKER_SECRETS_FILE="$broker_agent_secrets" \
@@ -49,9 +51,10 @@ start_hf_broker() {
   HF_BROKER_PID=$!
 
   export MLCLAW_HF_BROKER_URL="http://127.0.0.1:7863"
-  export MLCLAW_HF_BROKER_OPERATOR_URL="http://127.0.0.1:7864"
   export MLCLAW_HF_BROKER_AGENT_SECRET_FILE="$agent_secret_file"
-  export MLCLAW_HF_BROKER_OPERATOR_SECRET_FILE="$operator_secret_file"
+  if [ -z "${MLCLAW_OPERATOR_BROKERS_FILE:-}" ]; then
+    export MLCLAW_OPERATOR_BROKERS_FILE="$operator_brokers_file"
+  fi
 
   for _ in $(seq 1 50); do
     if ! kill -0 "$HF_BROKER_PID" 2>/dev/null; then
