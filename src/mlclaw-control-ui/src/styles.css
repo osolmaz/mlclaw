@@ -182,6 +182,29 @@ nav {
   letter-spacing: 0;
 }
 
+.integrationList {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.integrationRow {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 12px;
+  border: 1px solid #dbe4ef;
+  border-radius: 7px;
+  background: #f8fafc;
+}
+
+.integrationRow span {
+  color: #64748b;
+  font-size: 13px;
+}
+
 .panel h2 {
   font-size: 19px;
 }

@@ -12,6 +12,12 @@ The browser never receives an OpenClaw gateway token. ML Claw authenticates the
 signed-in Hugging Face user, then proxies HTTP and WebSocket traffic to
 OpenClaw on loopback using OpenClaw trusted-proxy auth.
 
+After signing in, an administrator can authorize the hosted Hugging Face MCP
+server and Research Agent with the same Hugging Face account. Ordinary users
+grant only identity scopes. Integration credentials stay in the trusted ML
+Claw wrapper; the unprivileged OpenClaw process receives only loopback MCP
+access.
+
 ## Install
 
 With Node.js:
@@ -37,11 +43,12 @@ You need a Hugging Face account and a token available through `HF_TOKEN`,
 `HF_TOKEN_PATH`, `$HF_HOME/token`, or `hf auth login`. You never paste that
 token into someone else's app; the bootstrapper runs locally.
 
-For the default Hugging Face Router model in Space gateway mode, provide an
-inference token through `MLCLAW_ROUTER_TOKEN`, `HF_ROUTER_TOKEN`, or
-`--router-token-file`. That token is stored in the Space as
-`MLCLAW_ROUTER_TOKEN` for model calls. It is separate from the local token used
-to create buckets and Spaces.
+For any Hugging Face Router model, provide a dedicated inference token through
+`MLCLAW_ROUTER_TOKEN`, `HF_ROUTER_TOKEN`, or `--router-token-file`. The token
+is stored separately from the local Hub token used to create and synchronize
+resources. Only this dedicated inference token is passed to OpenClaw; the
+broader local Hub token stays in the trusted wrapper. In Space mode, the
+inference token is stored as the `MLCLAW_ROUTER_TOKEN` Space secret.
 
 ## Default Flow
 
@@ -56,9 +63,10 @@ This creates:
 - no explicit Space hardware request; Hugging Face uses the default free CPU
   hardware unless you pass `--hardware`;
 - a Docker Space that starts from the prebuilt `ghcr.io/osolmaz/mlclaw` image;
-- Hugging Face OAuth metadata in the Space README;
-- Space variables, a bucket volume mount for state sync, and a write-only
-  secret for session signing;
+- Hugging Face OAuth metadata for browser auth, Hugging Face MCP, and Research
+  Agent access in the Space README;
+- Space variables, a bucket volume mount for state sync, and separate
+  write-only secrets for session signing and OAuth credential encryption;
 - a separate `MLCLAW_ROUTER_TOKEN` Space secret when using Hugging Face Router
   models;
 - a local deployment manifest under `~/.config/mlclaw`.
@@ -137,6 +145,10 @@ mlclaw gateway migrate mlclaw --to local
 mlclaw gateway migrate mlclaw --to space
 ```
 
+The local MCP proxy uses the Hugging Face token kept in the local deployment
+environment. The trusted wrapper does not need the Space OAuth client, and the
+encrypted Space OAuth credential remains in the bucket for migration back.
+
 Useful operations:
 
 ```bash
@@ -174,7 +186,9 @@ It never reads secret values and never modifies bucket contents.
 
 `mlclaw update` also refreshes the generated Space Dockerfile and runtime
 metadata, so older Spaces can move to the current implementation without
-recreating their bucket.
+recreating their bucket. When updating a legacy deployment that still uses a
+broad Hub token for Router inference, ML Claw requires and installs a dedicated
+Router token before it changes or restarts the Space.
 
 ## Browser Settings
 
@@ -188,8 +202,9 @@ Use the browser control UI for:
 
 - `/mlclaw/settings`: choose Router model/provider rows, update `OPENCLAW_MODEL`
   and `MLCLAW_MODEL_CHOICES`, and request a Space restart.
-- `/mlclaw/status`: inspect runtime, bucket, model, and OAuth status.
-- `/mlclaw/credentials`: submit an OpenAI API key.
+- `/mlclaw/status`: inspect runtime, bucket, model, OAuth, and integration status.
+- `/mlclaw/credentials`: connect or disconnect Hugging Face MCP and Research
+  Agent access, or submit an OpenAI API key.
 - `/mlclaw/logout`: clear the ML Claw session cookie.
 
 The same control UI is linked from the OpenClaw gateway. Settings changes

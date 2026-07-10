@@ -45,9 +45,24 @@ describe("runtime image Dockerfile", () => {
     const runtimeCli = await fs.readFile("src/mlclaw-space-runtime/cli.ts", "utf8");
 
     expect(entrypoint).toContain(
-      'gosu node node /app/openclaw.mjs setup --baseline --workspace "$WORKSPACE_DIR"',
+      'gosu "$OPENCLAW_IDENTITY" node /app/openclaw.mjs setup --baseline --workspace "$WORKSPACE_DIR"',
     );
+    expect(entrypoint).toContain('gosu "$OPENCLAW_IDENTITY" node /app/hf-state-sync.js restore');
+    expect(entrypoint).toContain('node /app/hf-state-sync.js prepare-restore');
+    expect(entrypoint).toContain('export MLCLAW_OPENCLAW_UID="$OPENCLAW_UID"');
+    expect(entrypoint).toContain('export MLCLAW_OPENCLAW_GID="$OPENCLAW_GID"');
+    for (const secret of [
+      "MLCLAW_CREDENTIAL_KEY",
+      "MLCLAW_SESSION_SECRET",
+      "OAUTH_CLIENT_SECRET",
+      "HF_TOKEN",
+      "HUGGINGFACE_HUB_TOKEN",
+    ]) {
+      expect(entrypoint).toContain(`-u ${secret}`);
+    }
     expect(entrypoint).not.toContain("node /app/hf-tooling-seed.js");
-    expect(runtimeCli).toContain("waitForBootstrapAndSeedHuggingFaceTooling");
+    expect(runtimeCli).toContain("--wait-for-bootstrap");
+    expect(runtimeCli).toContain("toolingSeedEnvironment");
+    expect(runtimeCli).toContain('toolingSeeder.once("error"');
   });
 });

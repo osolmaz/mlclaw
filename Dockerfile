@@ -46,6 +46,8 @@ USER root
 # Live state stays on local disk; Space bucket volumes are mounted separately for snapshots.
 ENV PORT=7860
 ENV MLCLAW_OPENCLAW_PORT=7861
+ENV MLCLAW_OPENCLAW_UID=1000
+ENV MLCLAW_OPENCLAW_GID=1000
 ENV OPENCLAW_GATEWAY_PORT=7861
 ENV OPENCLAW_LIVE_DIR=/home/node/.local/share/mlclaw/live
 ENV OPENCLAW_STATE_DIR=/home/node/.local/share/mlclaw/live/.openclaw

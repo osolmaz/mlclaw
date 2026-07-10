@@ -4,8 +4,10 @@ import type net from "node:net";
 import { Readable } from "node:stream";
 import type { Hono } from "hono";
 import { createSpaceRuntimeApp } from "./app.js";
-import type { SpaceRuntimeConfig } from "./config.js";
-import { configureOpenClawGateway } from "./openclaw-config.js";
+import { integrationCredentialSlot, type SpaceRuntimeConfig } from "./config.js";
+import { McpCredentialStore } from "./mcp-credentials.js";
+import { McpIntegrationServer } from "./mcp-integrations.js";
+import { configureOpenClawGateway, managedMcpServerStatus } from "./openclaw-config.js";
 import { loadOpenAiCredentialFile, openAiConfigured } from "./openai-credentials.js";
 import { loginPage, templatePage, unauthorizedPage } from "./pages.js";
 import { proxyHttp, proxyWebSocket, rejectWebSocket } from "./proxy.js";
@@ -21,9 +23,20 @@ export class SpaceRuntimeServer {
   private openclawStopping = false;
   private readonly app: Hono;
   private readonly exitProcess: (code: number) => void;
+  private readonly mcpCredentials: McpCredentialStore;
+  private readonly mcpIntegrations: McpIntegrationServer;
 
   constructor(private readonly config: SpaceRuntimeConfig, options: SpaceRuntimeServerOptions = {}) {
     this.exitProcess = options.exitProcess ?? ((code) => process.exit(code));
+    this.mcpCredentials = new McpCredentialStore({
+      file: config.mcpCredentialFile,
+      secret: config.credentialKey,
+      providerUrl: config.providerUrl,
+      ...(config.oauthClientId ? { clientId: config.oauthClientId } : {}),
+      ...(config.oauthClientSecret ? { clientSecret: config.oauthClientSecret } : {}),
+    });
+    this.mcpIntegrations = new McpIntegrationServer(config, this.mcpCredentials);
+    const credentialSlot = integrationCredentialSlot(config);
     this.app = createSpaceRuntimeApp(config, {
       openclawRunning: () => Boolean(this.openclaw && !this.openclaw.killed),
       openAiConfigured: async () =>
@@ -34,11 +47,21 @@ export class SpaceRuntimeServer {
         this.config.model = model;
         this.config.modelChoices = choices;
       },
+      saveMcpCredentials: async (identity) => {
+        if (!credentialSlot) {
+          throw new Error("ML Claw has no integration administrator");
+        }
+        await this.mcpCredentials.save(identity, credentialSlot);
+      },
+      clearMcpCredentials: (slot) => this.mcpCredentials.clear(slot),
+      mcpCredentialStatus: (slot) => this.mcpCredentials.status(slot),
+      mcpServerStatus: () => managedMcpServerStatus(this.config),
     });
   }
 
   async start(): Promise<http.Server> {
     if (this.config.mode === "app") {
+      await this.mcpIntegrations.start();
       await this.startOpenClaw();
     }
 
@@ -90,6 +113,11 @@ export class SpaceRuntimeServer {
   }
 
   async stop(): Promise<void> {
+    await this.stopOpenClaw();
+    await this.mcpIntegrations.stop();
+  }
+
+  private async stopOpenClaw(): Promise<void> {
     const child = this.openclaw;
     if (!child || child.killed) {
       return;
@@ -131,6 +159,18 @@ export class SpaceRuntimeServer {
       this.sendHtml(res, unauthorizedPage(session.username), 403);
       return;
     }
+    if (this.isAdmin(session.username) && this.config.oauthClientId && this.config.oauthClientSecret && isBrowserNavigation(req)) {
+      const integrations = await managedMcpServerStatus(this.config);
+      const credentialSlot = integrationCredentialSlot(this.config);
+      const authorization = credentialSlot
+        ? await this.mcpCredentials.status(credentialSlot).catch(() => undefined)
+        : undefined;
+      if (integrations.some((integration) => integration.enabled) && !authorization?.configured) {
+        const next = normalizeNext(`${url.pathname}${url.search}`);
+        this.sendRedirect(res, `/oauth/login?intent=integrations&next=${encodeURIComponent(next)}`);
+        return;
+      }
+    }
     await proxyHttp(req, res, this.config, { username: session.username });
   }
 
@@ -165,11 +205,17 @@ export class SpaceRuntimeServer {
       const persistedOpenAiKey = await loadOpenAiCredentialFile(this.config.openaiCredentialFile);
       const env: NodeJS.ProcessEnv = {
         ...process.env,
+        HOME: "/home/node",
+        USER: "node",
+        LOGNAME: "node",
         OPENCLAW_GATEWAY_PORT: String(this.config.openclawPort),
         OPENCLAW_MODEL: this.config.model,
         ...(persistedOpenAiKey ? { OPENAI_API_KEY: persistedOpenAiKey } : {}),
         ...extraEnv,
       };
+      for (const key of WRAPPER_ONLY_ENV) {
+        delete env[key];
+      }
       if (this.config.routerToken) {
         env.HF_TOKEN = this.config.routerToken;
         env.HUGGINGFACE_HUB_TOKEN = this.config.routerToken;
@@ -177,6 +223,9 @@ export class SpaceRuntimeServer {
       this.openclaw = spawn(this.config.openclawCommand, this.config.openclawArgs, {
         stdio: "inherit",
         env,
+        ...(process.getuid?.() === 0
+          ? { uid: this.config.openclawUid, gid: this.config.openclawGid }
+          : {}),
       });
       this.openclaw.once("exit", (code, signal) => {
         process.stdout.write(`[mlclaw] openclaw exited code=${code ?? "null"} signal=${signal ?? "null"}\n`);
@@ -192,17 +241,21 @@ export class SpaceRuntimeServer {
   }
 
   private async restartOpenClawWithOpenAi(apiKey: string): Promise<void> {
-    await this.stop();
+    await this.stopOpenClaw();
     await this.startOpenClaw({ OPENAI_API_KEY: apiKey });
   }
 
   private async restartOpenClaw(): Promise<void> {
-    await this.stop();
+    await this.stopOpenClaw();
     await this.startOpenClaw();
   }
 
   private isAllowed(username: string): boolean {
     return this.config.allowAnySignedIn || this.config.allowedUsers.includes(username);
+  }
+
+  private isAdmin(username: string): boolean {
+    return this.config.adminUsers.includes(username);
   }
 
   private sendUnauthenticated(req: http.IncomingMessage, res: http.ServerResponse, url: URL): void {
@@ -233,6 +286,15 @@ export class SpaceRuntimeServer {
     res.end(body);
   }
 }
+
+const WRAPPER_ONLY_ENV = [
+  "MLCLAW_CREDENTIAL_KEY",
+  "MLCLAW_SESSION_SECRET",
+  "SESSION_SECRET",
+  "OAUTH_CLIENT_SECRET",
+  "HF_TOKEN",
+  "HUGGINGFACE_HUB_TOKEN",
+] as const;
 
 function nodeRequestToWebRequest(req: http.IncomingMessage, publicUrl: string): Request {
   const headers = new Headers();

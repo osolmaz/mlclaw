@@ -467,6 +467,38 @@ describe("mlclaw CLI", () => {
     expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(false);
   });
 
+  it("does not stop a legacy local gateway before Router credential validation", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([], false);
+    const stderr: string[] = [];
+    const runtime = { ...await createRuntime(hub, prompt, stderr), env: {} };
+    await writeManifest(runtime.configRoot, {
+      version: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-existing",
+      gatewayLocation: "local",
+      model: DEFAULT_MODEL,
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      localGateway: { engine: "docker", dockerContext: "desktop-linux" },
+      createdAt: "2026-06-16T00:00:00.000Z",
+      updatedAt: "2026-06-16T00:00:00.000Z",
+    });
+    await writeSecretEnv(runtime.configRoot, "research", {
+      HF_TOKEN: "hf_legacy_broad",
+      HUGGINGFACE_HUB_TOKEN: "hf_legacy_broad",
+    });
+    runtime.dockerRunner.inspectValue = { exists: true, running: true, status: "running" };
+
+    const code = await main(["gateway", "restart", "research", "--no-pull"], runtime);
+
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain("dedicated inference token");
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "stop")).toBe(false);
+  });
+
   it("uses an explicit bootstrap bucket as the durable state pointer", async () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt([]);
@@ -866,7 +898,7 @@ describe("mlclaw CLI", () => {
     expect(hub.calls.some((call) => call.name === "addSpaceSecret" && call.args[1] === "TELEGRAM_BOT_TOKEN")).toBe(false);
   });
 
-  it("requires a Router token for non-interactive Space bootstrap with Hugging Face Router models", async () => {
+  it("requires a Router token for non-interactive bootstrap with Hugging Face Router models", async () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt([], false);
     const stderr: string[] = [];
@@ -885,6 +917,32 @@ describe("mlclaw CLI", () => {
     expect(code).toBe(1);
     expect(stderr.join("\n")).toContain("set MLCLAW_ROUTER_TOKEN or pass --router-token-file");
     expect(hub.calls.some((call) => call.name === "createDockerSpace")).toBe(false);
+  });
+
+  it("requires a dedicated Router token for a non-interactive local gateway", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([], false);
+    const stderr: string[] = [];
+    const runtime = {
+      ...await createRuntime(hub, prompt, stderr),
+      env: {},
+    };
+
+    const code = await main([
+      "bootstrap",
+      "--gateway",
+      "local",
+      "--name",
+      "research",
+      "--gateway-token",
+      "gateway-token",
+      "--no-pull",
+      "--yes",
+    ], runtime);
+
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain("dedicated inference token");
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(false);
   });
 
   it("reuses a persisted Router token for non-interactive Space bootstrap", async () => {
@@ -919,6 +977,10 @@ describe("mlclaw CLI", () => {
     expect(hub.calls).toContainEqual({
       name: "addSpaceSecret",
       args: ["alice/research", "MLCLAW_ROUTER_TOKEN", "hf_router_saved"],
+    });
+    expect(hub.calls).toContainEqual({
+      name: "addSpaceSecret",
+      args: ["alice/research", "MLCLAW_CREDENTIAL_KEY", expect.any(String)],
     });
   });
 
@@ -1266,6 +1328,10 @@ describe("mlclaw CLI", () => {
       args: ["alice/research", "MLCLAW_RUNTIME_IMAGE", DEFAULT_RUNTIME_IMAGE],
     });
     expect(hub.calls).toContainEqual({
+      name: "addSpaceSecret",
+      args: ["alice/research", "MLCLAW_ROUTER_TOKEN", "hf_router_test"],
+    });
+    expect(hub.calls).toContainEqual({
       name: "addSpaceVariable",
       args: ["alice/research", "MLCLAW_GATEWAY_LOCATION", "space"],
     });
@@ -1288,6 +1354,78 @@ describe("mlclaw CLI", () => {
     expect(adminsIndex).toBeGreaterThanOrEqual(0);
     expect(restartIndex).toBeGreaterThan(allowedUsersIndex);
     expect(restartIndex).toBeGreaterThan(adminsIndex);
+  });
+
+  it("blocks a legacy Router update before changing or restarting the Space", async () => {
+    const hub = createFakeHub();
+    await hub.addSpaceVariable("alice/research", "OPENCLAW_HF_TEMPLATE_REV", "old-template");
+    await hub.addSpaceVariable("alice/research", "OPENCLAW_MODEL", DEFAULT_MODEL);
+    await hub.addSpaceSecret("alice/research", "HF_TOKEN", "hf_legacy_broad");
+    hub.calls.length = 0;
+    const { prompt } = createPrompt([], false);
+    const stderr: string[] = [];
+    const baseRuntime = await createRuntime(hub, prompt, stderr);
+    let pushed = false;
+    const runtime = {
+      ...baseRuntime,
+      env: {},
+      pushTemplateToSpace: async () => {
+        pushed = true;
+        return { templateRev: "test-template" };
+      },
+    };
+
+    const code = await main(["update", "alice/research"], runtime);
+
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain("dedicated inference token");
+    expect(pushed).toBe(false);
+    expect(hub.calls.some((call) => call.name === "addSpaceVariable")).toBe(false);
+    expect(hub.calls.some((call) => call.name === "restartSpace")).toBe(false);
+    expect(hub.calls.some((call) => call.name === "deleteSpaceSecret")).toBe(false);
+  });
+
+  it("replaces an existing Router token when update receives an explicit override", async () => {
+    const hub = createFakeHub();
+    await hub.addSpaceVariable("alice/research", "OPENCLAW_HF_TEMPLATE_REV", "old-template");
+    await hub.addSpaceVariable("alice/research", "OPENCLAW_MODEL", DEFAULT_MODEL);
+    await hub.addSpaceSecret("alice/research", "MLCLAW_ROUTER_TOKEN", "hf_router_revoked");
+    hub.calls.length = 0;
+    const { prompt } = createPrompt([], false);
+    const runtime = await createRuntime(hub, prompt);
+    await writeManifest(runtime.configRoot, {
+      version: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-existing",
+      gatewayLocation: "space",
+      model: DEFAULT_MODEL,
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      createdAt: "2026-06-16T00:00:00.000Z",
+      updatedAt: "2026-06-16T00:00:00.000Z",
+    });
+    await writeSecretEnv(runtime.configRoot, "research", {
+      MLCLAW_ROUTER_TOKEN: "hf_router_revoked",
+    });
+
+    const code = await main([
+      "update",
+      "alice/research",
+      "--router-token",
+      "hf_router_replacement",
+    ], runtime);
+
+    expect(code).toBe(0);
+    expect(hub.calls).toContainEqual({
+      name: "addSpaceSecret",
+      args: ["alice/research", "MLCLAW_ROUTER_TOKEN", "hf_router_replacement"],
+    });
+    await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
+      MLCLAW_ROUTER_TOKEN: "hf_router_replacement",
+    });
+    expect(hub.calls.some((call) => call.name === "restartSpace")).toBe(true);
   });
 
   it("can bundle the current Space runtime during update when requested", async () => {
@@ -1445,6 +1583,7 @@ describe("mlclaw CLI", () => {
     expect(code).toBe(0);
     expect(output.join("\n")).toContain("deleted stale secrets HF_TOKEN, HUGGINGFACE_HUB_TOKEN");
     expect(output.join("\n")).toContain("mounted bucket alice/research-data at /data/mlclaw-state");
+    expect(output.join("\n")).toContain("set secret MLCLAW_CREDENTIAL_KEY");
     expect(hub.calls).toContainEqual({
       name: "addSpaceVariable",
       args: ["alice/research", "MLCLAW_STATE_MOUNT_DIR", "/data/mlclaw-state"],
@@ -1455,6 +1594,10 @@ describe("mlclaw CLI", () => {
     });
     expect(hub.calls).toContainEqual({ name: "deleteSpaceSecret", args: ["alice/research", "HF_TOKEN"] });
     expect(hub.calls).toContainEqual({ name: "deleteSpaceSecret", args: ["alice/research", "HUGGINGFACE_HUB_TOKEN"] });
+    expect(hub.calls).toContainEqual({
+      name: "addSpaceSecret",
+      args: ["alice/research", "MLCLAW_CREDENTIAL_KEY", expect.any(String)],
+    });
     expect(hub.calls).toContainEqual({
       name: "setSpaceVolumes",
       args: ["alice/research", [
@@ -1492,6 +1635,7 @@ describe("mlclaw CLI", () => {
     await hub.addSpaceVariable("alice/research", "MLCLAW_ALLOWED_USERS", "alice");
     await hub.addSpaceVariable("alice/research", "MLCLAW_ADMINS", "alice");
     await hub.addSpaceSecret("alice/research", "MLCLAW_SESSION_SECRET", "session");
+    await hub.addSpaceSecret("alice/research", "MLCLAW_CREDENTIAL_KEY", "credential-key");
     hub.calls.length = 0;
 
     const { prompt } = createPrompt([]);
@@ -1521,6 +1665,7 @@ describe("mlclaw CLI", () => {
     await hub.addSpaceVariable("alice/research", "MLCLAW_ADMINS", "alice");
     await hub.addSpaceSecret("alice/research", "HF_TOKEN", "hf_old");
     await hub.addSpaceSecret("alice/research", "MLCLAW_SESSION_SECRET", "session");
+    await hub.addSpaceSecret("alice/research", "MLCLAW_CREDENTIAL_KEY", "credential-key");
     hub.calls.length = 0;
 
     const { prompt } = createPrompt([]);
@@ -1551,6 +1696,7 @@ describe("mlclaw CLI", () => {
     await hub.addSpaceVariable("alice/research", "MLCLAW_ALLOWED_USERS", "alice");
     await hub.addSpaceVariable("alice/research", "MLCLAW_ADMINS", "alice");
     await hub.addSpaceSecret("alice/research", "MLCLAW_SESSION_SECRET", "session");
+    await hub.addSpaceSecret("alice/research", "MLCLAW_CREDENTIAL_KEY", "credential-key");
     hub.calls.length = 0;
 
     const { prompt } = createPrompt([]);
@@ -1681,6 +1827,10 @@ describe("mlclaw CLI", () => {
     expect(hub.calls).toContainEqual({
       name: "addSpaceSecret",
       args: ["alice/research", "MLCLAW_ROUTER_TOKEN", "hf_router_saved"],
+    });
+    expect(hub.calls).toContainEqual({
+      name: "addSpaceSecret",
+      args: ["alice/research", "MLCLAW_CREDENTIAL_KEY", expect.any(String)],
     });
   });
 
@@ -1842,6 +1992,47 @@ describe("mlclaw CLI", () => {
     expect(removeVolumeIndex).toBeGreaterThan(removeIndex);
     expect(runIndex).toBeGreaterThan(removeVolumeIndex);
     expect(runtime.dockerRunner.calls.some((call) => call.name === "start")).toBe(false);
+  });
+
+  it("does not hand off a legacy local gateway before Router credential validation", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([], false);
+    const stderr: string[] = [];
+    const runtime = { ...await createRuntime(hub, prompt, stderr), env: {} };
+    await writeManifest(runtime.configRoot, {
+      version: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-existing",
+      gatewayLocation: "local",
+      model: DEFAULT_MODEL,
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      localGateway: { engine: "docker", dockerContext: "desktop-linux" },
+      createdAt: "2026-06-16T00:00:00.000Z",
+      updatedAt: "2026-06-16T00:00:00.000Z",
+    });
+    await writeSecretEnv(runtime.configRoot, "research", {
+      HF_TOKEN: "hf_legacy_broad",
+      HUGGINGFACE_HUB_TOKEN: "hf_legacy_broad",
+    });
+    runtime.dockerRunner.inspectValue = { exists: true, running: true, status: "running" };
+
+    const code = await main([
+      "state",
+      "adopt",
+      "research",
+      "--bucket",
+      "alice/research-archive-data",
+      "--yes",
+      "--no-pull",
+    ], runtime);
+
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain("dedicated inference token");
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "stop")).toBe(false);
+    expect(hub.calls.some((call) => call.name === "bucket.uploadFiles")).toBe(false);
   });
 
   it("rebinds a local gateway to another Docker context through bucket handoff", async () => {

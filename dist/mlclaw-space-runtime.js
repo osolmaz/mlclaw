@@ -7,297 +7,19 @@ var __export = (target, all) => {
 };
 
 // src/mlclaw-space-runtime/cli.ts
+import { spawn as spawn2 } from "node:child_process";
 import process2 from "node:process";
-
-// src/hf-tooling/seed.ts
-import fs from "node:fs/promises";
-import path from "node:path";
-var DEFAULT_HF_TOOLING_ASSET_ROOT = "/app/assets/hf-tooling";
-var DEFAULT_OPENCLAW_LIVE_DIR = "/tmp/openclaw-live";
-var OPENCLAW_BOOTSTRAP_FILENAME = "BOOTSTRAP.md";
-var OPENCLAW_WORKSPACE_STATE_FILENAME = "openclaw-workspace-state.json";
-var MLCLAW_CONTEXT_START = "<!-- MLCLAW:HUGGINGFACE_TOOLING:START -->";
-var MLCLAW_CONTEXT_END = "<!-- MLCLAW:HUGGINGFACE_TOOLING:END -->";
-async function seedHuggingFaceTooling(options = {}) {
-  const env = options.env ?? process.env;
-  const assetRoot = options.assetRoot ?? env.MLCLAW_HF_TOOLING_DIR ?? DEFAULT_HF_TOOLING_ASSET_ROOT;
-  const workspaceDir = options.workspaceDir ?? resolveWorkspaceDir(env);
-  const now = options.now ?? (() => /* @__PURE__ */ new Date());
-  const manifest = await readToolingManifest(assetRoot);
-  const agentSkills = await copyBaselineSkills({
-    assetRoot,
-    manifest,
-    targetRoot: path.join(workspaceDir, ".agents", "skills")
-  });
-  const workspaceSkills = await copyBaselineSkills({
-    assetRoot,
-    manifest,
-    targetRoot: path.join(workspaceDir, "skills")
-  });
-  const templateRoot = path.join(assetRoot, "templates");
-  const copiedTemplateFiles = await copyMissingTree(templateRoot, workspaceDir);
-  const wroteContextFile = await ensureWorkspaceContextFile({ manifest, workspaceDir });
-  const wroteManifest = await writeWorkspaceManifest({
-    manifest,
-    workspaceDir,
-    installedAt: now().toISOString()
-  });
-  return {
-    workspaceDir,
-    copiedSkills: agentSkills.copied,
-    skippedSkills: agentSkills.skipped,
-    copiedWorkspaceSkills: workspaceSkills.copied,
-    skippedWorkspaceSkills: workspaceSkills.skipped,
-    copiedTemplateFiles,
-    wroteContextFile,
-    wroteManifest
-  };
-}
-async function waitForBootstrapAndSeedHuggingFaceTooling(options = {}) {
-  const env = options.env ?? process.env;
-  const workspaceDir = options.workspaceDir ?? resolveWorkspaceDir(env);
-  const bootstrapPath = path.join(workspaceDir, OPENCLAW_BOOTSTRAP_FILENAME);
-  const statePath = path.join(workspaceDir, OPENCLAW_WORKSPACE_STATE_FILENAME);
-  const pollIntervalMs = options.pollIntervalMs ?? 1e3;
-  let observedPendingBootstrap = false;
-  while (!options.signal?.aborted) {
-    if (await pathExists(bootstrapPath)) {
-      observedPendingBootstrap = true;
-    } else if (!observedPendingBootstrap || await workspaceSetupIsComplete(statePath)) {
-      return await seedHuggingFaceTooling({ ...options, workspaceDir });
-    }
-    await waitForPoll(pollIntervalMs, options.signal);
-  }
-  return null;
-}
-async function workspaceSetupIsComplete(statePath) {
-  try {
-    const parsed = JSON.parse(await fs.readFile(statePath, "utf8"));
-    if (typeof parsed !== "object" || parsed === null) {
-      return false;
-    }
-    const setupCompletedAt = parsed.setupCompletedAt;
-    return typeof setupCompletedAt === "string" && setupCompletedAt.trim().length > 0;
-  } catch {
-    return false;
-  }
-}
-async function waitForPoll(delayMs, signal) {
-  if (signal?.aborted) {
-    return;
-  }
-  await new Promise((resolve) => {
-    const finish = () => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", finish);
-      resolve();
-    };
-    const timer = setTimeout(finish, delayMs);
-    signal?.addEventListener("abort", finish, { once: true });
-  });
-}
-async function copyBaselineSkills(params) {
-  const copied = [];
-  const skipped = [];
-  await fs.mkdir(params.targetRoot, { recursive: true });
-  for (const skill of params.manifest.skills.installed) {
-    const source = path.join(params.assetRoot, "skills", skill);
-    const target = path.join(params.targetRoot, skill);
-    if (await pathExists(target)) {
-      skipped.push(skill);
-      continue;
-    }
-    await assertDirectory(source, `baseline skill ${skill}`);
-    await fs.cp(source, target, { recursive: true, preserveTimestamps: true });
-    copied.push(skill);
-  }
-  return { copied, skipped };
-}
-async function ensureWorkspaceContextFile(params) {
-  const contextPath = path.join(params.workspaceDir, "AGENTS.md");
-  const block = buildWorkspaceContextBlock(params.manifest);
-  const existing = await readTextFileIfExists(contextPath);
-  const next = mergeManagedBlock(existing, block);
-  if (existing === next) {
-    return false;
-  }
-  await fs.mkdir(path.dirname(contextPath), { recursive: true });
-  await fs.writeFile(contextPath, next, "utf8");
-  return true;
-}
-function buildWorkspaceContextBlock(manifest) {
-  const skills = manifest.skills.installed.map((skill) => `- \`${skill}\``).join("\n");
-  return `${MLCLAW_CONTEXT_START}
-## ML Claw Hugging Face Tooling
-
-This workspace has Hugging Face tooling preinstalled. Use the Hugging Face CLI
-\`hf\`, \`hf-discover\`, and \`uv\` for Hub, dataset, model, Space, and bucket
-work.
-
-Hugging Face agent skills are available in both \`.agents/skills\` and
-\`skills\`. Prefer these skills when the task involves Hugging Face:
-
-${skills}
-
-The pinned tooling manifest is \`.agents/.mlclaw-hf-tooling.json\`.
-${MLCLAW_CONTEXT_END}
-`;
-}
-function mergeManagedBlock(existing, block) {
-  const normalizedBlock = block.endsWith("\n") ? block : `${block}
-`;
-  if (!existing) {
-    return `# ML Claw Workspace
-
-${normalizedBlock}`;
-  }
-  const start = existing.indexOf(MLCLAW_CONTEXT_START);
-  const end = existing.indexOf(MLCLAW_CONTEXT_END);
-  if (start >= 0 && end >= start) {
-    const afterEnd = end + MLCLAW_CONTEXT_END.length;
-    const suffix = existing.slice(afterEnd).replace(/^\r?\n/u, "");
-    const next = `${existing.slice(0, start)}${normalizedBlock}${suffix}`;
-    return next.replace(/\n{4,}/g, "\n\n\n");
-  }
-  const trimmed = existing.replace(/\s+$/u, "");
-  return `${trimmed}
-
-${normalizedBlock}`;
-}
-async function readTextFileIfExists(filePath) {
-  try {
-    return await fs.readFile(filePath, "utf8");
-  } catch (err) {
-    if (isMissingFileError(err)) {
-      return null;
-    }
-    throw err;
-  }
-}
-function resolveWorkspaceDir(env) {
-  const explicit = env.OPENCLAW_WORKSPACE_DIR?.trim();
-  if (explicit) {
-    return explicit;
-  }
-  const liveDir = env.OPENCLAW_LIVE_DIR?.trim() || DEFAULT_OPENCLAW_LIVE_DIR;
-  return path.join(liveDir, "workspace");
-}
-async function readToolingManifest(assetRoot) {
-  const raw2 = await fs.readFile(path.join(assetRoot, "manifest.json"), "utf8");
-  const parsed = JSON.parse(raw2);
-  assertToolingManifest(parsed);
-  return parsed;
-}
-function assertToolingManifest(value) {
-  if (typeof value !== "object" || value === null) {
-    throw new Error("HF tooling manifest must be an object");
-  }
-  const record = value;
-  if (record.schemaVersion !== 1) {
-    throw new Error("HF tooling manifest schemaVersion must be 1");
-  }
-  const skills = record.skills;
-  if (!skills || !Array.isArray(skills.installed) || !skills.installed.every((skill) => typeof skill === "string")) {
-    throw new Error("HF tooling manifest must list installed skills");
-  }
-  const python = record.python;
-  if (!python || typeof python.packages !== "object" || python.packages === null) {
-    throw new Error("HF tooling manifest must list Python packages");
-  }
-}
-async function copyMissingTree(sourceRoot, targetRoot) {
-  const copied = [];
-  await assertDirectory(sourceRoot, "HF tooling templates");
-  for (const entry of await fs.readdir(sourceRoot, { withFileTypes: true })) {
-    const source = path.join(sourceRoot, entry.name);
-    const target = path.join(targetRoot, entry.name);
-    if (entry.isDirectory()) {
-      copied.push(...await copyMissingTree(source, target));
-    } else if (entry.isFile()) {
-      if (await pathExists(target)) {
-        continue;
-      }
-      await fs.mkdir(path.dirname(target), { recursive: true });
-      await fs.copyFile(source, target);
-      copied.push(path.relative(targetRoot, target).split(path.sep).join(path.posix.sep));
-    }
-  }
-  return copied;
-}
-async function writeWorkspaceManifest(params) {
-  const manifestPath = path.join(params.workspaceDir, ".agents", ".mlclaw-hf-tooling.json");
-  const existing = await readExistingWorkspaceManifest(manifestPath);
-  const installedAt = existing?.installedAt ?? params.installedAt;
-  const next = {
-    ...params.manifest,
-    installedAt
-  };
-  if (existing && sameBaseline(existing, next)) {
-    return false;
-  }
-  await fs.mkdir(path.dirname(manifestPath), { recursive: true });
-  await fs.writeFile(manifestPath, `${JSON.stringify(next, null, 2)}
-`, "utf8");
-  return true;
-}
-async function readExistingWorkspaceManifest(manifestPath) {
-  try {
-    const parsed = JSON.parse(await fs.readFile(manifestPath, "utf8"));
-    if (typeof parsed !== "object" || parsed === null) {
-      return null;
-    }
-    const record = parsed;
-    if (typeof record.installedAt !== "string") {
-      return null;
-    }
-    assertToolingManifest(record);
-    return record;
-  } catch (err) {
-    if (isMissingFileError(err)) {
-      return null;
-    }
-    return null;
-  }
-}
-function sameBaseline(a, b) {
-  return JSON.stringify(withoutInstalledAt(a)) === JSON.stringify(withoutInstalledAt(b));
-}
-function withoutInstalledAt(value) {
-  const { installedAt: _installedAt, ...rest } = value;
-  return rest;
-}
-async function assertDirectory(dir, label) {
-  let stat;
-  try {
-    stat = await fs.stat(dir);
-  } catch (err) {
-    if (isMissingFileError(err)) {
-      throw new Error(`${label} is missing: ${dir}`);
-    }
-    throw err;
-  }
-  if (!stat.isDirectory()) {
-    throw new Error(`${label} is not a directory: ${dir}`);
-  }
-}
-async function pathExists(candidate) {
-  try {
-    await fs.access(candidate);
-    return true;
-  } catch (err) {
-    if (isMissingFileError(err)) {
-      return false;
-    }
-    throw err;
-  }
-}
-function isMissingFileError(err) {
-  return err instanceof Error && "code" in err && err.code === "ENOENT";
-}
 
 // src/mlclaw-space-runtime/config.ts
 import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
+
+// src/hf-state-sync/paths.ts
+var DEFAULT_BUCKET_PREFIX = "openclaw-state";
+function normalizeBucketPrefix(prefix) {
+  const normalized = (prefix?.trim() || DEFAULT_BUCKET_PREFIX).replace(/^\/+|\/+$/g, "");
+  return normalized || DEFAULT_BUCKET_PREFIX;
+}
 
 // src/mlclaw-space-runtime/branding.ts
 var DEFAULT_BRAND_NAME = "ML Claw";
@@ -914,6 +636,7 @@ function positiveNumber(value) {
 function loadConfig(env = process.env) {
   const port = integer(env.PORT ?? env.MLCLAW_SPACE_PORT, 7860);
   const openclawPort = integer(env.MLCLAW_OPENCLAW_PORT ?? env.OPENCLAW_GATEWAY_PORT, 7861);
+  const mcpPort = integer(env.MLCLAW_MCP_PORT, 7862);
   const spaceId = trim(env.SPACE_ID);
   const canonicalSpaceId = trim(env.MLCLAW_CANONICAL_SPACE_ID) ?? "osolmaz/mlclaw";
   const canonicalCreatorUserId = trim(env.MLCLAW_CANONICAL_CREATOR_USER_ID);
@@ -936,22 +659,35 @@ function loadConfig(env = process.env) {
   ]);
   const publicUrl = publicUrlFromEnv(env, port);
   const sessionSecret = trim(env.MLCLAW_SESSION_SECRET ?? env.SESSION_SECRET) ?? randomBytes(48).toString("base64url");
+  const configuredCredentialKey = trim(env.MLCLAW_CREDENTIAL_KEY);
+  if (mode === "app" && !configuredCredentialKey) {
+    throw new Error("MLCLAW_CREDENTIAL_KEY is required in app mode; run mlclaw doctor --fix");
+  }
+  const credentialKey = configuredCredentialKey ?? randomBytes(32).toString("base64url");
   const openclawCommand = trim(env.MLCLAW_OPENCLAW_COMMAND) ?? "openclaw";
   const openclawArgs = splitArgs(env.MLCLAW_OPENCLAW_ARGS) ?? ["gateway"];
   const runtimeSettingsFile = trim(env.MLCLAW_RUNTIME_SETTINGS_FILE) ?? "/home/node/.local/share/mlclaw/live/.mlclaw/settings.json";
+  const stateMountDir = trim(env.MLCLAW_STATE_MOUNT_DIR);
+  const statePrefix = trim(env.OPENCLAW_HF_STATE_PREFIX);
+  const mcpCredentialFile = trim(env.MLCLAW_MCP_CREDENTIAL_FILE) ?? (stateMountDir ? `${stateMountDir.replace(/\/+$/, "")}/${normalizeBucketPrefix(statePrefix)}/.mlclaw/mcp-oauth.enc` : `${pathDirname(runtimeSettingsFile)}/mcp-oauth.enc`);
   const runtimeSettings2 = readRuntimeSettings(runtimeSettingsFile);
   const model = runtimeSettings2.model ?? trim(env.OPENCLAW_MODEL) ?? DEFAULT_MODEL;
   const agentName = trim(env.OPENCLAW_AGENT_NAME);
   return {
     port,
     openclawPort,
+    mcpPort,
     openclawHost: trim(env.MLCLAW_OPENCLAW_HOST) ?? "127.0.0.1",
+    openclawUid: integer(env.MLCLAW_OPENCLAW_UID, 1e3),
+    openclawGid: integer(env.MLCLAW_OPENCLAW_GID, 1e3),
     publicUrl,
     providerUrl: trim(env.OPENID_PROVIDER_URL) ?? "https://huggingface.co",
     oauthClientId: trim(env.OAUTH_CLIENT_ID),
     oauthClientSecret: trim(env.OAUTH_CLIENT_SECRET),
     sessionSecret,
     sessionSecretGenerated: !trim(env.MLCLAW_SESSION_SECRET ?? env.SESSION_SECRET),
+    credentialKey,
+    credentialKeyGenerated: !configuredCredentialKey,
     cookieSecure: env.MLCLAW_COOKIE_SECURE === "0" ? false : !publicUrl.startsWith("http://"),
     spaceId,
     canonicalSpaceId,
@@ -965,6 +701,11 @@ function loadConfig(env = process.env) {
     routerToken: trim(env.MLCLAW_ROUTER_TOKEN ?? env.HF_ROUTER_TOKEN),
     hubUrl: trim(env.HF_ENDPOINT) ?? "https://huggingface.co",
     openaiCredentialFile: trim(env.MLCLAW_OPENAI_CREDENTIAL_FILE) ?? "/tmp/mlclaw-secrets/openai.env",
+    mcpCredentialFile,
+    hfMcpUrl: trim(env.MLCLAW_HF_MCP_URL) ?? "https://huggingface.co/mcp?bouquet=hf",
+    researchMcpUrl: trim(env.MLCLAW_RESEARCH_MCP_URL) ?? "https://evalstate-research-agent-two.hf.space/mcp",
+    researchTimeoutMs: integer(env.MLCLAW_RESEARCH_TIMEOUT_MS, 30 * 60 * 1e3),
+    researchPollMs: integer(env.MLCLAW_RESEARCH_POLL_MS, 1500),
     runtimeSettingsFile,
     openclawConfigPath: trim(env.OPENCLAW_CONFIG_PATH) ?? "/home/node/.local/share/mlclaw/live/.openclaw/openclaw.json",
     openclawCommand,
@@ -974,8 +715,8 @@ function loadConfig(env = process.env) {
     modelChoices: runtimeSettings2.modelChoices ?? parseModelChoicesEnv(env.MLCLAW_MODEL_CHOICES, model),
     routerModelsUrl: trim(env.MLCLAW_ROUTER_MODELS_URL) ?? "https://router.huggingface.co/v1/models",
     stateBucket: trim(env.OPENCLAW_HF_STATE_BUCKET),
-    stateMountDir: trim(env.MLCLAW_STATE_MOUNT_DIR),
-    statePrefix: trim(env.OPENCLAW_HF_STATE_PREFIX),
+    stateMountDir,
+    statePrefix,
     gatewayLocation: trim(env.MLCLAW_GATEWAY_LOCATION),
     runtimeImage: trim(env.MLCLAW_RUNTIME_IMAGE),
     runtimeId: trim(env.MLCLAW_RUNTIME_ID),
@@ -983,6 +724,13 @@ function loadConfig(env = process.env) {
     assetsDir: trim(env.MLCLAW_ASSETS_DIR) ?? "/app/assets",
     branding: resolveBranding(env, agentName)
   };
+}
+function integrationCredentialSlot(config2) {
+  return config2.adminUsers[0];
+}
+function pathDirname(file) {
+  const slash = file.lastIndexOf("/");
+  return slash > 0 ? file.slice(0, slash) : ".";
 }
 function resolveMode(params) {
   if (params.env.MLCLAW_FORCE_TEMPLATE === "1") {
@@ -1051,12 +799,12 @@ function readRuntimeSettings(file) {
 
 // src/mlclaw-space-runtime/server.ts
 import { spawn } from "node:child_process";
-import http2 from "node:http";
-import { Readable } from "node:stream";
+import http3 from "node:http";
+import { Readable as Readable2 } from "node:stream";
 
 // src/mlclaw-space-runtime/app.ts
-import fs4 from "node:fs/promises";
-import path4 from "node:path";
+import fs3 from "node:fs/promises";
+import path3 from "node:path";
 
 // node_modules/hono/dist/compose.js
 var compose = (middleware, onError, onNotFound) => {
@@ -1998,31 +1746,31 @@ var Context = class {
     return Object.fromEntries(this.#var);
   }
   #newResponse(data, arg, headers) {
-    const responseHeaders = this.#res ? new Headers(this.#res.headers) : this.#preparedHeaders ?? new Headers();
+    const responseHeaders2 = this.#res ? new Headers(this.#res.headers) : this.#preparedHeaders ?? new Headers();
     if (typeof arg === "object" && "headers" in arg) {
       const argHeaders = arg.headers instanceof Headers ? arg.headers : new Headers(arg.headers);
       for (const [key, value] of argHeaders) {
         if (key.toLowerCase() === "set-cookie") {
-          responseHeaders.append(key, value);
+          responseHeaders2.append(key, value);
         } else {
-          responseHeaders.set(key, value);
+          responseHeaders2.set(key, value);
         }
       }
     }
     if (headers) {
       for (const [k, v] of Object.entries(headers)) {
         if (typeof v === "string") {
-          responseHeaders.set(k, v);
+          responseHeaders2.set(k, v);
         } else {
-          responseHeaders.delete(k);
+          responseHeaders2.delete(k);
           for (const v2 of v) {
-            responseHeaders.append(k, v2);
+            responseHeaders2.append(k, v2);
           }
         }
       }
     }
     const status = typeof arg === "number" ? arg : arg?.status ?? this.#status;
-    return createResponseInstance(data, { status, headers: responseHeaders });
+    return createResponseInstance(data, { status, headers: responseHeaders2 });
   }
   newResponse = (...args) => this.#newResponse(...args);
   /**
@@ -7301,18 +7049,34 @@ var coerce = {
 var NEVER = INVALID;
 
 // src/mlclaw-space-runtime/oauth.ts
+var HF_MCP_OAUTH_SCOPES = [
+  "openid",
+  "profile",
+  "read-mcp",
+  "read-repos",
+  "contribute-repos",
+  "write-repos",
+  "manage-repos",
+  "inference-api",
+  "jobs"
+];
+var HF_LOGIN_OAUTH_SCOPES = ["openid", "profile"];
 var tokenResponseSchema = external_exports.object({
-  access_token: external_exports.string().min(1)
+  access_token: external_exports.string().min(1),
+  refresh_token: external_exports.string().min(1).optional(),
+  token_type: external_exports.string().min(1).optional().default("Bearer"),
+  scope: external_exports.union([external_exports.string(), external_exports.array(external_exports.string())]).optional(),
+  expires_in: external_exports.number().positive().optional()
 }).passthrough();
 var userInfoSchema = external_exports.object({
   preferred_username: external_exports.string().min(1)
 }).passthrough();
-function authorizeUrl(settings, state) {
+function authorizeUrl(settings, state, scopes = HF_LOGIN_OAUTH_SCOPES) {
   const url = new URL(`${settings.providerUrl.replace(/\/+$/, "")}/oauth/authorize`);
   url.searchParams.set("client_id", settings.clientId);
   url.searchParams.set("redirect_uri", settings.redirectUri);
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", "openid profile");
+  url.searchParams.set("scope", scopes.join(" "));
   url.searchParams.set("state", state);
   return url.toString();
 }
@@ -7350,14 +7114,580 @@ async function exchangeCodeForIdentity(settings, code) {
   if (!userBody.success) {
     return void 0;
   }
-  return { username: userBody.data.preferred_username };
+  return {
+    username: userBody.data.preferred_username,
+    accessToken: tokenBody.data.access_token,
+    ...tokenBody.data.refresh_token ? { refreshToken: tokenBody.data.refresh_token } : {},
+    tokenType: tokenBody.data.token_type,
+    scope: normalizeScope(tokenBody.data.scope),
+    ...tokenBody.data.expires_in ? { expiresAt: Date.now() + tokenBody.data.expires_in * 1e3 } : {}
+  };
+}
+function normalizeScope(value) {
+  const scopes = Array.isArray(value) ? value : (value ?? "").split(/\s+/);
+  return [...new Set(scopes.map((scope) => scope.trim()).filter(Boolean))];
 }
 
 // src/mlclaw-space-runtime/openclaw-config.ts
-import fs2 from "node:fs/promises";
-import path2 from "node:path";
+import fs from "node:fs/promises";
+import path from "node:path";
+
+// src/mlclaw-space-runtime/mcp-integrations.ts
+import { createHmac as createHmac2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import http from "node:http";
+import { Readable } from "node:stream";
+var MAX_REQUEST_BYTES = 16 * 1024 * 1024;
+var UPSTREAM_TIMEOUT_MS = 12e4;
+var INTERNAL_HEADER = "x-mlclaw-mcp-key";
+var McpIntegrationServer = class {
+  constructor(config2, credentials) {
+    this.config = config2;
+    this.credentials = credentials;
+    this.internalToken = deriveInternalToken(config2.sessionSecret);
+  }
+  server;
+  internalToken;
+  activeRequests = /* @__PURE__ */ new Set();
+  managedServerConfig() {
+    return managedMcpServerConfig(this.config);
+  }
+  async start() {
+    if (this.server) {
+      return;
+    }
+    const server2 = http.createServer((req, res) => {
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      this.activeRequests.add(controller);
+      req.once("aborted", abort);
+      res.once("close", abort);
+      this.handle(req, res, controller.signal).catch((err) => {
+        if (controller.signal.aborted) {
+          res.destroy();
+          return;
+        }
+        process.stderr.write(`[mlclaw] MCP integration request failed: ${safeError(err)}
+`);
+        if (!res.headersSent) {
+          writeJson(res, 502, mcpError(null, -32603, "MCP integration request failed"));
+        } else {
+          res.end();
+        }
+      }).finally(() => {
+        req.off("aborted", abort);
+        res.off("close", abort);
+        this.activeRequests.delete(controller);
+      });
+    });
+    await new Promise((resolve, reject) => {
+      server2.once("error", reject);
+      server2.listen(this.config.mcpPort, "127.0.0.1", () => {
+        server2.off("error", reject);
+        resolve();
+      });
+    });
+    this.server = server2;
+    process.stdout.write(`[mlclaw] MCP integrations listening on 127.0.0.1:${this.config.mcpPort}
+`);
+  }
+  async stop() {
+    const server2 = this.server;
+    this.server = void 0;
+    if (!server2) {
+      return;
+    }
+    const closed = new Promise((resolve) => server2.close(() => resolve()));
+    for (const controller of this.activeRequests) {
+      controller.abort();
+    }
+    server2.closeAllConnections();
+    await closed;
+  }
+  async handle(req, res, signal) {
+    if (!validInternalToken(req.headers[INTERNAL_HEADER], this.internalToken)) {
+      writeJson(res, 401, mcpError(null, -32001, "Unauthorized"));
+      return;
+    }
+    const pathname = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
+    if (pathname !== "/mcp/huggingface" && pathname !== "/mcp/research") {
+      writeJson(res, 404, mcpError(null, -32601, "Not found"));
+      return;
+    }
+    let accessToken;
+    try {
+      accessToken = await this.integrationAccessToken();
+    } catch (err) {
+      writeJson(res, 503, mcpError(null, -32002, safeError(err)));
+      return;
+    }
+    const body = await readBody(req, MAX_REQUEST_BYTES);
+    if (pathname === "/mcp/research" && req.method === "POST") {
+      const parsed = parseJsonRpc(body);
+      if (parsed?.method === "tools/call" && toolName(parsed) === "research") {
+        await this.handleResearchCall(req, res, body, parsed, accessToken, signal);
+        return;
+      }
+    }
+    await forwardStreaming({
+      req,
+      res,
+      body,
+      url: pathname === "/mcp/huggingface" ? this.config.hfMcpUrl : this.config.researchMcpUrl,
+      accessToken,
+      signal
+    });
+  }
+  async handleResearchCall(req, res, body, request, accessToken, signal) {
+    const deadline = Date.now() + this.config.researchTimeoutMs;
+    const initial = await forwardBuffered({
+      method: req.method ?? "POST",
+      requestHeaders: req.headers,
+      body,
+      url: this.config.researchMcpUrl,
+      accessToken,
+      timeoutMs: remainingUpstreamTimeout(deadline),
+      signal
+    });
+    const message = parseMcpResponse(initial.body);
+    const prefab = prefabJob(message);
+    if (!prefab) {
+      writeBuffered(res, initial);
+      return;
+    }
+    const sessionId = requestHeader(req.headers, "mcp-session-id");
+    const protocolVersion = requestHeader(req.headers, "mcp-protocol-version");
+    if (!sessionId) {
+      writeJson(res, 502, mcpError(request.id ?? null, -32603, "Research Agent did not establish an MCP session"));
+      return;
+    }
+    try {
+      const startToken = await this.integrationAccessToken();
+      await this.callResearchBackend({
+        sessionId,
+        tool: prefab.startTool,
+        arguments: { job_id: prefab.jobId },
+        accessToken: startToken,
+        id: `${String(request.id ?? "research")}:start`,
+        protocolVersion,
+        timeoutMs: remainingUpstreamTimeout(deadline),
+        signal
+      });
+      let status;
+      while (Date.now() < deadline) {
+        if (res.destroyed) {
+          return;
+        }
+        const pollToken = await this.integrationAccessToken();
+        const remainingMs = deadline - Date.now();
+        if (remainingMs <= 0) {
+          break;
+        }
+        const deadlineBound = remainingMs <= UPSTREAM_TIMEOUT_MS;
+        let result;
+        try {
+          result = await this.callResearchBackend({
+            sessionId,
+            tool: prefab.statusTool,
+            arguments: { job_id: prefab.jobId },
+            accessToken: pollToken,
+            id: `${String(request.id ?? "research")}:status`,
+            protocolVersion,
+            timeoutMs: Math.min(UPSTREAM_TIMEOUT_MS, remainingMs),
+            signal
+          });
+        } catch (err) {
+          if (deadlineBound && isTimeoutError(err) && !signal.aborted) {
+            break;
+          }
+          throw err;
+        }
+        status = toolResultObject(result);
+        if (status?.done === true) {
+          const error = stringValue2(status.error);
+          const resultText = stringValue2(status.result);
+          writeJson(res, 200, {
+            jsonrpc: "2.0",
+            id: request.id ?? null,
+            result: {
+              content: [{
+                type: "text",
+                text: error ? `Research failed: ${error}` : resultText ?? `Research completed. Job: ${prefab.jobId}`
+              }],
+              structuredContent: redactResearchStatus(status),
+              isError: Boolean(error)
+            }
+          });
+          return;
+        }
+        await delay(Math.min(this.config.researchPollMs, Math.max(0, deadline - Date.now())), signal);
+      }
+      writeJson(res, 200, {
+        jsonrpc: "2.0",
+        id: request.id ?? null,
+        result: {
+          content: [{ type: "text", text: `Research is still running. Job: ${prefab.jobId}` }],
+          structuredContent: redactResearchStatus(status ?? { job_id: prefab.jobId, status: "running", done: false }),
+          isError: false
+        }
+      });
+    } catch (err) {
+      if (err instanceof ResearchRpcError) {
+        writeJson(res, 200, mcpError(request.id ?? null, err.code, err.message));
+        return;
+      }
+      throw err;
+    }
+  }
+  async callResearchBackend(params) {
+    const response = await forwardBuffered({
+      method: "POST",
+      requestHeaders: {
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+        "mcp-session-id": params.sessionId,
+        ...params.protocolVersion ? { "mcp-protocol-version": params.protocolVersion } : {}
+      },
+      body: Buffer.from(JSON.stringify({
+        jsonrpc: "2.0",
+        id: params.id,
+        method: "tools/call",
+        params: { name: params.tool, arguments: params.arguments }
+      })),
+      url: this.config.researchMcpUrl,
+      accessToken: params.accessToken,
+      ...params.timeoutMs !== void 0 ? { timeoutMs: params.timeoutMs } : {},
+      signal: params.signal
+    });
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`Research Agent returned HTTP ${response.status}`);
+    }
+    const parsed = parseMcpResponse(response.body);
+    if (!parsed || typeof parsed !== "object") {
+      throw new Error("Research Agent returned an invalid MCP response");
+    }
+    const rpcError = objectValue(parsed.error);
+    if (rpcError) {
+      throw new ResearchRpcError(
+        numberValue(rpcError.code) ?? -32603,
+        stringValue2(rpcError.message) ?? "Research Agent request failed"
+      );
+    }
+    const toolError = mcpToolError(parsed);
+    if (toolError) {
+      throw new ResearchRpcError(-32003, toolError);
+    }
+    return parsed;
+  }
+  async integrationAccessToken() {
+    if (this.config.gatewayLocation === "local" && this.config.hfToken) {
+      return this.config.hfToken;
+    }
+    const credentialSlot = integrationCredentialSlot(this.config);
+    if (!credentialSlot) {
+      throw new Error("ML Claw has no primary admin");
+    }
+    return this.credentials.accessToken(credentialSlot);
+  }
+};
+var ResearchRpcError = class extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+    this.name = "ResearchRpcError";
+  }
+};
+function deriveInternalToken(secret) {
+  return createHmac2("sha256", secret).update("mlclaw:mcp-integrations:v1").digest("base64url");
+}
+function managedMcpServerConfig(config2) {
+  const headers = { [INTERNAL_HEADER]: deriveInternalToken(config2.sessionSecret) };
+  return {
+    huggingface: {
+      url: `http://127.0.0.1:${config2.mcpPort}/mcp/huggingface`,
+      transport: "streamable-http",
+      headers,
+      timeout: 120,
+      connectTimeout: 10,
+      supportsParallelToolCalls: true
+    },
+    "research-agent": {
+      url: `http://127.0.0.1:${config2.mcpPort}/mcp/research`,
+      transport: "streamable-http",
+      headers,
+      timeout: Math.ceil(config2.researchTimeoutMs / 1e3) + 30,
+      connectTimeout: 10,
+      supportsParallelToolCalls: false
+    }
+  };
+}
+async function forwardStreaming(params) {
+  const timed = timedAbortSignal(params.signal, UPSTREAM_TIMEOUT_MS);
+  try {
+    const response = await fetch(params.url, {
+      method: params.req.method ?? "POST",
+      headers: upstreamHeaders(params.req.headers, params.accessToken),
+      ...params.body.byteLength > 0 ? { body: Buffer.from(params.body) } : {},
+      redirect: "error",
+      signal: timed.signal
+    });
+    params.res.writeHead(response.status, responseHeaders(response.headers));
+    if (!response.body) {
+      params.res.end();
+      return;
+    }
+    await new Promise((resolve, reject) => {
+      const stream = Readable.fromWeb(response.body);
+      stream.once("error", reject);
+      params.res.once("error", reject);
+      params.res.once("finish", resolve);
+      stream.pipe(params.res);
+    });
+  } finally {
+    timed.dispose();
+  }
+}
+async function forwardBuffered(params) {
+  const timed = timedAbortSignal(params.signal, params.timeoutMs ?? UPSTREAM_TIMEOUT_MS);
+  try {
+    const response = await fetch(params.url, {
+      method: params.method,
+      headers: upstreamHeaders(params.requestHeaders, params.accessToken),
+      ...params.body.byteLength > 0 ? { body: Buffer.from(params.body) } : {},
+      redirect: "error",
+      signal: timed.signal
+    });
+    return {
+      status: response.status,
+      headers: response.headers,
+      body: new Uint8Array(await response.arrayBuffer())
+    };
+  } finally {
+    timed.dispose();
+  }
+}
+function upstreamHeaders(headers, accessToken) {
+  const out = new Headers({ authorization: `Bearer ${accessToken}` });
+  for (const name of ["accept", "content-type", "mcp-session-id", "mcp-protocol-version", "last-event-id"]) {
+    const value = requestHeader(headers, name);
+    if (value) {
+      out.set(name, value);
+    }
+  }
+  return out;
+}
+function responseHeaders(headers) {
+  const out = {};
+  for (const name of ["content-type", "cache-control", "mcp-session-id", "mcp-protocol-version", "www-authenticate", "retry-after"]) {
+    const value = headers.get(name);
+    if (value) {
+      out[name] = value;
+    }
+  }
+  return out;
+}
+function writeBuffered(res, response) {
+  const headers = responseHeaders(response.headers);
+  headers["content-length"] = response.body.byteLength;
+  res.writeHead(response.status, headers);
+  res.end(response.body);
+}
+async function readBody(req, limit) {
+  const chunks = [];
+  let length = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    length += buffer.length;
+    if (length > limit) {
+      throw new Error("MCP request body is too large");
+    }
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks);
+}
+function parseJsonRpc(body) {
+  try {
+    const value = JSON.parse(Buffer.from(body).toString("utf8"));
+    return value && typeof value === "object" && !Array.isArray(value) ? value : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function parseMcpResponse(body) {
+  const text = Buffer.from(body).toString("utf8").trim();
+  if (!text) {
+    return void 0;
+  }
+  const candidates = text.startsWith("{") ? [text] : text.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim());
+  for (const candidate of candidates.reverse()) {
+    try {
+      const value = JSON.parse(candidate);
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        return value;
+      }
+    } catch {
+    }
+  }
+  return void 0;
+}
+function prefabJob(message) {
+  const result = objectValue(message?.result);
+  const structured = objectValue(result?.structuredContent);
+  const prefab = objectValue(structured?.$prefab);
+  const state = objectValue(prefab?.state);
+  const view = objectValue(prefab?.view);
+  const jobId = stringValue2(state?.job_id);
+  const startTool = findActionTool(view, "_start_research");
+  const statusTool = findActionTool(view, "_research_status");
+  return jobId && startTool && statusTool ? { jobId, startTool, statusTool } : void 0;
+}
+function findActionTool(value, suffix) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findActionTool(item, suffix);
+      if (found) {
+        return found;
+      }
+    }
+    return void 0;
+  }
+  if (!value || typeof value !== "object") {
+    return void 0;
+  }
+  const record = value;
+  const tool = stringValue2(record.tool);
+  if (record.action === "toolCall" && tool?.endsWith(suffix)) {
+    return tool;
+  }
+  for (const item of Object.values(record)) {
+    const found = findActionTool(item, suffix);
+    if (found) {
+      return found;
+    }
+  }
+  return void 0;
+}
+function toolName(request) {
+  return stringValue2(objectValue(request.params)?.name);
+}
+function toolResultObject(message) {
+  const result = objectValue(message.result);
+  const structured = objectValue(result?.structuredContent);
+  if (structured) {
+    return structured;
+  }
+  const content = Array.isArray(result?.content) ? result.content : [];
+  for (const item of content) {
+    const text = stringValue2(objectValue(item)?.text);
+    if (!text) {
+      continue;
+    }
+    try {
+      const value = JSON.parse(text);
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        return value;
+      }
+    } catch {
+    }
+  }
+  return void 0;
+}
+function mcpToolError(message) {
+  const result = objectValue(message.result);
+  if (result?.isError !== true) {
+    return void 0;
+  }
+  const content = Array.isArray(result.content) ? result.content : [];
+  const detail = content.map((item) => stringValue2(objectValue(item)?.text)).filter((text) => Boolean(text)).join("\n").trim();
+  return detail || "Research Agent tool failed";
+}
+function redactResearchStatus(status) {
+  return Object.fromEntries(Object.entries(status).filter(([key]) => ![
+    "auth",
+    "token",
+    "access_token",
+    "refresh_token"
+  ].includes(key.toLowerCase())));
+}
+function mcpError(id, code, message) {
+  return { jsonrpc: "2.0", id, error: { code, message } };
+}
+function writeJson(res, status, value) {
+  const body = `${JSON.stringify(value)}
+`;
+  res.writeHead(status, {
+    "cache-control": "no-store",
+    "content-length": Buffer.byteLength(body),
+    "content-type": "application/json; charset=utf-8"
+  });
+  res.end(body);
+}
+function validInternalToken(value, expected) {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const actualBuffer = Buffer.from(value);
+  const expectedBuffer = Buffer.from(expected);
+  return actualBuffer.length === expectedBuffer.length && timingSafeEqual2(actualBuffer, expectedBuffer);
+}
+function requestHeader(headers, name) {
+  const value = headers[name];
+  return Array.isArray(value) ? value[0] : value;
+}
+function objectValue(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : void 0;
+}
+function stringValue2(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : void 0;
+}
+function numberValue(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : void 0;
+}
+function safeError(err) {
+  return err instanceof Error ? err.message : "unknown error";
+}
+function delay(ms, signal) {
+  if (signal.aborted) {
+    return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+  }
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    }, ms);
+    const abort = () => {
+      clearTimeout(timer);
+      reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", abort, { once: true });
+  });
+}
+function timedAbortSignal(parent, timeoutMs) {
+  const controller = new AbortController();
+  const abort = () => controller.abort(parent.reason);
+  if (parent.aborted) {
+    abort();
+  } else {
+    parent.addEventListener("abort", abort, { once: true });
+  }
+  const timeout = setTimeout(() => controller.abort(new DOMException("Timed out", "TimeoutError")), timeoutMs);
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      clearTimeout(timeout);
+      parent.removeEventListener("abort", abort);
+    }
+  };
+}
+function isTimeoutError(err) {
+  return err instanceof Error && err.name === "TimeoutError";
+}
+function remainingUpstreamTimeout(deadline) {
+  return Math.max(1, Math.min(UPSTREAM_TIMEOUT_MS, deadline - Date.now()));
+}
+
+// src/mlclaw-space-runtime/openclaw-config.ts
 async function configureOpenClawGateway(config2) {
-  const raw2 = await fs2.readFile(config2.openclawConfigPath, "utf8");
+  const raw2 = await fs.readFile(config2.openclawConfigPath, "utf8");
   const openclawConfig = JSON.parse(raw2);
   const gateway = object(openclawConfig, "gateway");
   gateway.mode = "local";
@@ -7378,10 +7708,39 @@ async function configureOpenClawGateway(config2) {
     allowedOrigins: [config2.publicUrl]
   };
   configureOpenClawModels(openclawConfig, config2);
-  await fs2.mkdir(path2.dirname(config2.openclawConfigPath), { recursive: true });
-  await fs2.writeFile(config2.openclawConfigPath, `${JSON.stringify(openclawConfig, null, 2)}
+  configureManagedMcpServers(openclawConfig, config2);
+  await fs.mkdir(path.dirname(config2.openclawConfigPath), { recursive: true });
+  await fs.writeFile(config2.openclawConfigPath, `${JSON.stringify(openclawConfig, null, 2)}
 `, { mode: 384 });
-  await fs2.chmod(config2.openclawConfigPath, 384);
+  await fs.chmod(config2.openclawConfigPath, 384);
+  if (process.getuid?.() === 0) {
+    await fs.chown(config2.openclawConfigPath, config2.openclawUid, config2.openclawGid);
+  }
+}
+async function managedMcpServerStatus(config2) {
+  const raw2 = JSON.parse(await fs.readFile(config2.openclawConfigPath, "utf8"));
+  const servers = object(object(raw2, "mcp"), "servers");
+  return [
+    { id: "huggingface", name: "Hugging Face MCP" },
+    { id: "research-agent", name: "Research Agent" }
+  ].map((server2) => ({
+    ...server2,
+    enabled: objectValue2(servers[server2.id])?.enabled !== false
+  }));
+}
+function configureManagedMcpServers(openclawConfig, config2) {
+  const mcp = object(openclawConfig, "mcp");
+  const servers = object(mcp, "servers");
+  for (const [name, managed] of Object.entries(managedMcpServerConfig(config2))) {
+    const existing = servers[name];
+    const userFields = existing && typeof existing === "object" && !Array.isArray(existing) ? existing : {};
+    servers[name] = {
+      ...userFields,
+      ...managed,
+      ...userFields.enabled === false ? { enabled: false } : { enabled: true },
+      ...userFields.toolFilter && typeof userFields.toolFilter === "object" ? { toolFilter: userFields.toolFilter } : {}
+    };
+  }
 }
 function configureOpenClawModels(openclawConfig, config2) {
   const agents = object(openclawConfig, "agents");
@@ -7468,16 +7827,19 @@ function object(parent, key) {
   parent[key] = created;
   return created;
 }
+function objectValue2(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : void 0;
+}
 
 // src/mlclaw-space-runtime/openai-credentials.ts
-import fs3 from "node:fs/promises";
-import path3 from "node:path";
+import fs2 from "node:fs/promises";
+import path2 from "node:path";
 function openAiConfigured(env = process.env) {
   return Boolean(env.OPENAI_API_KEY?.trim());
 }
 async function loadOpenAiCredentialFile(file) {
   try {
-    const raw2 = await fs3.readFile(file, "utf8");
+    const raw2 = await fs2.readFile(file, "utf8");
     const match2 = raw2.match(/(?:^|\n)OPENAI_API_KEY=([^\n]+)/);
     return match2?.[1]?.trim() || void 0;
   } catch {
@@ -7485,10 +7847,10 @@ async function loadOpenAiCredentialFile(file) {
   }
 }
 async function writeEphemeralOpenAiCredential(file, apiKey) {
-  await fs3.mkdir(path3.dirname(file), { recursive: true, mode: 448 });
-  await fs3.writeFile(file, `OPENAI_API_KEY=${apiKey.trim()}
+  await fs2.mkdir(path2.dirname(file), { recursive: true, mode: 448 });
+  await fs2.writeFile(file, `OPENAI_API_KEY=${apiKey.trim()}
 `, { encoding: "utf8", mode: 384 });
-  await fs3.chmod(file, 384);
+  await fs2.chmod(file, 384);
 }
 function validateOpenAiApiKey(value) {
   if (typeof value !== "string") {
@@ -7640,7 +8002,7 @@ function normalizeRouterModelsPayload(payload) {
       continue;
     }
     const record = model;
-    const modelId = stringValue2(record.id);
+    const modelId = stringValue3(record.id);
     if (!modelId || !modelId.includes("/")) {
       continue;
     }
@@ -7670,11 +8032,11 @@ function normalizeProviderChoice(params) {
     return void 0;
   }
   const provider = params.provider;
-  const providerId = stringValue2(provider.provider);
+  const providerId = stringValue3(provider.provider);
   if (!providerId || !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(providerId)) {
     return void 0;
   }
-  const status = stringValue2(provider.status) ?? "live";
+  const status = stringValue3(provider.status) ?? "live";
   if (status !== "live") {
     return void 0;
   }
@@ -7721,7 +8083,7 @@ function compareChoices(left, right) {
   }
   return left.openclawModel.localeCompare(right.openclawModel);
 }
-function stringValue2(value) {
+function stringValue3(value) {
   return typeof value === "string" && value.trim() ? value.trim() : void 0;
 }
 function normalizeModalities2(value) {
@@ -7763,7 +8125,7 @@ function positiveNumber2(value) {
 }
 
 // src/mlclaw-space-runtime/cookies.ts
-import { createHmac as createHmac2, randomBytes as randomBytes3, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { createHmac as createHmac3, randomBytes as randomBytes3, timingSafeEqual as timingSafeEqual3 } from "node:crypto";
 function createSignedCookie(options, payload) {
   const body = Buffer.from(JSON.stringify({
     ...payload,
@@ -7815,12 +8177,12 @@ function randomState() {
   return randomBytes3(24).toString("base64url");
 }
 function sign2(value, secret) {
-  return createHmac2("sha256", secret).update(value).digest("base64url");
+  return createHmac3("sha256", secret).update(value).digest("base64url");
 }
 function signatureMatches2(a, b) {
   const left = Buffer.from(a);
   const right = Buffer.from(b);
-  return left.length === right.length && timingSafeEqual2(left, right);
+  return left.length === right.length && timingSafeEqual3(left, right);
 }
 function parseCookies(header) {
   const cookies = /* @__PURE__ */ new Map();
@@ -7879,7 +8241,7 @@ function createOauthStateCookie(params) {
       secret: params.sessionSecret,
       maxAgeSeconds: STATE_TTL_SECONDS,
       secure: params.secure
-    }, { state, next: normalizeNext(params.next) })
+    }, { state, next: normalizeNext(params.next), intent: params.intent ?? "login" })
   };
 }
 function clearSessionCookie(secure) {
@@ -8064,9 +8426,9 @@ function createSpaceRuntimeApp(config2, controls) {
   const app = new Hono2();
   app.get("/health", (c) => health(c, config2, controls));
   app.get("/healthz", (c) => health(c, config2, controls));
-  app.get("/assets/mlclaw.svg", async () => serveFile(path4.join(config2.assetsDir, "mlclaw.svg"), "image/svg+xml; charset=utf-8"));
-  app.get("/assets/hf-logo.svg", async () => serveFile(path4.join(config2.assetsDir, "hf-logo.svg"), "image/svg+xml; charset=utf-8"));
-  app.get("/assets/assistant-avatar.svg", async () => serveFile(path4.join(config2.assetsDir, "assistant-avatar.svg"), "image/svg+xml; charset=utf-8"));
+  app.get("/assets/mlclaw.svg", async () => serveFile(path3.join(config2.assetsDir, "mlclaw.svg"), "image/svg+xml; charset=utf-8"));
+  app.get("/assets/hf-logo.svg", async () => serveFile(path3.join(config2.assetsDir, "hf-logo.svg"), "image/svg+xml; charset=utf-8"));
+  app.get("/assets/assistant-avatar.svg", async () => serveFile(path3.join(config2.assetsDir, "assistant-avatar.svg"), "image/svg+xml; charset=utf-8"));
   app.get("/assets/mlclaw-control-branding.js", () => staticScript(CONTROL_BRANDING_SCRIPT));
   app.get("/assets/brand/logo", async () => serveBrandAsset(config2, config2.branding.logoAsset));
   app.get("/favicon.svg", async () => serveBrandAsset(config2, config2.branding.faviconSvgAsset));
@@ -8081,7 +8443,7 @@ function createSpaceRuntimeApp(config2, controls) {
     }
   }));
   app.get("/oauth/login", (c) => handleOauthLogin(c, config2));
-  app.get("/oauth/callback", (c) => handleOauthCallback(c, config2));
+  app.get("/oauth/callback", (c) => handleOauthCallback(c, config2, controls));
   app.get("/login", (c) => c.html(loginPage(config2, void 0, normalizeNext(c.req.query("next") ?? "/"))));
   app.get("/logout", (c) => logoutResponse(config2, false));
   app.get("/mlclaw/logout", (c) => logoutResponse(config2, false));
@@ -8092,7 +8454,7 @@ function createSpaceRuntimeApp(config2, controls) {
     if (!safe) {
       return c.text("not found\n", 404);
     }
-    const file = path4.join(config2.assetsDir, "mlclaw-control-ui", safe);
+    const file = path3.join(config2.assetsDir, "mlclaw-control-ui", safe);
     return serveFile(file, contentType(file), true);
   });
   app.get("/mlclaw/openai", (c) => c.redirect("/mlclaw/credentials", 302));
@@ -8115,6 +8477,25 @@ function createSpaceRuntimeApp(config2, controls) {
       return auth;
     }
     return c.json(await statusPayload(config2, controls));
+  });
+  app.post("/mlclaw/api/integrations/huggingface/disconnect", async (c) => {
+    const auth = requireAdmin(c, config2);
+    if (auth instanceof Response) {
+      return auth;
+    }
+    const csrf = requireCsrf(c, config2, auth.username);
+    if (csrf) {
+      return csrf;
+    }
+    if (config2.gatewayLocation === "local") {
+      return c.json({
+        ok: false,
+        error: "Local integrations use the local Hugging Face token; manage that credential with the ML Claw CLI"
+      }, 409);
+    }
+    const credentialSlot = integrationCredentialSlot(config2) ?? auth.username;
+    await controls.clearMcpCredentials(credentialSlot);
+    return c.json({ ok: true, configured: false });
   });
   app.get("/mlclaw/api/settings", (c) => {
     const auth = requireAllowed(c, config2);
@@ -8247,8 +8628,12 @@ function handleOauthLogin(c, config2) {
   if (!config2.oauthClientId || !config2.oauthClientSecret) {
     return c.html(loginPage(config2, "Hugging Face OAuth is not configured.", next));
   }
+  const session = readSession(c.req.header("cookie"), config2.sessionSecret);
+  const integrationsRequested = c.req.query("intent") === "integrations";
+  const intent = integrationsRequested && session && isAdmin(config2, session.username) ? "integrations" : "login";
   const { state, cookie } = createOauthStateCookie({
     next,
+    intent,
     sessionSecret: config2.sessionSecret,
     secure: config2.cookieSecure
   });
@@ -8258,11 +8643,11 @@ function handleOauthLogin(c, config2) {
     clientSecret: config2.oauthClientSecret,
     providerUrl: config2.providerUrl,
     redirectUri
-  }, state) });
+  }, state, intent === "integrations" ? HF_MCP_OAUTH_SCOPES : void 0) });
   headers.append("set-cookie", cookie);
   return new Response(null, { status: 302, headers });
 }
-async function handleOauthCallback(c, config2) {
+async function handleOauthCallback(c, config2, controls) {
   const stateCookie = readOauthState(c.req.header("cookie"), config2.sessionSecret);
   const state = c.req.query("state");
   const code = c.req.query("code");
@@ -8278,6 +8663,19 @@ async function handleOauthCallback(c, config2) {
   if (!identity) {
     return c.html(loginPage(config2, "Hugging Face sign-in failed. Try again."), 401);
   }
+  if (stateCookie.intent === "integrations") {
+    const session = readSession(c.req.header("cookie"), config2.sessionSecret);
+    if (!session || !isAdmin(config2, session.username) || session.username !== identity.username) {
+      return c.html(loginPage(config2, "Integration authorization requires the signed-in ML Claw administrator."), 403);
+    }
+    try {
+      await controls.saveMcpCredentials(identity);
+    } catch (err) {
+      process.stderr.write(`[mlclaw] failed to store MCP authorization: ${formatError(err)}
+`);
+      return c.html(loginPage(config2, "Hugging Face sign-in succeeded, but MCP authorization could not be stored."), 500);
+    }
+  }
   const headers = new Headers({ location: normalizeNext(typeof stateCookie.next === "string" ? stateCookie.next : "/") });
   headers.append("set-cookie", createSessionCookie({
     username: identity.username,
@@ -8292,7 +8690,7 @@ async function controlUi(c, config2) {
   if (auth instanceof Response) {
     return auth;
   }
-  return serveFile(path4.join(config2.assetsDir, "mlclaw-control-ui", "index.html"), "text/html; charset=utf-8");
+  return serveFile(path3.join(config2.assetsDir, "mlclaw-control-ui", "index.html"), "text/html; charset=utf-8");
 }
 function logoutResponse(config2, json) {
   const headers = new Headers();
@@ -8356,6 +8754,17 @@ function isAdmin(config2, username) {
   return config2.adminUsers.includes(username);
 }
 async function statusPayload(config2, controls) {
+  const credentialSlot = integrationCredentialSlot(config2) ?? "";
+  const localTokenConfigured = config2.gatewayLocation === "local" && Boolean(config2.hfToken);
+  let mcpCredentials;
+  let mcpCredentialError;
+  if (!localTokenConfigured && credentialSlot) {
+    try {
+      mcpCredentials = await controls.mcpCredentialStatus(credentialSlot);
+    } catch {
+      mcpCredentialError = "Encrypted MCP credentials could not be loaded";
+    }
+  }
   return {
     ok: true,
     mode: config2.mode,
@@ -8385,6 +8794,17 @@ async function statusPayload(config2, controls) {
       environmentConfigured: openAiConfigured(),
       runtimeFileConfigured: Boolean(await loadOpenAiCredentialFile(config2.openaiCredentialFile))
     },
+    integrations: {
+      automatic: true,
+      source: localTokenConfigured ? "local" : mcpCredentials?.configured ? "oauth" : null,
+      identity: mcpCredentials?.configured ? mcpCredentials.username : null,
+      configured: localTokenConfigured || (mcpCredentials?.configured ?? false),
+      scope: mcpCredentials?.scope ?? [],
+      expiresAt: mcpCredentials?.expiresAt ?? null,
+      refreshable: mcpCredentials?.refreshable ?? false,
+      error: mcpCredentialError ?? null,
+      servers: await controls.mcpServerStatus()
+    },
     branding: publicBranding(config2.branding)
   };
 }
@@ -8406,19 +8826,22 @@ async function readJson(c) {
   }
 }
 async function writeRuntimeSettingsFile(config2, model, choices) {
-  await fs4.mkdir(path4.dirname(config2.runtimeSettingsFile), { recursive: true });
-  await fs4.writeFile(config2.runtimeSettingsFile, `${JSON.stringify({
+  await fs3.mkdir(path3.dirname(config2.runtimeSettingsFile), { recursive: true });
+  await fs3.writeFile(config2.runtimeSettingsFile, `${JSON.stringify({
     version: 1,
     model,
     modelChoices: choices,
     updatedAt: (/* @__PURE__ */ new Date()).toISOString()
   }, null, 2)}
 `, { encoding: "utf8", mode: 384 });
-  await fs4.chmod(config2.runtimeSettingsFile, 384);
+  await fs3.chmod(config2.runtimeSettingsFile, 384);
+  if (process.getuid?.() === 0) {
+    await fs3.chown(config2.runtimeSettingsFile, config2.openclawUid, config2.openclawGid);
+  }
 }
 async function serveFile(file, contentTypeHeader, immutable = false) {
   try {
-    const body = await fs4.readFile(file);
+    const body = await fs3.readFile(file);
     const headers = new Headers({ "content-type": contentTypeHeader });
     if (immutable) {
       headers.set("cache-control", "public, max-age=31536000, immutable");
@@ -8432,11 +8855,11 @@ async function serveFile(file, contentTypeHeader, immutable = false) {
   }
 }
 async function serveBrandAsset(config2, asset) {
-  const response = await serveFile(path4.join(config2.assetsDir, asset), contentType(asset));
+  const response = await serveFile(path3.join(config2.assetsDir, asset), contentType(asset));
   if (response.status !== 404 || asset === "mlclaw.svg") {
     return response;
   }
-  return serveFile(path4.join(config2.assetsDir, "mlclaw.svg"), "image/svg+xml; charset=utf-8");
+  return serveFile(path3.join(config2.assetsDir, "mlclaw.svg"), "image/svg+xml; charset=utf-8");
 }
 function safeRelativePath(value) {
   let decoded;
@@ -8445,7 +8868,7 @@ function safeRelativePath(value) {
   } catch {
     return void 0;
   }
-  const normalized = path4.posix.normalize(decoded).replace(/^\/+/, "");
+  const normalized = path3.posix.normalize(decoded).replace(/^\/+/, "");
   if (!normalized || normalized === "." || normalized.startsWith("../") || normalized.includes("/../")) {
     return void 0;
   }
@@ -8476,8 +8899,292 @@ function contentType(file) {
   return "application/octet-stream";
 }
 
+// src/mlclaw-space-runtime/mcp-credentials.ts
+import { createCipheriv, createDecipheriv, hkdfSync, randomBytes as randomBytes4 } from "node:crypto";
+import fs4 from "node:fs/promises";
+import path4 from "node:path";
+var DEFAULT_REFRESH_TIMEOUT_MS = 3e4;
+var McpCredentialStore = class {
+  constructor(options) {
+    this.options = options;
+    this.key = Buffer.from(hkdfSync(
+      "sha256",
+      Buffer.from(options.secret, "utf8"),
+      Buffer.alloc(0),
+      Buffer.from("mlclaw:mcp-oauth:v1", "utf8"),
+      32
+    ));
+    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.now = options.now ?? Date.now;
+  }
+  key;
+  fetchImpl;
+  now;
+  loadPromise;
+  document = { version: 1, credentials: {} };
+  refreshes = /* @__PURE__ */ new Map();
+  mutationTail = Promise.resolve();
+  async save(identity, slot = identity.username) {
+    await this.mutate(async () => {
+      await this.loadForRecovery();
+      this.document.credentials[slot] = {
+        username: identity.username,
+        accessToken: identity.accessToken,
+        ...identity.refreshToken ? { refreshToken: identity.refreshToken } : {},
+        tokenType: identity.tokenType,
+        scope: [...identity.scope],
+        ...identity.expiresAt ? { expiresAt: identity.expiresAt } : {},
+        updatedAt: this.now()
+      };
+      await this.persist();
+    });
+  }
+  async clear(username) {
+    await this.mutate(async () => {
+      const recovered = await this.loadForRecovery();
+      if (!(username in this.document.credentials) && !recovered) {
+        return;
+      }
+      delete this.document.credentials[username];
+      await this.persist();
+    });
+  }
+  async status(slot) {
+    await this.load();
+    const credential = this.document.credentials[slot];
+    const refreshable = Boolean(credential?.refreshToken);
+    const configured = Boolean(credential && (!credential.expiresAt || credential.expiresAt > this.now() + 6e4 || refreshable));
+    return credential ? {
+      configured,
+      username: credential.username,
+      scope: [...credential.scope],
+      expiresAt: credential.expiresAt ? new Date(credential.expiresAt).toISOString() : null,
+      refreshable
+    } : {
+      configured: false,
+      username: slot,
+      scope: [],
+      expiresAt: null,
+      refreshable: false
+    };
+  }
+  async accessToken(slot) {
+    await this.load();
+    const credential = this.document.credentials[slot];
+    if (!credential) {
+      throw new Error("Hugging Face MCP authorization is not configured");
+    }
+    if (!credential.expiresAt || credential.expiresAt > this.now() + 6e4) {
+      return credential.accessToken;
+    }
+    const existing = this.refreshes.get(slot);
+    if (existing) {
+      return existing;
+    }
+    const refreshing = this.refresh(slot, credential).finally(() => {
+      this.refreshes.delete(slot);
+    });
+    this.refreshes.set(slot, refreshing);
+    return refreshing;
+  }
+  async load() {
+    if (!this.loadPromise) {
+      this.loadPromise = this.loadFromDisk().catch((err) => {
+        this.loadPromise = void 0;
+        throw err;
+      });
+    }
+    await this.loadPromise;
+  }
+  async loadFromDisk() {
+    let raw2;
+    try {
+      raw2 = await fs4.readFile(this.options.file, "utf8");
+    } catch (err) {
+      if (isNotFound(err)) {
+        return;
+      }
+      throw new Error("Could not read encrypted MCP credentials");
+    }
+    try {
+      this.document = decodeDocument(decryptEnvelope(raw2, this.key));
+    } catch {
+      throw new InvalidCredentialFileError();
+    }
+  }
+  async loadForRecovery() {
+    try {
+      await this.load();
+      return false;
+    } catch (err) {
+      if (!(err instanceof InvalidCredentialFileError)) {
+        throw err;
+      }
+      this.document = { version: 1, credentials: {} };
+      this.loadPromise = Promise.resolve();
+      return true;
+    }
+  }
+  mutate(operation) {
+    const result = this.mutationTail.then(operation);
+    this.mutationTail = result.then(() => void 0, () => void 0);
+    return result;
+  }
+  async persist() {
+    const directory = path4.dirname(this.options.file);
+    await fs4.mkdir(directory, { recursive: true, mode: 448 });
+    const temporary = `${this.options.file}.${process.pid}.${randomBytes4(6).toString("hex")}.tmp`;
+    const encrypted = encryptDocument(this.document, this.key);
+    try {
+      await fs4.writeFile(temporary, `${JSON.stringify(encrypted)}
+`, { encoding: "utf8", mode: 384 });
+      await fs4.chmod(temporary, 384);
+      await fs4.rename(temporary, this.options.file);
+      await fs4.chmod(this.options.file, 384);
+    } finally {
+      await fs4.rm(temporary, { force: true });
+    }
+  }
+  async refresh(slot, credential) {
+    return this.mutate(async () => {
+      if (this.document.credentials[slot] !== credential) {
+        throw new Error("Hugging Face MCP authorization expired; sign in again");
+      }
+      if (!credential.refreshToken || !this.options.clientId || !this.options.clientSecret) {
+        throw new Error("Hugging Face MCP authorization expired; sign in again");
+      }
+      const providerUrl = this.options.providerUrl.replace(/\/+$/, "");
+      const basic = Buffer.from(`${this.options.clientId}:${this.options.clientSecret}`).toString("base64");
+      let response;
+      try {
+        response = await this.fetchImpl(`${providerUrl}/oauth/token`, {
+          method: "POST",
+          headers: {
+            authorization: `Basic ${basic}`,
+            "content-type": "application/x-www-form-urlencoded"
+          },
+          body: new URLSearchParams({
+            grant_type: "refresh_token",
+            refresh_token: credential.refreshToken,
+            client_id: this.options.clientId
+          }),
+          signal: AbortSignal.timeout(this.options.refreshTimeoutMs ?? DEFAULT_REFRESH_TIMEOUT_MS)
+        });
+      } catch {
+        throw new Error("Hugging Face MCP authorization refresh is temporarily unavailable");
+      }
+      if (!response.ok) {
+        const error = await response.clone().json().catch(() => void 0);
+        if ((response.status === 400 || response.status === 401) && stringValue4(error?.error) === "invalid_grant") {
+          delete this.document.credentials[slot];
+          await this.persist();
+          throw new Error("Hugging Face MCP authorization expired; sign in again");
+        }
+        throw new Error("Hugging Face MCP authorization refresh is temporarily unavailable");
+      }
+      const body = await response.json();
+      const accessToken = stringValue4(body.access_token);
+      if (!accessToken) {
+        throw new Error("Hugging Face MCP token refresh returned an invalid response");
+      }
+      const expiresIn = numberValue2(body.expires_in);
+      const { expiresAt: _expired, ...credentialWithoutExpiry } = credential;
+      const refreshed = {
+        ...credentialWithoutExpiry,
+        accessToken,
+        refreshToken: stringValue4(body.refresh_token) ?? credential.refreshToken,
+        tokenType: stringValue4(body.token_type) ?? credential.tokenType,
+        scope: scopeValue(body.scope) ?? credential.scope,
+        ...expiresIn ? { expiresAt: this.now() + expiresIn * 1e3 } : {},
+        updatedAt: this.now()
+      };
+      this.document.credentials[slot] = refreshed;
+      await this.persist();
+      return accessToken;
+    });
+  }
+};
+var InvalidCredentialFileError = class extends Error {
+  constructor() {
+    super("Encrypted MCP credentials are invalid or cannot be decrypted");
+    this.name = "InvalidCredentialFileError";
+  }
+};
+function encryptDocument(document, key) {
+  const iv = randomBytes4(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const plaintext = Buffer.from(JSON.stringify(document), "utf8");
+  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  return {
+    version: 1,
+    algorithm: "aes-256-gcm",
+    iv: iv.toString("base64url"),
+    tag: cipher.getAuthTag().toString("base64url"),
+    ciphertext: ciphertext.toString("base64url")
+  };
+}
+function decryptEnvelope(raw2, key) {
+  const envelope = JSON.parse(raw2);
+  if (envelope.version !== 1 || envelope.algorithm !== "aes-256-gcm" || !envelope.iv || !envelope.tag || !envelope.ciphertext) {
+    throw new Error("invalid envelope");
+  }
+  const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(envelope.iv, "base64url"));
+  decipher.setAuthTag(Buffer.from(envelope.tag, "base64url"));
+  const plaintext = Buffer.concat([
+    decipher.update(Buffer.from(envelope.ciphertext, "base64url")),
+    decipher.final()
+  ]);
+  return JSON.parse(plaintext.toString("utf8"));
+}
+function decodeDocument(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("invalid credential document");
+  }
+  const record = value;
+  if (record.version !== 1 || !record.credentials || typeof record.credentials !== "object" || Array.isArray(record.credentials)) {
+    throw new Error("invalid credential document");
+  }
+  const credentials = {};
+  for (const [username, raw2] of Object.entries(record.credentials)) {
+    if (!raw2 || typeof raw2 !== "object" || Array.isArray(raw2)) {
+      throw new Error("invalid credential");
+    }
+    const item = raw2;
+    const accessToken = stringValue4(item.accessToken);
+    const refreshToken = stringValue4(item.refreshToken);
+    const expiresAt = numberValue2(item.expiresAt);
+    const credentialUsername = stringValue4(item.username);
+    if (!accessToken || !credentialUsername) {
+      throw new Error("invalid credential");
+    }
+    credentials[username] = {
+      username: credentialUsername,
+      accessToken,
+      ...refreshToken ? { refreshToken } : {},
+      tokenType: stringValue4(item.tokenType) ?? "Bearer",
+      scope: scopeValue(item.scope) ?? [],
+      ...expiresAt ? { expiresAt } : {},
+      updatedAt: numberValue2(item.updatedAt) ?? 0
+    };
+  }
+  return { version: 1, credentials };
+}
+function scopeValue(value) {
+  const values = Array.isArray(value) ? value.filter((item) => typeof item === "string") : typeof value === "string" ? value.split(/\s+/) : void 0;
+  return values ? [...new Set(values.map((item) => item.trim()).filter(Boolean))] : void 0;
+}
+function stringValue4(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : void 0;
+}
+function numberValue2(value) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : void 0;
+}
+function isNotFound(err) {
+  return Boolean(err && typeof err === "object" && "code" in err && err.code === "ENOENT");
+}
+
 // src/mlclaw-space-runtime/proxy.ts
-import http from "node:http";
+import http2 from "node:http";
 import net from "node:net";
 var ADMIN_CONTROL_UI_SCOPES = [
   "operator.admin",
@@ -8509,14 +9216,14 @@ async function proxyHttp(req, res, config2, identity) {
     delete headers["Accept-Encoding"];
   }
   addTrustedProxyHeaders(headers, config2, identity);
-  const upstream = http.request({
+  const upstream = http2.request({
     host: config2.openclawHost,
     port: config2.openclawPort,
     method: req.method,
     path: req.url,
     headers
   }, (upstreamResponse) => {
-    const responseHeaders = sanitizeHeaders(upstreamResponse.headers);
+    const responseHeaders2 = sanitizeHeaders(upstreamResponse.headers);
     const inject = shouldInjectShell({
       method: req.method,
       requestAccept: String(req.headers.accept ?? ""),
@@ -8524,7 +9231,7 @@ async function proxyHttp(req, res, config2, identity) {
       responseContentEncoding: headerValue(upstreamResponse.headers["content-encoding"])
     });
     if (!inject) {
-      res.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders);
+      res.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders2);
       upstreamResponse.pipe(res);
       return;
     }
@@ -8534,9 +9241,9 @@ async function proxyHttp(req, res, config2, identity) {
     });
     upstreamResponse.on("end", () => {
       const body = rewriteOpenClawHtml(Buffer.concat(chunks).toString("utf8"), config2.branding);
-      delete responseHeaders["content-length"];
-      delete responseHeaders["Content-Length"];
-      res.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders);
+      delete responseHeaders2["content-length"];
+      delete responseHeaders2["Content-Length"];
+      res.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders2);
       res.end(body);
     });
   });
@@ -8641,6 +9348,15 @@ var SpaceRuntimeServer = class {
   constructor(config2, options = {}) {
     this.config = config2;
     this.exitProcess = options.exitProcess ?? ((code) => process.exit(code));
+    this.mcpCredentials = new McpCredentialStore({
+      file: config2.mcpCredentialFile,
+      secret: config2.credentialKey,
+      providerUrl: config2.providerUrl,
+      ...config2.oauthClientId ? { clientId: config2.oauthClientId } : {},
+      ...config2.oauthClientSecret ? { clientSecret: config2.oauthClientSecret } : {}
+    });
+    this.mcpIntegrations = new McpIntegrationServer(config2, this.mcpCredentials);
+    const credentialSlot = integrationCredentialSlot(config2);
     this.app = createSpaceRuntimeApp(config2, {
       openclawRunning: () => Boolean(this.openclaw && !this.openclaw.killed),
       openAiConfigured: async () => openAiConfigured() || Boolean(await loadOpenAiCredentialFile(this.config.openaiCredentialFile)),
@@ -8649,7 +9365,16 @@ var SpaceRuntimeServer = class {
       setModelSettings: (model, choices) => {
         this.config.model = model;
         this.config.modelChoices = choices;
-      }
+      },
+      saveMcpCredentials: async (identity) => {
+        if (!credentialSlot) {
+          throw new Error("ML Claw has no integration administrator");
+        }
+        await this.mcpCredentials.save(identity, credentialSlot);
+      },
+      clearMcpCredentials: (slot) => this.mcpCredentials.clear(slot),
+      mcpCredentialStatus: (slot) => this.mcpCredentials.status(slot),
+      mcpServerStatus: () => managedMcpServerStatus(this.config)
     });
   }
   openclaw;
@@ -8657,11 +9382,14 @@ var SpaceRuntimeServer = class {
   openclawStopping = false;
   app;
   exitProcess;
+  mcpCredentials;
+  mcpIntegrations;
   async start() {
     if (this.config.mode === "app") {
+      await this.mcpIntegrations.start();
       await this.startOpenClaw();
     }
-    const server2 = http2.createServer((req, res) => {
+    const server2 = http3.createServer((req, res) => {
       this.handle(req, res).catch((err) => {
         process.stderr.write(`[mlclaw] request failed: ${formatError2(err)}
 `);
@@ -8710,6 +9438,10 @@ var SpaceRuntimeServer = class {
     return server2;
   }
   async stop() {
+    await this.stopOpenClaw();
+    await this.mcpIntegrations.stop();
+  }
+  async stopOpenClaw() {
     const child = this.openclaw;
     if (!child || child.killed) {
       return;
@@ -8749,6 +9481,16 @@ var SpaceRuntimeServer = class {
       this.sendHtml(res, unauthorizedPage(session.username), 403);
       return;
     }
+    if (this.isAdmin(session.username) && this.config.oauthClientId && this.config.oauthClientSecret && isBrowserNavigation2(req)) {
+      const integrations = await managedMcpServerStatus(this.config);
+      const credentialSlot = integrationCredentialSlot(this.config);
+      const authorization = credentialSlot ? await this.mcpCredentials.status(credentialSlot).catch(() => void 0) : void 0;
+      if (integrations.some((integration) => integration.enabled) && !authorization?.configured) {
+        const next = normalizeNext(`${url.pathname}${url.search}`);
+        this.sendRedirect(res, `/oauth/login?intent=integrations&next=${encodeURIComponent(next)}`);
+        return;
+      }
+    }
     await proxyHttp(req, res, this.config, { username: session.username });
   }
   shouldRouteToMlClaw(pathname) {
@@ -8764,18 +9506,25 @@ var SpaceRuntimeServer = class {
       const persistedOpenAiKey = await loadOpenAiCredentialFile(this.config.openaiCredentialFile);
       const env = {
         ...process.env,
+        HOME: "/home/node",
+        USER: "node",
+        LOGNAME: "node",
         OPENCLAW_GATEWAY_PORT: String(this.config.openclawPort),
         OPENCLAW_MODEL: this.config.model,
         ...persistedOpenAiKey ? { OPENAI_API_KEY: persistedOpenAiKey } : {},
         ...extraEnv
       };
+      for (const key of WRAPPER_ONLY_ENV) {
+        delete env[key];
+      }
       if (this.config.routerToken) {
         env.HF_TOKEN = this.config.routerToken;
         env.HUGGINGFACE_HUB_TOKEN = this.config.routerToken;
       }
       this.openclaw = spawn(this.config.openclawCommand, this.config.openclawArgs, {
         stdio: "inherit",
-        env
+        env,
+        ...process.getuid?.() === 0 ? { uid: this.config.openclawUid, gid: this.config.openclawGid } : {}
       });
       this.openclaw.once("exit", (code, signal) => {
         process.stdout.write(`[mlclaw] openclaw exited code=${code ?? "null"} signal=${signal ?? "null"}
@@ -8791,15 +9540,18 @@ var SpaceRuntimeServer = class {
     }
   }
   async restartOpenClawWithOpenAi(apiKey) {
-    await this.stop();
+    await this.stopOpenClaw();
     await this.startOpenClaw({ OPENAI_API_KEY: apiKey });
   }
   async restartOpenClaw() {
-    await this.stop();
+    await this.stopOpenClaw();
     await this.startOpenClaw();
   }
   isAllowed(username) {
     return this.config.allowAnySignedIn || this.config.allowedUsers.includes(username);
+  }
+  isAdmin(username) {
+    return this.config.adminUsers.includes(username);
   }
   sendUnauthenticated(req, res, url) {
     const next = normalizeNext(`${url.pathname}${url.search}`);
@@ -8828,6 +9580,14 @@ var SpaceRuntimeServer = class {
     res.end(body);
   }
 };
+var WRAPPER_ONLY_ENV = [
+  "MLCLAW_CREDENTIAL_KEY",
+  "MLCLAW_SESSION_SECRET",
+  "SESSION_SECRET",
+  "OAUTH_CLIENT_SECRET",
+  "HF_TOKEN",
+  "HUGGINGFACE_HUB_TOKEN"
+];
 function nodeRequestToWebRequest(req, publicUrl) {
   const headers = new Headers();
   for (const [key, value] of Object.entries(req.headers)) {
@@ -8844,7 +9604,7 @@ function nodeRequestToWebRequest(req, publicUrl) {
     headers
   };
   if (req.method !== "GET" && req.method !== "HEAD") {
-    init.body = Readable.toWeb(req);
+    init.body = Readable2.toWeb(req);
     init.duplex = "half";
   }
   return new Request(new URL(req.url ?? "/", publicUrl).toString(), init);
@@ -8896,36 +9656,54 @@ function formatError2(err) {
 // src/mlclaw-space-runtime/cli.ts
 var config = loadConfig();
 var server = new SpaceRuntimeServer(config);
-var toolingSeedAbort = new AbortController();
+var toolingSeeder;
 if (config.sessionSecretGenerated && config.mode === "app") {
   process2.stderr.write("[mlclaw] MLCLAW_SESSION_SECRET is missing; generated an ephemeral session secret for this boot\n");
 }
 var httpServer = await server.start();
 if (config.mode === "app") {
-  void waitForBootstrapAndSeedHuggingFaceTooling({ signal: toolingSeedAbort.signal }).then(
-    (result) => {
-      if (result) {
-        process2.stdout.write(
-          `[hf-tooling] seeded after OpenClaw bootstrap skills=${result.copiedWorkspaceSkills.length} templates=${result.copiedTemplateFiles.length}
-`
-        );
-      }
-    },
-    (err) => {
-      if (!toolingSeedAbort.signal.aborted) {
-        process2.stderr.write(`[hf-tooling] delayed seed failed: ${err instanceof Error ? err.message : String(err)}
-`);
-      }
+  toolingSeeder = spawn2(
+    process2.execPath,
+    [process2.env.MLCLAW_HF_TOOLING_SEED_SCRIPT ?? "/app/hf-tooling-seed.js", "--wait-for-bootstrap"],
+    {
+      stdio: "inherit",
+      env: toolingSeedEnvironment(process2.env),
+      ...process2.getuid?.() === 0 ? { uid: config.openclawUid, gid: config.openclawGid } : {}
     }
   );
+  toolingSeeder.once("exit", (code, signal) => {
+    if (code && code !== 0) {
+      process2.stderr.write(`[hf-tooling] delayed seeder exited code=${code} signal=${signal ?? "null"}
+`);
+    }
+    toolingSeeder = void 0;
+  });
+  toolingSeeder.once("error", (err) => {
+    process2.stderr.write(`[hf-tooling] delayed seeder failed to start: ${err.message}
+`);
+    toolingSeeder = void 0;
+  });
 }
 async function shutdown(signal) {
   process2.stdout.write(`[mlclaw] received ${signal}; shutting down
 `);
-  toolingSeedAbort.abort();
+  toolingSeeder?.kill(signal);
   httpServer.close();
   await server.stop();
   process2.exit(0);
 }
 process2.on("SIGTERM", () => void shutdown("SIGTERM"));
 process2.on("SIGINT", () => void shutdown("SIGINT"));
+function toolingSeedEnvironment(env) {
+  return {
+    HOME: "/home/node",
+    PATH: env.PATH,
+    NODE_ENV: env.NODE_ENV,
+    OPENCLAW_LIVE_DIR: env.OPENCLAW_LIVE_DIR,
+    OPENCLAW_WORKSPACE_DIR: env.OPENCLAW_WORKSPACE_DIR,
+    MLCLAW_HF_TOOLING_DIR: env.MLCLAW_HF_TOOLING_DIR
+  };
+}
+export {
+  toolingSeedEnvironment
+};

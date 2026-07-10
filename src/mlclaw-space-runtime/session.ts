@@ -13,6 +13,7 @@ export type SessionPayload = {
 export type StatePayload = {
   state: string;
   next?: string;
+  intent?: "login" | "integrations";
   exp: number;
 };
 
@@ -32,6 +33,7 @@ export function createSessionCookie(params: {
 export function createOauthStateCookie(params: {
   state?: string;
   next: string;
+  intent?: "login" | "integrations";
   sessionSecret: string;
   secure: boolean;
 }): { state: string; cookie: string } {
@@ -43,7 +45,7 @@ export function createOauthStateCookie(params: {
       secret: params.sessionSecret,
       maxAgeSeconds: STATE_TTL_SECONDS,
       secure: params.secure,
-    }, { state, next: normalizeNext(params.next) }),
+    }, { state, next: normalizeNext(params.next), intent: params.intent ?? "login" }),
   };
 }
 

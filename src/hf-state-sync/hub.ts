@@ -132,6 +132,10 @@ export function createMountedBucketHub(params: { mountDir: string }): BucketHub 
       try {
         await fs.mkdir(dir, { recursive: true });
         await fs.copyFile(localPath, tmp);
+        // The trusted supervisor uploads as root, while restore runs as the
+        // unprivileged OpenClaw user. State objects contain only snapshots and
+        // runtime metadata, so keep them world-readable but root-writable.
+        await fs.chmod(tmp, 0o644);
         await fs.rename(tmp, target);
       } catch (err) {
         await fs.rm(tmp, { force: true }).catch(() => undefined);

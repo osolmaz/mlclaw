@@ -3829,10 +3829,10 @@ var CurrentXorbInfo = class {
       hash: computeXorbHash(xorbChunksCleaned),
       chunks: xorbChunksCleaned,
       id: this.id,
-      files: Object.entries(this.fileProcessedBytes).map(([path7, processedBytes]) => ({
-        path: path7,
-        progress: processedBytes / this.fileSize[path7],
-        lastSentProgress: ((this.fileUploadedBytes[path7] ?? 0) + (processedBytes - (this.fileUploadedBytes[path7] ?? 0)) * PROCESSING_PROGRESS_RATIO) / this.fileSize[path7]
+      files: Object.entries(this.fileProcessedBytes).map(([path9, processedBytes]) => ({
+        path: path9,
+        progress: processedBytes / this.fileSize[path9],
+        lastSentProgress: ((this.fileUploadedBytes[path9] ?? 0) + (processedBytes - (this.fileUploadedBytes[path9] ?? 0)) * PROCESSING_PROGRESS_RATIO) / this.fileSize[path9]
       }))
     };
   }
@@ -4705,7 +4705,7 @@ var BucketClient = class {
     if (paths.length === 0) {
       return;
     }
-    await this.batch(paths.map((path7) => ({ type: "deleteFile", path: path7 })));
+    await this.batch(paths.map((path9) => ({ type: "deleteFile", path: path9 })));
   }
   async batch(operations) {
     const body = `${operations.map((op) => JSON.stringify(op)).join("\n")}
@@ -4721,8 +4721,8 @@ var BucketClient = class {
    * any other failure (including bucket/auth errors), so a missing object is
    * never conflated with an unreachable bucket.
    */
-  async downloadFile(path7) {
-    const url = `${this.hubUrl}/buckets/${this.bucket}/resolve/${encodeURIComponent(path7)}`;
+  async downloadFile(path9) {
+    const url = `${this.hubUrl}/buckets/${this.bucket}/resolve/${encodeURIComponent(path9)}`;
     const response = await this.fetchWithRetry(url);
     if (response.status === 404) {
       await this.assertBucketAccessible();
@@ -4862,6 +4862,7 @@ function createMountedBucketHub(params) {
       try {
         await fs.mkdir(dir, { recursive: true });
         await fs.copyFile(localPath, tmp);
+        await fs.chmod(tmp, 420);
         await fs.rename(tmp, target);
       } catch (err) {
         await fs.rm(tmp, { force: true }).catch(() => void 0);
@@ -4899,6 +4900,8 @@ function positiveIntFromEnv(value, fallback) {
 }
 function resolveSyncConfig(env = process.env) {
   const runId = env.MLCLAW_RUN_ID?.trim() || randomUUID();
+  const snapshotUid = nonNegativeIntFromEnv(env.MLCLAW_OPENCLAW_UID);
+  const snapshotGid = nonNegativeIntFromEnv(env.MLCLAW_OPENCLAW_GID);
   return {
     liveDir: env.OPENCLAW_LIVE_DIR?.trim() || DEFAULT_LIVE_DIR,
     bucket: env.OPENCLAW_HF_STATE_BUCKET?.trim() || null,
@@ -4911,8 +4914,14 @@ function resolveSyncConfig(env = process.env) {
     runtimeId: env.MLCLAW_RUNTIME_ID?.trim() || runId,
     agentName: env.OPENCLAW_AGENT_NAME?.trim() || "openclaw",
     gatewayLocation: env.MLCLAW_GATEWAY_LOCATION === "local" || env.MLCLAW_GATEWAY_LOCATION === "space" ? env.MLCLAW_GATEWAY_LOCATION : "unknown",
-    runtimeImage: env.MLCLAW_RUNTIME_IMAGE?.trim() || "unknown"
+    runtimeImage: env.MLCLAW_RUNTIME_IMAGE?.trim() || "unknown",
+    ...snapshotUid !== void 0 ? { snapshotUid } : {},
+    ...snapshotGid !== void 0 ? { snapshotGid } : {}
   };
+}
+function nonNegativeIntFromEnv(value) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : void 0;
 }
 function remotePath(config, name) {
   return `${normalizeBucketPrefix(config.bucketPrefix)}/${name.replace(/^\/+/, "")}`;
@@ -5553,8 +5562,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path7, errorMaps, issueData } = params;
-  const fullPath = [...path7, ...issueData.path || []];
+  const { data, path: path9, errorMaps, issueData } = params;
+  const fullPath = [...path9, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -5670,11 +5679,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path7, key) {
+  constructor(parent, value, path9, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path7;
+    this._path = path9;
     this._key = key;
   }
   get path() {
@@ -9230,10 +9239,65 @@ async function runRestore(params) {
   }
 }
 
-// src/hf-state-sync/snapshot.ts
+// src/hf-state-sync/prepare.ts
 import fs5 from "node:fs/promises";
-import os2 from "node:os";
 import path5 from "node:path";
+async function prepareRestore(config) {
+  if (config.snapshotUid === void 0 || config.snapshotGid === void 0) {
+    throw new Error("restore preparation requires MLCLAW_OPENCLAW_UID and MLCLAW_OPENCLAW_GID");
+  }
+  const liveParent = path5.dirname(config.liveDir);
+  await fs5.mkdir(liveParent, { recursive: true });
+  await fs5.chown(liveParent, config.snapshotUid, config.snapshotGid);
+  if (!config.stateMountDir) {
+    return;
+  }
+  const prefixRoot = confinedPath(config.stateMountDir, config.bucketPrefix);
+  await makeReadableIfFile(path5.join(prefixRoot, "manifest.json"));
+  const snapshotsDir = path5.join(prefixRoot, "snapshots");
+  let entries;
+  try {
+    entries = await fs5.readdir(snapshotsDir, { withFileTypes: true });
+  } catch (err) {
+    if (isNotFound2(err)) {
+      return;
+    }
+    throw err;
+  }
+  for (const entry of entries) {
+    if (entry.isFile()) {
+      await fs5.chmod(path5.join(snapshotsDir, entry.name), 420);
+    }
+  }
+}
+function confinedPath(root, relative) {
+  const resolvedRoot = path5.resolve(root);
+  const resolved = path5.resolve(resolvedRoot, relative);
+  if (resolved !== resolvedRoot && !resolved.startsWith(`${resolvedRoot}${path5.sep}`)) {
+    throw new Error(`invalid state prefix outside mounted bucket: ${relative}`);
+  }
+  return resolved;
+}
+async function makeReadableIfFile(file) {
+  try {
+    const stat = await fs5.lstat(file);
+    if (stat.isFile()) {
+      await fs5.chmod(file, 420);
+    }
+  } catch (err) {
+    if (!isNotFound2(err)) {
+      throw err;
+    }
+  }
+}
+function isNotFound2(err) {
+  return err instanceof Error && "code" in err && err.code === "ENOENT";
+}
+
+// src/hf-state-sync/snapshot.ts
+import fs6 from "node:fs/promises";
+import os2 from "node:os";
+import path6 from "node:path";
 var snapshotCounter = 0;
 function snapshotId(now, runId) {
   snapshotCounter += 1;
@@ -9241,12 +9305,12 @@ function snapshotId(now, runId) {
   return `${stamp}-${runId.slice(0, 8)}-${snapshotCounter}`;
 }
 async function fetchManifest(config, hub, workDir) {
-  const localPath = path5.join(workDir, "manifest.remote.json");
+  const localPath = path6.join(workDir, "manifest.remote.json");
   const result = await hub.download(remotePath(config, MANIFEST_REMOTE_NAME), localPath);
   if (result === "not-found") {
     return { kind: "none" };
   }
-  const parsed = parseManifest(await fs5.readFile(localPath, "utf8"));
+  const parsed = parseManifest(await fs6.readFile(localPath, "utf8"));
   return parsed.kind === "ok" ? { kind: "ok", manifest: parsed.manifest } : { kind: "invalid", reason: parsed.reason };
 }
 async function runSnapshot(params) {
@@ -9255,31 +9319,29 @@ async function runSnapshot(params) {
     return { kind: "skipped", reason: "no-bucket" };
   }
   try {
-    await fs5.access(config.liveDir);
+    await fs6.access(config.liveDir);
   } catch {
     return { kind: "skipped", reason: "empty-state" };
   }
-  const workDir = await fs5.mkdtemp(path5.join(os2.tmpdir(), "hf-state-snapshot-"));
+  const workDir = await fs6.mkdtemp(path6.join(os2.tmpdir(), "hf-state-snapshot-"));
   try {
-    const stagingDir = path5.join(workDir, "stage");
-    const staged = await stageLiveDir(config.liveDir, stagingDir);
+    const now = (params.now ?? (() => /* @__PURE__ */ new Date()))();
+    const id = snapshotId(now, config.runId);
+    const archiveName = `state-${id}.tar.zst`;
+    const archivePath = path6.join(workDir, archiveName);
+    const staged = params.stageArchive ? await params.stageArchive({ liveDir: config.liveDir, archivePath }) : await stageArchiveInProcess(config.liveDir, path6.join(workDir, "stage"), archivePath);
     if (staged.kind === "corrupt-database") {
       return {
         kind: "failed",
         detail: `live database ${staged.database} failed integrity check: ${staged.detail}`
       };
     }
-    const now = (params.now ?? (() => /* @__PURE__ */ new Date()))();
-    const id = snapshotId(now, config.runId);
-    const archiveName = `state-${id}.tar.zst`;
-    const archivePath = path5.join(workDir, archiveName);
-    await createTarZst(stagingDir, archivePath);
     const entry = {
       id,
       path: remotePath(config, `snapshots/${archiveName}`),
       createdAt: now.toISOString(),
       sha256: await sha256File(archivePath),
-      sizeBytes: (await fs5.stat(archivePath)).size,
+      sizeBytes: (await fs6.stat(archivePath)).size,
       runId: config.runId,
       bootTime: params.bootTime
     };
@@ -9296,27 +9358,127 @@ async function runSnapshot(params) {
       entry,
       keep: config.keepSnapshots
     });
-    const manifestPath = path5.join(workDir, "manifest.json");
-    await fs5.writeFile(manifestPath, serializeManifest(manifest));
+    const manifestPath = path6.join(workDir, "manifest.json");
+    await fs6.writeFile(manifestPath, serializeManifest(manifest));
     await hub.upload(manifestPath, remotePath(config, MANIFEST_REMOTE_NAME));
     if (expired.length > 0) {
       await hub.delete(expired.map((e) => e.path));
     }
-    log(`snapshot ${entry.id} uploaded (${entry.sizeBytes} bytes, ${staged.databases.length} dbs)`);
+    log(`snapshot ${entry.id} uploaded (${entry.sizeBytes} bytes, ${staged.databaseCount} dbs)`);
     return { kind: "uploaded", entry };
   } catch (err) {
     return { kind: "failed", detail: err instanceof Error ? err.message : String(err) };
   } finally {
-    await fs5.rm(workDir, { recursive: true, force: true });
+    await fs6.rm(workDir, { recursive: true, force: true });
   }
+}
+async function stageArchiveInProcess(liveDir, stagingDir, archivePath) {
+  const staged = await stageLiveDir(liveDir, stagingDir);
+  if (staged.kind === "corrupt-database") {
+    return staged;
+  }
+  await createTarZst(stagingDir, archivePath);
+  return { kind: "staged", databaseCount: staged.databases.length };
 }
 
 // src/hf-state-sync/supervise.ts
-import { spawn } from "node:child_process";
-import fs6 from "node:fs/promises";
-import os3 from "node:os";
-import path6 from "node:path";
+import { spawn as spawn2 } from "node:child_process";
+import fs8 from "node:fs/promises";
+import os4 from "node:os";
+import path8 from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+
+// src/hf-state-sync/stage-worker.ts
+import { spawn } from "node:child_process";
+import { createReadStream as createReadStream2, createWriteStream, writeFileSync } from "node:fs";
+import fs7 from "node:fs/promises";
+import os3 from "node:os";
+import path7 from "node:path";
+import { pipeline as pipeline2 } from "node:stream/promises";
+function unprivilegedStageArchive(params) {
+  return async ({ liveDir, archivePath }) => {
+    const child = spawn(process.execPath, [params.scriptPath, "stage-worker", liveDir], {
+      uid: params.uid,
+      gid: params.gid,
+      env: snapshotWorkerEnvironment(process.env),
+      stdio: ["ignore", "pipe", "inherit", "pipe"]
+    });
+    if (!child.stdout || !child.stdio[3]) {
+      child.kill("SIGKILL");
+      throw new Error("snapshot staging worker pipes are unavailable");
+    }
+    const archiveOutput = createWriteStream(archivePath, { flags: "wx", mode: 384 });
+    const metadata = collect(child.stdio[3]);
+    const archive = pipeline2(child.stdout, archiveOutput);
+    const exitCode = await new Promise((resolve, reject) => {
+      child.once("error", reject);
+      child.once("exit", (code, signal) => resolve(code ?? (signal ? 128 : 1)));
+    });
+    await archive;
+    const message = parseWorkerMessage(await metadata);
+    if (exitCode !== 0 || message.kind === "failed") {
+      throw new Error(message.kind === "failed" ? message.detail : `snapshot staging worker exited with code ${exitCode}`);
+    }
+    return message;
+  };
+}
+async function runStageWorker(liveDir) {
+  const workDir = await fs7.mkdtemp(path7.join(os3.tmpdir(), "hf-state-stage-worker-"));
+  try {
+    const stagingDir = path7.join(workDir, "stage");
+    const archivePath = path7.join(workDir, "snapshot.tar.zst");
+    const staged = await stageLiveDir(liveDir, stagingDir);
+    if (staged.kind === "corrupt-database") {
+      writeWorkerMessage(staged);
+      return 0;
+    }
+    await createTarZst(stagingDir, archivePath);
+    writeWorkerMessage({ kind: "staged", databaseCount: staged.databases.length });
+    await pipeline2(createReadStream2(archivePath), process.stdout);
+    return 0;
+  } catch (err) {
+    writeWorkerMessage({ kind: "failed", detail: err instanceof Error ? err.message : String(err) });
+    return 1;
+  } finally {
+    await fs7.rm(workDir, { recursive: true, force: true });
+  }
+}
+function snapshotWorkerEnvironment(env) {
+  return {
+    HOME: "/home/node",
+    PATH: env.PATH,
+    TMPDIR: env.TMPDIR
+  };
+}
+function writeWorkerMessage(message) {
+  writeFileSync(3, `${JSON.stringify(message)}
+`);
+}
+async function collect(stream) {
+  if (!stream) {
+    throw new Error("snapshot staging worker metadata pipe is unavailable");
+  }
+  const chunks = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+function parseWorkerMessage(raw) {
+  const parsed = JSON.parse(raw);
+  if (parsed.kind === "staged" && Number.isInteger(parsed.databaseCount) && parsed.databaseCount >= 0) {
+    return parsed;
+  }
+  if (parsed.kind === "corrupt-database" && parsed.database && parsed.detail) {
+    return parsed;
+  }
+  if (parsed.kind === "failed" && parsed.detail) {
+    return parsed;
+  }
+  throw new Error("snapshot staging worker returned invalid metadata");
+}
+
+// src/hf-state-sync/supervise.ts
 var LEASE_HEARTBEAT_MS = 6e4;
 var HANDOFF_REQUEST_TTL_MS = 10 * 60 * 1e3;
 async function supervise(params) {
@@ -9326,6 +9488,12 @@ async function supervise(params) {
     throw new Error("supervise: missing child command");
   }
   const bootTime = (/* @__PURE__ */ new Date()).toISOString();
+  const scriptPath = process.argv[1];
+  const stageArchive = process.getuid?.() === 0 && scriptPath && config.snapshotUid !== void 0 && config.snapshotGid !== void 0 ? unprivilegedStageArchive({
+    uid: config.snapshotUid,
+    gid: config.snapshotGid,
+    scriptPath
+  }) : void 0;
   let lastSnapshotId;
   const handoffState = { request: null };
   const writeLease = async () => {
@@ -9339,24 +9507,24 @@ async function supervise(params) {
       lastHeartbeatAt: (/* @__PURE__ */ new Date()).toISOString(),
       ...lastSnapshotId ? { lastSnapshotId } : {}
     };
-    const tmpDir = await fs6.mkdtemp(path6.join(os3.tmpdir(), "hf-state-lease-"));
+    const tmpDir = await fs8.mkdtemp(path8.join(os4.tmpdir(), "hf-state-lease-"));
     try {
-      const file = path6.join(tmpDir, "status.json");
-      await fs6.writeFile(file, JSON.stringify(status, null, 2) + "\n");
+      const file = path8.join(tmpDir, "status.json");
+      await fs8.writeFile(file, JSON.stringify(status, null, 2) + "\n");
       await hub.upload(file, remotePath(config, "runtime/status.json"));
     } finally {
-      await fs6.rm(tmpDir, { recursive: true, force: true });
+      await fs8.rm(tmpDir, { recursive: true, force: true });
     }
   };
   const readHandoffRequest = async () => {
-    const tmpDir = await fs6.mkdtemp(path6.join(os3.tmpdir(), "hf-state-handoff-"));
+    const tmpDir = await fs8.mkdtemp(path8.join(os4.tmpdir(), "hf-state-handoff-"));
     try {
-      const file = path6.join(tmpDir, "request.json");
+      const file = path8.join(tmpDir, "request.json");
       const result = await hub.download(remotePath(config, "runtime/handoff-request.json"), file);
       if (result === "not-found") {
         return null;
       }
-      const parsed = JSON.parse(await fs6.readFile(file, "utf8"));
+      const parsed = JSON.parse(await fs8.readFile(file, "utf8"));
       if (parsed?.schemaVersion !== 1 || parsed.agent !== config.agentName || parsed.runtimeId !== config.runtimeId || typeof parsed.requestedAt !== "string" || typeof parsed.requestId !== "string" || !parsed.requestId) {
         return null;
       }
@@ -9370,7 +9538,7 @@ async function supervise(params) {
       }
       return parsed;
     } finally {
-      await fs6.rm(tmpDir, { recursive: true, force: true });
+      await fs8.rm(tmpDir, { recursive: true, force: true });
     }
   };
   const writeHandoffAck = async (request) => {
@@ -9383,17 +9551,17 @@ async function supervise(params) {
       completedAt: (/* @__PURE__ */ new Date()).toISOString(),
       ...lastSnapshotId ? { lastSnapshotId } : {}
     };
-    const tmpDir = await fs6.mkdtemp(path6.join(os3.tmpdir(), "hf-state-handoff-ack-"));
+    const tmpDir = await fs8.mkdtemp(path8.join(os4.tmpdir(), "hf-state-handoff-ack-"));
     try {
-      const file = path6.join(tmpDir, "ack.json");
-      await fs6.writeFile(file, JSON.stringify(ack, null, 2) + "\n");
+      const file = path8.join(tmpDir, "ack.json");
+      await fs8.writeFile(file, JSON.stringify(ack, null, 2) + "\n");
       await hub.upload(file, remotePath(config, "runtime/handoff-ack.json"));
       await hub.delete([remotePath(config, "runtime/handoff-request.json")]);
     } finally {
-      await fs6.rm(tmpDir, { recursive: true, force: true });
+      await fs8.rm(tmpDir, { recursive: true, force: true });
     }
   };
-  const child = spawn(binary, args, { stdio: "inherit" });
+  const child = spawn2(binary, args, { stdio: "inherit" });
   const childExit = new Promise((resolve) => {
     child.on("exit", (code, signal) => resolve(code ?? (signal ? 128 : 1)));
     child.on("error", (err) => {
@@ -9405,7 +9573,12 @@ async function supervise(params) {
   let inFlight = null;
   const runOnce = async (label) => {
     try {
-      const outcome = await runSnapshot({ config, hub, bootTime });
+      const outcome = await runSnapshot({
+        config,
+        hub,
+        bootTime,
+        ...stageArchive ? { stageArchive } : {}
+      });
       if (outcome.kind === "failed") {
         logError(`${label}: snapshot failed: ${outcome.detail}`);
       } else if (outcome.kind === "uploaded") {
@@ -9540,6 +9713,14 @@ function makeHub(config) {
   return createHfBucketHub({ bucket: config.bucket });
 }
 async function main(argv) {
+  if (argv[0] === "stage-worker") {
+    const liveDir = argv[1];
+    if (!liveDir) {
+      logError("stage-worker: missing live directory");
+      return 2;
+    }
+    return runStageWorker(liveDir);
+  }
   const config = resolveSyncConfig();
   const hub = makeHub(config);
   if (!hub) {
@@ -9547,6 +9728,9 @@ async function main(argv) {
   }
   const mode = argv[0];
   switch (mode) {
+    case "prepare-restore":
+      await prepareRestore(config);
+      return 0;
     case "restore": {
       if (!hub) {
         return 0;
@@ -9587,8 +9771,8 @@ async function main(argv) {
         return 2;
       }
       if (!hub) {
-        const { spawn: spawn2 } = await import("node:child_process");
-        const child = spawn2(command[0], command.slice(1), { stdio: "inherit" });
+        const { spawn: spawn3 } = await import("node:child_process");
+        const child = spawn3(command[0], command.slice(1), { stdio: "inherit" });
         return await new Promise((resolve) => {
           process.on("SIGTERM", () => child.kill("SIGTERM"));
           process.on("SIGINT", () => child.kill("SIGINT"));

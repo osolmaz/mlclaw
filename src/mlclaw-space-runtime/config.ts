@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
+import { normalizeBucketPrefix } from "../hf-state-sync/paths.js";
 import { resolveBranding, type RuntimeBranding } from "./branding.js";
 import { DEFAULT_MODEL, normalizeModelChoices, parseModelChoicesEnv, type ModelChoice } from "./model-choices.js";
 
@@ -8,13 +9,18 @@ export type RuntimeMode = "template" | "app";
 export type SpaceRuntimeConfig = {
   port: number;
   openclawPort: number;
+  mcpPort: number;
   openclawHost: string;
+  openclawUid: number;
+  openclawGid: number;
   publicUrl: string;
   providerUrl: string;
   oauthClientId: string | undefined;
   oauthClientSecret: string | undefined;
   sessionSecret: string;
   sessionSecretGenerated: boolean;
+  credentialKey: string;
+  credentialKeyGenerated: boolean;
   cookieSecure: boolean;
   spaceId: string | undefined;
   canonicalSpaceId: string;
@@ -28,6 +34,11 @@ export type SpaceRuntimeConfig = {
   routerToken: string | undefined;
   hubUrl: string;
   openaiCredentialFile: string;
+  mcpCredentialFile: string;
+  hfMcpUrl: string;
+  researchMcpUrl: string;
+  researchTimeoutMs: number;
+  researchPollMs: number;
   runtimeSettingsFile: string;
   openclawConfigPath: string;
   openclawCommand: string;
@@ -50,6 +61,7 @@ export type SpaceRuntimeConfig = {
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpaceRuntimeConfig {
   const port = integer(env.PORT ?? env.MLCLAW_SPACE_PORT, 7860);
   const openclawPort = integer(env.MLCLAW_OPENCLAW_PORT ?? env.OPENCLAW_GATEWAY_PORT, 7861);
+  const mcpPort = integer(env.MLCLAW_MCP_PORT, 7862);
   const spaceId = trim(env.SPACE_ID);
   const canonicalSpaceId = trim(env.MLCLAW_CANONICAL_SPACE_ID) ?? "osolmaz/mlclaw";
   const canonicalCreatorUserId = trim(env.MLCLAW_CANONICAL_CREATOR_USER_ID);
@@ -74,9 +86,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpaceRuntimeCo
   ]);
   const publicUrl = publicUrlFromEnv(env, port);
   const sessionSecret = trim(env.MLCLAW_SESSION_SECRET ?? env.SESSION_SECRET) ?? randomBytes(48).toString("base64url");
+  const configuredCredentialKey = trim(env.MLCLAW_CREDENTIAL_KEY);
+  if (mode === "app" && !configuredCredentialKey) {
+    throw new Error("MLCLAW_CREDENTIAL_KEY is required in app mode; run mlclaw doctor --fix");
+  }
+  const credentialKey = configuredCredentialKey ?? randomBytes(32).toString("base64url");
   const openclawCommand = trim(env.MLCLAW_OPENCLAW_COMMAND) ?? "openclaw";
   const openclawArgs = splitArgs(env.MLCLAW_OPENCLAW_ARGS) ?? ["gateway"];
   const runtimeSettingsFile = trim(env.MLCLAW_RUNTIME_SETTINGS_FILE) ?? "/home/node/.local/share/mlclaw/live/.mlclaw/settings.json";
+  const stateMountDir = trim(env.MLCLAW_STATE_MOUNT_DIR);
+  const statePrefix = trim(env.OPENCLAW_HF_STATE_PREFIX);
+  const mcpCredentialFile = trim(env.MLCLAW_MCP_CREDENTIAL_FILE) ?? (stateMountDir
+    ? `${stateMountDir.replace(/\/+$/, "")}/${normalizeBucketPrefix(statePrefix)}/.mlclaw/mcp-oauth.enc`
+    : `${pathDirname(runtimeSettingsFile)}/mcp-oauth.enc`);
   const runtimeSettings = readRuntimeSettings(runtimeSettingsFile);
   const model = runtimeSettings.model ?? trim(env.OPENCLAW_MODEL) ?? DEFAULT_MODEL;
   const agentName = trim(env.OPENCLAW_AGENT_NAME);
@@ -84,13 +106,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpaceRuntimeCo
   return {
     port,
     openclawPort,
+    mcpPort,
     openclawHost: trim(env.MLCLAW_OPENCLAW_HOST) ?? "127.0.0.1",
+    openclawUid: integer(env.MLCLAW_OPENCLAW_UID, 1000),
+    openclawGid: integer(env.MLCLAW_OPENCLAW_GID, 1000),
     publicUrl,
     providerUrl: trim(env.OPENID_PROVIDER_URL) ?? "https://huggingface.co",
     oauthClientId: trim(env.OAUTH_CLIENT_ID),
     oauthClientSecret: trim(env.OAUTH_CLIENT_SECRET),
     sessionSecret,
     sessionSecretGenerated: !trim(env.MLCLAW_SESSION_SECRET ?? env.SESSION_SECRET),
+    credentialKey,
+    credentialKeyGenerated: !configuredCredentialKey,
     cookieSecure: env.MLCLAW_COOKIE_SECURE === "0" ? false : !publicUrl.startsWith("http://"),
     spaceId,
     canonicalSpaceId,
@@ -104,6 +131,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpaceRuntimeCo
     routerToken: trim(env.MLCLAW_ROUTER_TOKEN ?? env.HF_ROUTER_TOKEN),
     hubUrl: trim(env.HF_ENDPOINT) ?? "https://huggingface.co",
     openaiCredentialFile: trim(env.MLCLAW_OPENAI_CREDENTIAL_FILE) ?? "/tmp/mlclaw-secrets/openai.env",
+    mcpCredentialFile,
+    hfMcpUrl: trim(env.MLCLAW_HF_MCP_URL) ?? "https://huggingface.co/mcp?bouquet=hf",
+    researchMcpUrl: trim(env.MLCLAW_RESEARCH_MCP_URL) ?? "https://evalstate-research-agent-two.hf.space/mcp",
+    researchTimeoutMs: integer(env.MLCLAW_RESEARCH_TIMEOUT_MS, 30 * 60 * 1000),
+    researchPollMs: integer(env.MLCLAW_RESEARCH_POLL_MS, 1500),
     runtimeSettingsFile,
     openclawConfigPath: trim(env.OPENCLAW_CONFIG_PATH) ?? "/home/node/.local/share/mlclaw/live/.openclaw/openclaw.json",
     openclawCommand,
@@ -113,8 +145,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpaceRuntimeCo
     modelChoices: runtimeSettings.modelChoices ?? parseModelChoicesEnv(env.MLCLAW_MODEL_CHOICES, model),
     routerModelsUrl: trim(env.MLCLAW_ROUTER_MODELS_URL) ?? "https://router.huggingface.co/v1/models",
     stateBucket: trim(env.OPENCLAW_HF_STATE_BUCKET),
-    stateMountDir: trim(env.MLCLAW_STATE_MOUNT_DIR),
-    statePrefix: trim(env.OPENCLAW_HF_STATE_PREFIX),
+    stateMountDir,
+    statePrefix,
     gatewayLocation: trim(env.MLCLAW_GATEWAY_LOCATION),
     runtimeImage: trim(env.MLCLAW_RUNTIME_IMAGE),
     runtimeId: trim(env.MLCLAW_RUNTIME_ID),
@@ -122,6 +154,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpaceRuntimeCo
     assetsDir: trim(env.MLCLAW_ASSETS_DIR) ?? "/app/assets",
     branding: resolveBranding(env, agentName),
   };
+}
+
+export function integrationCredentialSlot(config: Pick<SpaceRuntimeConfig, "adminUsers">): string | undefined {
+  return config.adminUsers[0];
+}
+
+function pathDirname(file: string): string {
+  const slash = file.lastIndexOf("/");
+  return slash > 0 ? file.slice(0, slash) : ".";
 }
 
 function resolveMode(params: {

@@ -88,6 +88,8 @@ type UpdateOptions = {
   force?: boolean;
   runtimeImage?: string;
   bundledRuntime?: boolean;
+  routerToken?: string;
+  routerTokenFile?: string;
 };
 
 type DoctorOptions = {
@@ -269,6 +271,8 @@ export function createProgram(runtimeOverrides: CliRuntime = {}): Command {
     .argument("<owner/space>", "Hugging Face Space repo ID")
     .option("--runtime-image <image>", "Runtime image to write into the generated Space Dockerfile")
     .option("--bundled-runtime", "Generate a bundled Space runtime instead of using the prebuilt ML Claw image", false)
+    .option("--router-token <token>", "Dedicated Hugging Face Router inference token")
+    .option("--router-token-file <path>", "File containing MLCLAW_ROUTER_TOKEN=..., HF_ROUTER_TOKEN=..., or a raw token")
     .option("--force", "Update even if the Space does not look like ML Claw", false)
     .action(async (repoId: string, opts: UpdateOptions) => {
       const token = await runtime.readToken(runtime.env);
@@ -329,8 +333,7 @@ export function createProgram(runtimeOverrides: CliRuntime = {}): Command {
     .option("--no-pull", "Do not docker pull before starting a local gateway")
     .option("--takeover", "Start even if another live runtime lease is present", false)
     .action(async (agent: string, opts: GatewayCommandOptions) => {
-      await gatewayStop(agent, runtime);
-      await gatewayStart(agent, opts, runtime);
+      await gatewayRestart(agent, opts, runtime);
     });
 
   gateway
@@ -572,10 +575,11 @@ async function resolveBootstrapPlan(params: {
 }): Promise<BootstrapResolvedPlan> {
   const { opts, owner, agentName, requestedGatewayLocation, hfToken, telegramToken, telegramUserId, model, runtimeImage, hub, runtime } = params;
   const names = namesFor(owner, agentName);
-  const sessionSecret = randomBytes(48).toString("base64url");
   const now = runtime.now().toISOString();
   const existingManifest = await readManifest(runtime.configRoot, agentName).catch(() => null);
-  const existingSecrets = await readSecretEnv(runtime.configRoot, agentName).catch(() => ({}));
+  const existingSecrets: Record<string, string> = await readSecretEnv(runtime.configRoot, agentName).catch(() => ({}));
+  const sessionSecret = existingSecrets.MLCLAW_SESSION_SECRET ?? randomBytes(48).toString("base64url");
+  const credentialKey = existingSecrets.MLCLAW_CREDENTIAL_KEY ?? randomBytes(32).toString("base64url");
   const gatewayLocation = requestedGatewayLocation ?? existingManifest?.gatewayLocation ?? DEFAULT_GATEWAY_LOCATION;
   if (opts.dockerContext && gatewayLocation !== "local") {
     throw new Error("--docker-context only applies to local gateway mode");
@@ -602,7 +606,6 @@ async function resolveBootstrapPlan(params: {
     opts,
     runtime,
     existingSecrets,
-    gatewayLocation,
     model,
   });
   const spacePlan = gatewayLocation === "space"
@@ -632,6 +635,7 @@ async function resolveBootstrapPlan(params: {
     ...(telegramToken ? { telegramToken } : {}),
     ...(telegramUserId ? { telegramUserId } : {}),
     sessionSecret,
+    credentialKey,
     bucket,
     model,
     agentName,
@@ -782,6 +786,10 @@ async function stateAdopt(agent: string, opts: StateAdoptOptions, runtime: Requi
   const hub = runtime.hubFactory(token);
   const secrets = await readSecretEnv(runtime.configRoot, agent);
   const bucketPrefix = persistedBucketPrefix(secrets);
+  const bucketChanged = current.bucket !== bucket;
+  if (bucketChanged && current.gatewayLocation === "local") {
+    assertDedicatedRouterToken(current.model, secrets);
+  }
 
   runtime.stdout.log(`Creating or adopting private bucket ${bucket}`);
   await hub.createBucket(bucket, true);
@@ -794,7 +802,6 @@ async function stateAdopt(agent: string, opts: StateAdoptOptions, runtime: Requi
     takeover: Boolean(opts.takeover),
   });
 
-  const bucketChanged = current.bucket !== bucket;
   if (bucketChanged) {
     await confirmBucketChange({
       message: `Adopt state bucket ${bucket} for ${agent}, replacing ${current.bucket}?`,
@@ -965,6 +972,7 @@ function deploymentSecrets(params: {
   telegramToken?: string;
   telegramUserId?: string;
   sessionSecret: string;
+  credentialKey: string;
   bucket: string;
   model: string;
   agentName: string;
@@ -986,6 +994,7 @@ function deploymentSecrets(params: {
     MLCLAW_RUNTIME_IMAGE: params.runtimeImage,
     MLCLAW_RUNTIME_ID: params.runtimeId,
     MLCLAW_SESSION_SECRET: params.sessionSecret,
+    MLCLAW_CREDENTIAL_KEY: params.credentialKey,
     MLCLAW_OPENCLAW_PORT: String(DEFAULT_SPACE_OPENCLAW_PORT),
     OPENCLAW_GATEWAY_PORT: String(DEFAULT_SPACE_OPENCLAW_PORT),
     ...(params.telegramToken ? { TELEGRAM_BOT_TOKEN: params.telegramToken } : {}),
@@ -1064,6 +1073,7 @@ async function deploySpaceGateway(params: {
   await clearSpaceGatewayDisabled(hub, manifest.space);
   await setDeploymentSecrets(hub, manifest.space, {
     MLCLAW_SESSION_SECRET: requiredSecret(secrets, "MLCLAW_SESSION_SECRET"),
+    MLCLAW_CREDENTIAL_KEY: requiredSecret(secrets, "MLCLAW_CREDENTIAL_KEY"),
     ...(secrets.MLCLAW_ROUTER_TOKEN ? { MLCLAW_ROUTER_TOKEN: secrets.MLCLAW_ROUTER_TOKEN } : {}),
     ...(secrets.TELEGRAM_BOT_TOKEN ? { TELEGRAM_BOT_TOKEN: secrets.TELEGRAM_BOT_TOKEN } : {}),
     ...(secrets.TELEGRAM_ALLOWED_USERS ? { TELEGRAM_ALLOWED_USERS: secrets.TELEGRAM_ALLOWED_USERS } : {}),
@@ -1087,6 +1097,8 @@ async function startLocalGateway(params: {
   resetVolume?: boolean;
 }): Promise<void> {
   const { manifest, runtime } = params;
+  const secrets = await ensureDeploymentCredentialKey(runtime, manifest.agent);
+  assertDedicatedRouterToken(manifest.model, secrets);
   const containerName = containerNameFor(manifest.agent);
   const volumeName = volumeNameFor(manifest.agent);
   const dockerContext = dockerContextFor(manifest);
@@ -1162,6 +1174,18 @@ async function gatewayStart(agent: string, opts: GatewayCommandOptions, runtime:
   }
 }
 
+async function gatewayRestart(agent: string, opts: GatewayCommandOptions, runtime: Required<CliRuntime>): Promise<void> {
+  const manifest = await readDeploymentManifest(runtime, agent, { requestedDockerContext: opts.dockerContext });
+  if (manifest.gatewayLocation === "local") {
+    assertDedicatedRouterToken(
+      manifest.model,
+      await readSecretEnv(runtime.configRoot, agent).catch(() => ({})),
+    );
+  }
+  await gatewayStop(agent, runtime);
+  await gatewayStart(agent, opts, runtime);
+}
+
 async function gatewayStop(agent: string, runtime: Required<CliRuntime>): Promise<void> {
   const manifest = await readDeploymentManifest(runtime, agent);
   const bucketPrefix = await readDeploymentBucketPrefix(runtime, agent);
@@ -1232,7 +1256,7 @@ async function gatewayMigrate(agent: string, opts: GatewayCommandOptions, runtim
   }
   const token = await runtime.readToken(runtime.env);
   const hub = runtime.hubFactory(token);
-  const secrets = await readSecretEnv(runtime.configRoot, agent);
+  const secrets = await ensureDeploymentCredentialKey(runtime, agent);
   const bucketPrefix = persistedBucketPrefix(secrets);
   const updated: DeploymentManifest = {
     ...current,
@@ -1240,14 +1264,13 @@ async function gatewayMigrate(agent: string, opts: GatewayCommandOptions, runtim
     runtimeImage: resolveRuntimeImage(opts.runtimeImage ?? current.runtimeImage, runtime.env),
     updatedAt: runtime.now().toISOString(),
   };
+  const routerToken = await resolveRouterToken({
+    opts,
+    runtime,
+    existingSecrets: secrets,
+    model: updated.model,
+  });
   if (target === "space") {
-    const routerToken = await resolveRouterToken({
-      opts,
-      runtime,
-      existingSecrets: secrets,
-      gatewayLocation: "space",
-      model: updated.model,
-    });
     const deploymentSecrets = {
       ...secrets,
       MLCLAW_GATEWAY_LOCATION: "space",
@@ -1321,6 +1344,7 @@ async function gatewayMigrate(agent: string, opts: GatewayCommandOptions, runtim
     });
     await writeSecretEnv(runtime.configRoot, agent, {
       ...secrets,
+      ...(routerToken ? { MLCLAW_ROUTER_TOKEN: routerToken } : {}),
       MLCLAW_GATEWAY_LOCATION: "local",
       MLCLAW_RUNTIME_IMAGE: updated.runtimeImage,
       MLCLAW_RUNTIME_ID: updated.localRuntimeId,
@@ -1337,6 +1361,10 @@ async function gatewayRebind(agent: string, opts: GatewayRebindOptions, runtime:
   if (current.gatewayLocation !== "local") {
     throw new Error("Docker context rebind only applies to local gateway deployments");
   }
+  assertDedicatedRouterToken(
+    current.model,
+    await readSecretEnv(runtime.configRoot, agent).catch(() => ({})),
+  );
 
   const targetBinding = await resolveLocalGatewayBinding({
     manifest: undefined,
@@ -1690,6 +1718,23 @@ function requiredSecret(secrets: Record<string, string>, key: string): string {
   return value;
 }
 
+async function ensureDeploymentCredentialKey(
+  runtime: Required<CliRuntime>,
+  agent: string,
+  existing?: Record<string, string>,
+): Promise<Record<string, string>> {
+  const secrets: Record<string, string> = existing ?? await readSecretEnv(runtime.configRoot, agent).catch(() => ({}));
+  if (secrets.MLCLAW_CREDENTIAL_KEY) {
+    return secrets;
+  }
+  const updated = {
+    ...secrets,
+    MLCLAW_CREDENTIAL_KEY: randomBytes(32).toString("base64url"),
+  };
+  await writeSecretEnv(runtime.configRoot, agent, updated);
+  return updated;
+}
+
 function requiredOption(value: string | undefined, label: string): string {
   if (!value) {
     throw new Error(`${label} is required`);
@@ -1715,6 +1760,16 @@ async function update(
   }
   const runtimeImage = resolveSpaceRuntimeImage(opts, runtime.env);
   const agentName = variables.get("OPENCLAW_AGENT_NAME")?.value?.trim() || repoId.split("/")[1] || "openclaw";
+  if (!canonicalTemplate) {
+    await ensureUpdateRouterToken({
+      repoId,
+      agentName,
+      model: variables.get("OPENCLAW_MODEL")?.value ?? DEFAULT_MODEL,
+      opts,
+      hub,
+      runtime,
+    });
+  }
   runtime.stdout.log(`Generating current Space files into ${repoId}`);
   const { templateRev } = await runtime.pushTemplateToSpace({
     targetRepo: repoId,
@@ -1742,6 +1797,44 @@ async function update(
   }
   await doctor(repoId, { fix: true }, hub, runtime);
   await hub.restartSpace(repoId, true);
+}
+
+async function ensureUpdateRouterToken(params: {
+  repoId: string;
+  agentName: string;
+  model: string;
+  opts: UpdateOptions;
+  hub: HubApi;
+  runtime: Required<CliRuntime>;
+}): Promise<void> {
+  if (!isHuggingFaceRouterModel(params.model)) {
+    return;
+  }
+  const spaceSecrets = await params.hub.getSpaceSecrets(params.repoId);
+  const hasExplicitOverride = params.opts.routerToken !== undefined || params.opts.routerTokenFile !== undefined;
+  if (hasRouterTokenSecretMap(spaceSecrets) && !hasExplicitOverride) {
+    return;
+  }
+  const hasManifest = await manifestExists(params.runtime.configRoot, params.agentName);
+  const localSecrets = hasManifest
+    ? await readSecretEnv(params.runtime.configRoot, params.agentName).catch(() => ({}))
+    : {};
+  const routerToken = await resolveRouterToken({
+    opts: params.opts,
+    runtime: params.runtime,
+    existingSecrets: localSecrets,
+    model: params.model,
+  });
+  if (!routerToken) {
+    throw new Error("Hugging Face Router models require a dedicated inference token before update");
+  }
+  await params.hub.addSpaceSecret(params.repoId, "MLCLAW_ROUTER_TOKEN", routerToken);
+  if (hasManifest) {
+    await writeSecretEnv(params.runtime.configRoot, params.agentName, {
+      ...localSecrets,
+      MLCLAW_ROUTER_TOKEN: routerToken,
+    });
+  }
 }
 
 async function doctor(repoId: string, opts: DoctorOptions, hub: HubApi, runtime: Required<CliRuntime>): Promise<void> {
@@ -1861,6 +1954,18 @@ async function doctor(repoId: string, opts: DoctorOptions, hub: HubApi, runtime:
       fixed.push("set secret MLCLAW_SESSION_SECRET");
     } else {
       issues.push("secret MLCLAW_SESSION_SECRET is missing");
+    }
+  }
+  if (!secrets.has("MLCLAW_CREDENTIAL_KEY")) {
+    if (fix) {
+      const agent = variables.get("OPENCLAW_AGENT_NAME")?.value?.trim() || repoId.split("/")[1] || "openclaw";
+      const credentialKey = await manifestExists(runtime.configRoot, agent)
+        ? requiredSecret(await ensureDeploymentCredentialKey(runtime, agent), "MLCLAW_CREDENTIAL_KEY")
+        : randomBytes(32).toString("base64url");
+      await hub.addSpaceSecret(repoId, "MLCLAW_CREDENTIAL_KEY", credentialKey);
+      fixed.push("set secret MLCLAW_CREDENTIAL_KEY");
+    } else {
+      issues.push("secret MLCLAW_CREDENTIAL_KEY is missing");
     }
   }
   if (!variables.has("MLCLAW_TEMPLATE_REV") && !variables.has("OPENCLAW_HF_TEMPLATE_REV")) {
@@ -2049,6 +2154,14 @@ function hasRouterTokenSecretMap(secrets: Map<string, { key: string }>): boolean
   return secrets.has("MLCLAW_ROUTER_TOKEN") || secrets.has("HF_ROUTER_TOKEN");
 }
 
+function assertDedicatedRouterToken(model: string, secrets: Record<string, string>): void {
+  if (isHuggingFaceRouterModel(model) && !hasRouterTokenSecretRecord(secrets)) {
+    throw new Error(
+      "Hugging Face Router models require a dedicated inference token; rerun bootstrap or migration with --router-token-file",
+    );
+  }
+}
+
 async function ensureSpaceStateVolume(
   hub: HubApi,
   repoId: string,
@@ -2141,24 +2254,24 @@ async function resolveRouterToken(params: {
   opts: { routerToken?: string; routerTokenFile?: string };
   runtime: Required<CliRuntime>;
   existingSecrets?: Record<string, string>;
-  gatewayLocation: GatewayLocation;
   model: string;
 }): Promise<string | undefined> {
-  const direct = params.opts.routerToken ??
+  const explicit = nonEmpty(params.opts.routerToken) ??
+    await readOptionalRouterTokenFile(params.opts.routerTokenFile);
+  const direct = explicit ??
     params.runtime.env.MLCLAW_ROUTER_TOKEN ??
     params.runtime.env.HF_ROUTER_TOKEN ??
     params.existingSecrets?.MLCLAW_ROUTER_TOKEN ??
     params.existingSecrets?.HF_ROUTER_TOKEN;
-  const fromFile = direct ? undefined : await readOptionalRouterTokenFile(params.opts.routerTokenFile);
-  const existing = nonEmpty(direct) ?? fromFile;
+  const existing = nonEmpty(direct);
   if (existing) {
     return existing;
   }
-  if (params.gatewayLocation !== "space" || !isHuggingFaceRouterModel(params.model)) {
+  if (!isHuggingFaceRouterModel(params.model)) {
     return undefined;
   }
   if (!params.runtime.prompt.isInteractive()) {
-    throw new Error("Space gateway model uses the Hugging Face Router; set MLCLAW_ROUTER_TOKEN or pass --router-token-file for inference.");
+    throw new Error("Hugging Face Router models require a dedicated inference token; set MLCLAW_ROUTER_TOKEN or pass --router-token-file.");
   }
   const value = await params.runtime.prompt.password({
     message: "Hugging Face Router token",
@@ -2170,7 +2283,7 @@ async function resolveRouterToken(params: {
   }
   const token = typeof value === "string" ? nonEmpty(value) : undefined;
   if (!token) {
-    throw new Error("Hugging Face Router token is required for Space gateway inference with huggingface/ models.");
+    throw new Error("A dedicated Hugging Face Router token is required for huggingface/ models.");
   }
   return token;
 }

@@ -6,6 +6,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 var DEFAULT_HF_TOOLING_ASSET_ROOT = "/app/assets/hf-tooling";
 var DEFAULT_OPENCLAW_LIVE_DIR = "/tmp/openclaw-live";
+var OPENCLAW_BOOTSTRAP_FILENAME = "BOOTSTRAP.md";
+var OPENCLAW_WORKSPACE_STATE_FILENAME = "openclaw-workspace-state.json";
 var MLCLAW_CONTEXT_START = "<!-- MLCLAW:HUGGINGFACE_TOOLING:START -->";
 var MLCLAW_CONTEXT_END = "<!-- MLCLAW:HUGGINGFACE_TOOLING:END -->";
 async function seedHuggingFaceTooling(options = {}) {
@@ -42,6 +44,49 @@ async function seedHuggingFaceTooling(options = {}) {
     wroteContextFile,
     wroteManifest
   };
+}
+async function waitForBootstrapAndSeedHuggingFaceTooling(options = {}) {
+  const env = options.env ?? process.env;
+  const workspaceDir = options.workspaceDir ?? resolveWorkspaceDir(env);
+  const bootstrapPath = path.join(workspaceDir, OPENCLAW_BOOTSTRAP_FILENAME);
+  const statePath = path.join(workspaceDir, OPENCLAW_WORKSPACE_STATE_FILENAME);
+  const pollIntervalMs = options.pollIntervalMs ?? 1e3;
+  let observedPendingBootstrap = false;
+  while (!options.signal?.aborted) {
+    if (await pathExists(bootstrapPath)) {
+      observedPendingBootstrap = true;
+    } else if (!observedPendingBootstrap || await workspaceSetupIsComplete(statePath)) {
+      return await seedHuggingFaceTooling({ ...options, workspaceDir });
+    }
+    await waitForPoll(pollIntervalMs, options.signal);
+  }
+  return null;
+}
+async function workspaceSetupIsComplete(statePath) {
+  try {
+    const parsed = JSON.parse(await fs.readFile(statePath, "utf8"));
+    if (typeof parsed !== "object" || parsed === null) {
+      return false;
+    }
+    const setupCompletedAt = parsed.setupCompletedAt;
+    return typeof setupCompletedAt === "string" && setupCompletedAt.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+async function waitForPoll(delayMs, signal) {
+  if (signal?.aborted) {
+    return;
+  }
+  await new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, delayMs);
+    signal?.addEventListener("abort", finish, { once: true });
+  });
 }
 async function copyBaselineSkills(params) {
   const copied = [];
@@ -243,18 +288,26 @@ function isMissingFileError(err) {
 }
 
 // src/hf-tooling/cli.ts
+var waitForBootstrap = process.argv.includes("--wait-for-bootstrap");
+var abort = new AbortController();
+process.on("SIGTERM", () => abort.abort());
+process.on("SIGINT", () => abort.abort());
 try {
-  const result = await seedHuggingFaceTooling();
-  const copied = result.copiedSkills.length;
-  const skipped = result.skippedSkills.length;
-  const workspaceCopied = result.copiedWorkspaceSkills.length;
-  const workspaceSkipped = result.skippedWorkspaceSkills.length;
-  const templates = result.copiedTemplateFiles.length;
-  const context = result.wroteContextFile ? "updated" : "current";
-  const manifest = result.wroteManifest ? "updated" : "current";
-  console.log(
-    `[hf-tooling] workspace=${result.workspaceDir} agentsSkills=copied:${copied},skipped:${skipped} workspaceSkills=copied:${workspaceCopied},skipped:${workspaceSkipped} templates:${templates} context:${context} manifest:${manifest}`
-  );
+  const result = waitForBootstrap ? await waitForBootstrapAndSeedHuggingFaceTooling({ signal: abort.signal }) : await seedHuggingFaceTooling();
+  if (!result) {
+    process.exitCode = 0;
+  } else {
+    const copied = result.copiedSkills.length;
+    const skipped = result.skippedSkills.length;
+    const workspaceCopied = result.copiedWorkspaceSkills.length;
+    const workspaceSkipped = result.skippedWorkspaceSkills.length;
+    const templates = result.copiedTemplateFiles.length;
+    const context = result.wroteContextFile ? "updated" : "current";
+    const manifest = result.wroteManifest ? "updated" : "current";
+    console.log(
+      `[hf-tooling] workspace=${result.workspaceDir} agentsSkills=copied:${copied},skipped:${skipped} workspaceSkills=copied:${workspaceCopied},skipped:${workspaceSkipped} templates:${templates} context:${context} manifest:${manifest}`
+    );
+  }
 } catch (err) {
   console.error(`[hf-tooling] ${err instanceof Error ? err.message : String(err)}`);
   process.exitCode = 1;

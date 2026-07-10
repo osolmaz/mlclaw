@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { SpaceRuntimeConfig } from "./config.js";
+import { managedMcpServerConfig } from "./mcp-integrations.js";
 import { displayNameFromModelId, parseOpenClawModelRef, type ModelChoice } from "./model-choices.js";
 
 export async function configureOpenClawGateway(config: SpaceRuntimeConfig): Promise<void> {
@@ -25,10 +26,49 @@ export async function configureOpenClawGateway(config: SpaceRuntimeConfig): Prom
     allowedOrigins: [config.publicUrl],
   };
   configureOpenClawModels(openclawConfig, config);
+  configureManagedMcpServers(openclawConfig, config);
 
   await fs.mkdir(path.dirname(config.openclawConfigPath), { recursive: true });
   await fs.writeFile(config.openclawConfigPath, `${JSON.stringify(openclawConfig, null, 2)}\n`, { mode: 0o600 });
   await fs.chmod(config.openclawConfigPath, 0o600);
+  if (process.getuid?.() === 0) {
+    await fs.chown(config.openclawConfigPath, config.openclawUid, config.openclawGid);
+  }
+}
+
+export async function managedMcpServerStatus(config: SpaceRuntimeConfig): Promise<Array<{
+  id: string;
+  name: string;
+  enabled: boolean;
+}>> {
+  const raw = JSON.parse(await fs.readFile(config.openclawConfigPath, "utf8")) as Record<string, unknown>;
+  const servers = object(object(raw, "mcp"), "servers");
+  return [
+    { id: "huggingface", name: "Hugging Face MCP" },
+    { id: "research-agent", name: "Research Agent" },
+  ].map((server) => ({
+    ...server,
+    enabled: objectValue(servers[server.id])?.enabled !== false,
+  }));
+}
+
+function configureManagedMcpServers(openclawConfig: Record<string, unknown>, config: SpaceRuntimeConfig): void {
+  const mcp = object(openclawConfig, "mcp");
+  const servers = object(mcp, "servers");
+  for (const [name, managed] of Object.entries(managedMcpServerConfig(config))) {
+    const existing = servers[name];
+    const userFields = existing && typeof existing === "object" && !Array.isArray(existing)
+      ? existing as Record<string, unknown>
+      : {};
+    servers[name] = {
+      ...userFields,
+      ...managed,
+      ...(userFields.enabled === false ? { enabled: false } : { enabled: true }),
+      ...(userFields.toolFilter && typeof userFields.toolFilter === "object"
+        ? { toolFilter: userFields.toolFilter }
+        : {}),
+    };
+  }
 }
 
 function configureOpenClawModels(openclawConfig: Record<string, unknown>, config: SpaceRuntimeConfig): void {
@@ -136,4 +176,10 @@ function object(parent: Record<string, unknown>, key: string): Record<string, un
   const created: Record<string, unknown> = {};
   parent[key] = created;
   return created;
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
 }

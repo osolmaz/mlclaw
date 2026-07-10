@@ -22,6 +22,13 @@ afterEach(async () => {
 });
 
 describe("ML Claw Space runtime", () => {
+  it("fails closed when an app deployment has no durable credential key", () => {
+    expect(() => loadConfig({
+      SPACE_ID: "alice/research",
+      MLCLAW_SESSION_SECRET: "x".repeat(48),
+    })).toThrow("MLCLAW_CREDENTIAL_KEY is required");
+  });
+
   it("includes the curated Router model presets", () => {
     expect(PRESET_MODEL_CHOICES.map((choice) => choice.openclawModel)).toEqual(
       expect.arrayContaining([
@@ -75,6 +82,10 @@ describe("ML Claw Space runtime", () => {
 
   it("requires an authenticated allowed session before returning deployment status", async () => {
     const config = await testConfig();
+    await fs.writeFile(config.openclawConfigPath, JSON.stringify({
+      gateway: {},
+      mcp: { servers: { "research-agent": { enabled: false } } },
+    }), "utf8");
     const runtime = new SpaceRuntimeServer(config);
     const server = await runtime.start();
     cleanups.push(() => closeServer(server), () => runtime.stop());
@@ -107,7 +118,153 @@ describe("ML Claw Space runtime", () => {
         allowedUsers: ["alice"],
         adminUsers: ["alice"],
       },
+      integrations: {
+        servers: [
+          { id: "huggingface", enabled: true },
+          { id: "research-agent", enabled: false },
+        ],
+      },
     });
+  });
+
+  it("reports trusted local Hub-token integrations as configured", async () => {
+    const config = await testConfig({
+      gatewayLocation: "local",
+      hfToken: "hf_local_wrapper",
+    });
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(() => closeServer(server), () => runtime.stop());
+
+    const response = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/status`, {
+      headers: { cookie: sessionCookie(config, "alice") },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      integrations: {
+        configured: true,
+        source: "local",
+        identity: null,
+        scope: [],
+        refreshable: false,
+        error: null,
+      },
+    });
+
+    const disconnect = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/integrations/huggingface/disconnect`, {
+      method: "POST",
+      headers: {
+        cookie: sessionCookie(config, "alice"),
+        "x-mlclaw-csrf": createCsrfToken({ username: "alice", sessionSecret: config.sessionSecret }),
+      },
+    });
+    expect(disconnect.status).toBe(409);
+    await expect(disconnect.json()).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining("ML Claw CLI"),
+    });
+  });
+
+  it("automatically requests MCP authorization for an admin entering the gateway", async () => {
+    const config = await testConfig();
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(() => closeServer(server), () => runtime.stop());
+
+    const response = await fetch(`http://127.0.0.1:${config.port}/chat?thread=1`, {
+      headers: {
+        cookie: sessionCookie(config, "alice"),
+        accept: "text/html",
+      },
+      redirect: "manual",
+    });
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("/oauth/login?intent=integrations&next=%2Fchat%3Fthread%3D1");
+  });
+
+  it("recovers unreadable MCP credentials through OAuth", async () => {
+    const config = await testConfig();
+    await fs.mkdir(path.dirname(config.mcpCredentialFile), { recursive: true });
+    await fs.writeFile(config.mcpCredentialFile, "invalid encrypted credential");
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(() => closeServer(server), () => runtime.stop());
+
+    const response = await fetch(`http://127.0.0.1:${config.port}/chat`, {
+      headers: {
+        cookie: sessionCookie(config, "alice"),
+        accept: "text/html",
+      },
+      redirect: "manual",
+    });
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("/oauth/login?intent=integrations&next=%2Fchat");
+  });
+
+  it("does not require integration authorization when every managed server is disabled", async () => {
+    const openclawPort = await freePort();
+    const upstream = http.createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+      res.end("gateway");
+    });
+    await listen(upstream, openclawPort);
+    cleanups.push(() => closeServer(upstream));
+
+    const config = await testConfig({ openclawPort });
+    await fs.writeFile(config.openclawConfigPath, JSON.stringify({
+      gateway: {},
+      mcp: {
+        servers: {
+          huggingface: { enabled: false },
+          "research-agent": { enabled: false },
+        },
+      },
+    }), "utf8");
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(() => closeServer(server), () => runtime.stop());
+
+    const response = await fetch(`http://127.0.0.1:${config.port}/`, {
+      headers: {
+        cookie: sessionCookie(config, "alice"),
+        accept: "text/html",
+      },
+      redirect: "manual",
+    });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("gateway");
+  });
+
+  it("requests broad integration scopes only for an authenticated admin", async () => {
+    const config = await testConfig({
+      allowedUsers: ["alice", "bob"],
+      adminUsers: ["alice"],
+    });
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(() => closeServer(server), () => runtime.stop());
+
+    const admin = await fetch(`http://127.0.0.1:${config.port}/oauth/login?intent=integrations`, {
+      headers: { cookie: sessionCookie(config, "alice") },
+      redirect: "manual",
+    });
+    const member = await fetch(`http://127.0.0.1:${config.port}/oauth/login?intent=integrations`, {
+      headers: { cookie: sessionCookie(config, "bob") },
+      redirect: "manual",
+    });
+    const anonymous = await fetch(`http://127.0.0.1:${config.port}/oauth/login?intent=integrations`, {
+      redirect: "manual",
+    });
+
+    expect(new URL(admin.headers.get("location") ?? "").searchParams.get("scope"))
+      .toContain("manage-repos");
+    expect(new URL(member.headers.get("location") ?? "").searchParams.get("scope"))
+      .toBe("openid profile");
+    expect(new URL(anonymous.headers.get("location") ?? "").searchParams.get("scope"))
+      .toBe("openid profile");
   });
 
   it("returns dynamic Hugging Face Router model/provider options", async () => {
@@ -603,6 +760,10 @@ describe("ML Claw Space runtime", () => {
         },
       },
     ]);
+    const runtimeSettings = await fs.stat(config.runtimeSettingsFile);
+    expect(runtimeSettings.mode & 0o777).toBe(0o600);
+    expect(runtimeSettings.uid).toBe(config.openclawUid);
+    expect(runtimeSettings.gid).toBe(config.openclawGid);
   });
 
   it("reports a saved model when the restart request fails", async () => {
@@ -680,7 +841,11 @@ describe("ML Claw Space runtime", () => {
     await listen(upstream, openclawPort);
     cleanups.push(() => closeServer(upstream));
 
-    const config = await testConfig({ openclawPort });
+    const config = await testConfig({
+      openclawPort,
+      oauthClientId: undefined,
+      oauthClientSecret: undefined,
+    });
     const runtime = new SpaceRuntimeServer(config);
     const server = await runtime.start();
     cleanups.push(() => closeServer(server), () => runtime.stop());
@@ -880,7 +1045,42 @@ describe("ML Claw Space runtime", () => {
     });
   });
 
-  it("preserves legacy broad Hub tokens when no Router token exists", async () => {
+  it("does not expose wrapper-only secrets to the OpenClaw child", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "mlclaw-wrapper-secrets-"));
+    cleanups.push(() => fs.rm(root, { recursive: true, force: true }));
+    const envFile = path.join(root, "env.json");
+    const secretKeys = ["MLCLAW_CREDENTIAL_KEY", "MLCLAW_SESSION_SECRET", "SESSION_SECRET", "OAUTH_CLIENT_SECRET"];
+    const keys = [...secretKeys, "HOME", "USER", "LOGNAME"];
+    const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    for (const key of keys) {
+      process.env[key] = `secret-${key}`;
+    }
+    cleanups.push(() => {
+      for (const key of keys) {
+        if (previous[key] === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = previous[key];
+        }
+      }
+    });
+    const config = await testConfig({
+      openclawArgs: [
+        "-e",
+        `require("fs").writeFileSync(${JSON.stringify(envFile)},JSON.stringify(Object.fromEntries(${JSON.stringify(keys)}.map(k=>[k,process.env[k]]))));setInterval(()=>undefined,100000)`,
+      ],
+    });
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(() => closeServer(server), () => runtime.stop());
+
+    await waitFor(async () => fileExists(envFile));
+    const env = JSON.parse(await fs.readFile(envFile, "utf8")) as Record<string, string>;
+    expect(secretKeys.every((key) => env[key] === undefined)).toBe(true);
+    expect(env).toMatchObject({ HOME: "/home/node", USER: "node", LOGNAME: "node" });
+  });
+
+  it("scrubs broad Hub tokens when no Router token exists", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "mlclaw-legacy-hub-token-"));
     cleanups.push(() => fs.rm(root, { recursive: true, force: true }));
     const envFile = path.join(root, "env.json");
@@ -912,10 +1112,7 @@ describe("ML Claw Space runtime", () => {
 
     await waitFor(async () => fileExists(envFile));
     const env = JSON.parse(await fs.readFile(envFile, "utf8")) as Record<string, string>;
-    expect(env).toEqual({
-      HF_TOKEN: "hf_legacy",
-      HUGGINGFACE_HUB_TOKEN: "hf_legacy",
-    });
+    expect(env).toEqual({});
   });
 
   it("restarts only the OpenClaw child when runtime restart has no Hub token", async () => {
@@ -929,6 +1126,19 @@ describe("ML Claw Space runtime", () => {
         restartCount += 1;
       },
       setModelSettings: () => undefined,
+      saveMcpCredentials: async () => undefined,
+      clearMcpCredentials: async () => undefined,
+      mcpCredentialStatus: async (username) => ({
+        configured: false,
+        username,
+        scope: [],
+        expiresAt: null,
+        refreshable: false,
+      }),
+      mcpServerStatus: async () => [
+        { id: "huggingface", name: "Hugging Face MCP", enabled: true },
+        { id: "research-agent", name: "Research Agent", enabled: true },
+      ],
     });
     const cookie = sessionCookie(config, "alice");
     const csrf = createCsrfToken({ username: "alice", sessionSecret: config.sessionSecret });
@@ -954,6 +1164,18 @@ describe("ML Claw Space runtime", () => {
       gateway: {
         controlUi: {
           allowedOrigins: ["https://old.example"],
+        },
+      },
+      mcp: {
+        servers: {
+          custom: {
+            command: "custom-mcp",
+          },
+          huggingface: {
+            enabled: false,
+            toolFilter: { include: ["paper_search"] },
+            url: "https://stale.example/mcp",
+          },
         },
       },
     }));
@@ -1014,6 +1236,18 @@ describe("ML Claw Space runtime", () => {
         }),
       ]),
     );
+    expect(rewritten.mcp.servers.custom).toEqual({ command: "custom-mcp" });
+    expect(rewritten.mcp.servers.huggingface).toMatchObject({
+      enabled: false,
+      url: `http://127.0.0.1:${config.mcpPort}/mcp/huggingface`,
+      transport: "streamable-http",
+      toolFilter: { include: ["paper_search"] },
+    });
+    expect(rewritten.mcp.servers["research-agent"]).toMatchObject({
+      enabled: true,
+      url: `http://127.0.0.1:${config.mcpPort}/mcp/research`,
+      transport: "streamable-http",
+    });
   });
 
   it("makes the duplicated Space owner the default admin", () => {
@@ -1021,6 +1255,7 @@ describe("ML Claw Space runtime", () => {
       SPACE_ID: "osolmaz/research",
       MLCLAW_ALLOWED_USERS: "alice,bob",
       MLCLAW_SESSION_SECRET: "x".repeat(48),
+      MLCLAW_CREDENTIAL_KEY: "k".repeat(48),
     });
 
     expect(config.adminUsers).toEqual(["osolmaz"]);
@@ -1033,6 +1268,7 @@ describe("ML Claw Space runtime", () => {
       MLCLAW_ALLOWED_USERS: "alice",
       MLCLAW_ADMINS: "bob",
       MLCLAW_SESSION_SECRET: "x".repeat(48),
+      MLCLAW_CREDENTIAL_KEY: "k".repeat(48),
     });
 
     expect(config.adminUsers).toEqual(["bob"]);
@@ -1045,6 +1281,7 @@ describe("ML Claw Space runtime", () => {
       SPACE_CREATOR_USER_ID: "42",
       MLCLAW_CANONICAL_CREATOR_USER_ID: "42",
       MLCLAW_SESSION_SECRET: "x".repeat(48),
+      MLCLAW_CREDENTIAL_KEY: "k".repeat(48),
     });
 
     expect(config.mode).toBe("template");
@@ -1056,6 +1293,7 @@ describe("ML Claw Space runtime", () => {
       SPACE_CREATOR_USER_ID: "42",
       MLCLAW_CANONICAL_CREATOR_USER_ID: "42",
       MLCLAW_SESSION_SECRET: "x".repeat(48),
+      MLCLAW_CREDENTIAL_KEY: "k".repeat(48),
     });
 
     expect(config.mode).toBe("app");
@@ -1066,6 +1304,7 @@ describe("ML Claw Space runtime", () => {
       SPACE_ID: "osolmaz/bob-lab",
       OPENCLAW_AGENT_NAME: "bob-lab",
       MLCLAW_SESSION_SECRET: "x".repeat(48),
+      MLCLAW_CREDENTIAL_KEY: "k".repeat(48),
     });
     expect(derived.branding).toMatchObject({
       name: "Bob Lab",
@@ -1086,6 +1325,7 @@ describe("ML Claw Space runtime", () => {
       MLCLAW_BRAND_THEME_COLOR: "#abc",
       MLCLAW_BRAND_LOGO: "/assets/custom/logo.svg",
       MLCLAW_SESSION_SECRET: "x".repeat(48),
+      MLCLAW_CREDENTIAL_KEY: "k".repeat(48),
     });
     expect(explicit.branding).toMatchObject({
       name: "Bob Research",
@@ -1133,16 +1373,22 @@ async function testConfig(overrides: Partial<SpaceRuntimeConfig> = {}): Promise<
   await fs.writeFile(configPath, JSON.stringify({ gateway: {} }), "utf8");
   const port = overrides.port ?? await freePort();
   const openclawPort = overrides.openclawPort ?? await freePort();
+  const mcpPort = overrides.mcpPort ?? await freePort();
   return {
     port,
     openclawPort,
+    mcpPort,
     openclawHost: "127.0.0.1",
+    openclawUid: process.getuid?.() ?? 1000,
+    openclawGid: process.getgid?.() ?? 1000,
     publicUrl: `http://127.0.0.1:${port}`,
     providerUrl: "https://huggingface.co",
     oauthClientId: "client",
     oauthClientSecret: "secret",
     sessionSecret: "x".repeat(48),
     sessionSecretGenerated: false,
+    credentialKey: "k".repeat(48),
+    credentialKeyGenerated: false,
     cookieSecure: false,
     spaceId: "alice/research",
     canonicalSpaceId: "osolmaz/mlclaw",
@@ -1156,6 +1402,11 @@ async function testConfig(overrides: Partial<SpaceRuntimeConfig> = {}): Promise<
     routerToken: undefined,
     hubUrl: "https://huggingface.co",
     openaiCredentialFile: path.join(root, "secrets", "openai.env"),
+    mcpCredentialFile: path.join(root, "secrets", "mcp-oauth.enc"),
+    hfMcpUrl: "https://huggingface.co/mcp?bouquet=hf",
+    researchMcpUrl: "https://evalstate-research-agent-two.hf.space/mcp",
+    researchTimeoutMs: 30 * 60 * 1000,
+    researchPollMs: 1500,
     runtimeSettingsFile: path.join(root, ".mlclaw", "settings.json"),
     openclawConfigPath: configPath,
     openclawCommand: process.execPath,

@@ -24,6 +24,9 @@ export type SyncConfig = {
   agentName: string;
   gatewayLocation: "local" | "space" | "unknown";
   runtimeImage: string;
+  /** UID/GID used by the secret-free snapshot traversal worker. */
+  snapshotUid?: number;
+  snapshotGid?: number;
 };
 
 const DEFAULT_LIVE_DIR = "/home/node/.local/share/mlclaw/live";
@@ -39,6 +42,8 @@ function positiveIntFromEnv(value: string | undefined, fallback: number): number
 
 export function resolveSyncConfig(env: NodeJS.ProcessEnv = process.env): SyncConfig {
   const runId = env.MLCLAW_RUN_ID?.trim() || randomUUID();
+  const snapshotUid = nonNegativeIntFromEnv(env.MLCLAW_OPENCLAW_UID);
+  const snapshotGid = nonNegativeIntFromEnv(env.MLCLAW_OPENCLAW_GID);
   return {
     liveDir: env.OPENCLAW_LIVE_DIR?.trim() || DEFAULT_LIVE_DIR,
     bucket: env.OPENCLAW_HF_STATE_BUCKET?.trim() || null,
@@ -54,7 +59,14 @@ export function resolveSyncConfig(env: NodeJS.ProcessEnv = process.env): SyncCon
       ? env.MLCLAW_GATEWAY_LOCATION
       : "unknown",
     runtimeImage: env.MLCLAW_RUNTIME_IMAGE?.trim() || "unknown",
+    ...(snapshotUid !== undefined ? { snapshotUid } : {}),
+    ...(snapshotGid !== undefined ? { snapshotGid } : {}),
   };
+}
+
+function nonNegativeIntFromEnv(value: string | undefined): number | undefined {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 /** Remote object path under the configured bucket prefix. */

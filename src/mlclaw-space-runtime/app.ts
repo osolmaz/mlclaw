@@ -3,11 +3,17 @@ import path from "node:path";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { brandingManifest, publicBranding } from "./branding.js";
-import type { SpaceRuntimeConfig } from "./config.js";
+import { integrationCredentialSlot, type SpaceRuntimeConfig } from "./config.js";
+import type { McpCredentialStatus } from "./mcp-credentials.js";
 import { createCsrfToken, verifyCsrfToken } from "./csrf.js";
 import { normalizeModel, restartCurrentSpace, runtimeSettings, setCurrentSpaceSecret, setCurrentSpaceVariable } from "./hub-settings.js";
 import { normalizeModelChoices, parseOpenClawModelRef, serializeModelChoices, type ModelChoice } from "./model-choices.js";
-import { authorizeUrl, exchangeCodeForIdentity } from "./oauth.js";
+import {
+  authorizeUrl,
+  exchangeCodeForIdentity,
+  HF_MCP_OAUTH_SCOPES,
+  type OAuthIdentity,
+} from "./oauth.js";
 import { configureOpenClawGateway } from "./openclaw-config.js";
 import {
   loadOpenAiCredentialFile,
@@ -35,6 +41,10 @@ export type RuntimeControls = {
   restartOpenClawWithOpenAi(apiKey: string): Promise<void>;
   restartOpenClaw(): Promise<void>;
   setModelSettings(model: string, choices: ModelChoice[]): void;
+  saveMcpCredentials(identity: OAuthIdentity): Promise<void>;
+  clearMcpCredentials(username: string): Promise<void>;
+  mcpCredentialStatus(username: string): Promise<McpCredentialStatus>;
+  mcpServerStatus(): Promise<Array<{ id: string; name: string; enabled: boolean }>>;
 };
 
 export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: RuntimeControls): Hono {
@@ -60,7 +70,7 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
   }));
 
   app.get("/oauth/login", (c) => handleOauthLogin(c, config));
-  app.get("/oauth/callback", (c) => handleOauthCallback(c, config));
+  app.get("/oauth/callback", (c) => handleOauthCallback(c, config, controls));
   app.get("/login", (c) => c.html(loginPage(config, undefined, normalizeNext(c.req.query("next") ?? "/"))));
   app.get("/logout", (c) => logoutResponse(config, false));
   app.get("/mlclaw/logout", (c) => logoutResponse(config, false));
@@ -98,6 +108,26 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
       return auth;
     }
     return c.json(await statusPayload(config, controls));
+  });
+
+  app.post("/mlclaw/api/integrations/huggingface/disconnect", async (c) => {
+    const auth = requireAdmin(c, config);
+    if (auth instanceof Response) {
+      return auth;
+    }
+    const csrf = requireCsrf(c, config, auth.username);
+    if (csrf) {
+      return csrf;
+    }
+    if (config.gatewayLocation === "local") {
+      return c.json({
+        ok: false,
+        error: "Local integrations use the local Hugging Face token; manage that credential with the ML Claw CLI",
+      }, 409);
+    }
+    const credentialSlot = integrationCredentialSlot(config) ?? auth.username;
+    await controls.clearMcpCredentials(credentialSlot);
+    return c.json({ ok: true, configured: false });
   });
 
   app.get("/mlclaw/api/settings", (c) => {
@@ -239,8 +269,14 @@ function handleOauthLogin(c: Context, config: SpaceRuntimeConfig): Response {
   if (!config.oauthClientId || !config.oauthClientSecret) {
     return c.html(loginPage(config, "Hugging Face OAuth is not configured.", next));
   }
+  const session = readSession(c.req.header("cookie"), config.sessionSecret);
+  const integrationsRequested = c.req.query("intent") === "integrations";
+  const intent = integrationsRequested && session && isAdmin(config, session.username)
+    ? "integrations"
+    : "login";
   const { state, cookie } = createOauthStateCookie({
     next,
+    intent,
     sessionSecret: config.sessionSecret,
     secure: config.cookieSecure,
   });
@@ -250,12 +286,12 @@ function handleOauthLogin(c: Context, config: SpaceRuntimeConfig): Response {
     clientSecret: config.oauthClientSecret,
     providerUrl: config.providerUrl,
     redirectUri,
-  }, state) });
+  }, state, intent === "integrations" ? HF_MCP_OAUTH_SCOPES : undefined) });
   headers.append("set-cookie", cookie);
   return new Response(null, { status: 302, headers });
 }
 
-async function handleOauthCallback(c: Context, config: SpaceRuntimeConfig): Promise<Response> {
+async function handleOauthCallback(c: Context, config: SpaceRuntimeConfig, controls: RuntimeControls): Promise<Response> {
   const stateCookie = readOauthState(c.req.header("cookie"), config.sessionSecret);
   const state = c.req.query("state");
   const code = c.req.query("code");
@@ -270,6 +306,18 @@ async function handleOauthCallback(c: Context, config: SpaceRuntimeConfig): Prom
   }, code);
   if (!identity) {
     return c.html(loginPage(config, "Hugging Face sign-in failed. Try again."), 401);
+  }
+  if (stateCookie.intent === "integrations") {
+    const session = readSession(c.req.header("cookie"), config.sessionSecret);
+    if (!session || !isAdmin(config, session.username) || session.username !== identity.username) {
+      return c.html(loginPage(config, "Integration authorization requires the signed-in ML Claw administrator."), 403);
+    }
+    try {
+      await controls.saveMcpCredentials(identity);
+    } catch (err) {
+      process.stderr.write(`[mlclaw] failed to store MCP authorization: ${formatError(err)}\n`);
+      return c.html(loginPage(config, "Hugging Face sign-in succeeded, but MCP authorization could not be stored."), 500);
+    }
   }
   const headers = new Headers({ location: normalizeNext(typeof stateCookie.next === "string" ? stateCookie.next : "/") });
   headers.append("set-cookie", createSessionCookie({
@@ -359,6 +407,17 @@ function isAdmin(config: SpaceRuntimeConfig, username: string): boolean {
 }
 
 async function statusPayload(config: SpaceRuntimeConfig, controls: RuntimeControls): Promise<Record<string, unknown>> {
+  const credentialSlot = integrationCredentialSlot(config) ?? "";
+  const localTokenConfigured = config.gatewayLocation === "local" && Boolean(config.hfToken);
+  let mcpCredentials: McpCredentialStatus | undefined;
+  let mcpCredentialError: string | undefined;
+  if (!localTokenConfigured && credentialSlot) {
+    try {
+      mcpCredentials = await controls.mcpCredentialStatus(credentialSlot);
+    } catch {
+      mcpCredentialError = "Encrypted MCP credentials could not be loaded";
+    }
+  }
   return {
     ok: true,
     mode: config.mode,
@@ -387,6 +446,17 @@ async function statusPayload(config: SpaceRuntimeConfig, controls: RuntimeContro
       configured: await controls.openAiConfigured(),
       environmentConfigured: openAiConfigured(),
       runtimeFileConfigured: Boolean(await loadOpenAiCredentialFile(config.openaiCredentialFile)),
+    },
+    integrations: {
+      automatic: true,
+      source: localTokenConfigured ? "local" : mcpCredentials?.configured ? "oauth" : null,
+      identity: mcpCredentials?.configured ? mcpCredentials.username : null,
+      configured: localTokenConfigured || (mcpCredentials?.configured ?? false),
+      scope: mcpCredentials?.scope ?? [],
+      expiresAt: mcpCredentials?.expiresAt ?? null,
+      refreshable: mcpCredentials?.refreshable ?? false,
+      error: mcpCredentialError ?? null,
+      servers: await controls.mcpServerStatus(),
     },
     branding: publicBranding(config.branding),
   };
@@ -426,6 +496,9 @@ async function writeRuntimeSettingsFile(
     updatedAt: new Date().toISOString(),
   }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
   await fs.chmod(config.runtimeSettingsFile, 0o600);
+  if (process.getuid?.() === 0) {
+    await fs.chown(config.runtimeSettingsFile, config.openclawUid, config.openclawGid);
+  }
 }
 
 async function serveFile(file: string, contentTypeHeader: string, immutable = false): Promise<Response> {
