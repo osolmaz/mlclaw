@@ -4862,6 +4862,7 @@ function createMountedBucketHub(params) {
       try {
         await fs.mkdir(dir, { recursive: true });
         await fs.copyFile(localPath, tmp);
+        await fs.chmod(tmp, 420);
         await fs.rename(tmp, target);
       } catch (err) {
         await fs.rm(tmp, { force: true }).catch(() => void 0);

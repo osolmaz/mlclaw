@@ -129,6 +129,7 @@ describe("snapshot/restore round-trip", () => {
     });
     expect(snap.kind).toBe("uploaded");
     await expect(fs.access(path.join(mountDir, MANIFEST_KEY))).resolves.toBeUndefined();
+    expect((await fs.stat(path.join(mountDir, MANIFEST_KEY))).mode & 0o777).toBe(0o644);
 
     const liveB = path.join(dir, "live-mounted-b");
     const restore = await runRestore({
