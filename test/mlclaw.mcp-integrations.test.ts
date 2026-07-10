@@ -678,6 +678,39 @@ describe("automatic MCP integrations", () => {
     });
   });
 
+  it("bounds Research Agent setup by the end-to-end deadline", async () => {
+    const upstream = http.createServer(async (req) => {
+      await drain(req);
+      await new Promise<void>((resolve) => req.once("close", resolve));
+    });
+    const upstreamPort = await listen(upstream);
+    cleanups.push(() => closeServer(upstream));
+
+    const fixture = await integrationFixture({
+      researchMcpUrl: `http://127.0.0.1:${upstreamPort}/mcp`,
+      researchTimeoutMs: 40,
+    });
+    const startedAt = Date.now();
+    const response = await fetch(`http://127.0.0.1:${fixture.config.mcpPort}/mcp/research`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "mcp-session-id": "research-setup-deadline",
+        "x-mlclaw-mcp-key": deriveInternalToken(fixture.config.sessionSecret),
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 11,
+        method: "tools/call",
+        params: { name: "research", arguments: { topic: "setup deadline" } },
+      }),
+    });
+
+    expect(response.status).toBe(502);
+    expect(Date.now() - startedAt).toBeLessThan(500);
+    expect(await response.json()).toMatchObject({ error: { message: "MCP integration request failed" } });
+  });
+
   it("returns a Research Agent JSON-RPC error without polling again", async () => {
     const calls: string[] = [];
     const upstream = http.createServer(async (req, res) => {

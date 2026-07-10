@@ -4,6 +4,7 @@ import { type SyncConfig, log, logError, resolveSyncConfig } from "./paths.js";
 import { runRestore } from "./restore.js";
 import { runSnapshot } from "./snapshot.js";
 import { supervise } from "./supervise.js";
+import { runStageWorker } from "./stage-worker.js";
 
 const USAGE = `usage:
   hf-state-sync restore
@@ -22,6 +23,14 @@ function makeHub(config: SyncConfig): BucketHub | null {
 }
 
 async function main(argv: string[]): Promise<number> {
+  if (argv[0] === "stage-worker") {
+    const liveDir = argv[1];
+    if (!liveDir) {
+      logError("stage-worker: missing live directory");
+      return 2;
+    }
+    return runStageWorker(liveDir);
+  }
   const config = resolveSyncConfig();
   const hub = makeHub(config);
   if (!hub) {

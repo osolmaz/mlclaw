@@ -24,6 +24,10 @@ per-MCP login is required.
 - Keep the trusted ML Claw wrapper as root and run OpenClaw as the unprivileged
   `node` user. Wrapper-only secrets and encrypted credential files are not
   readable by OpenClaw.
+- Run restore and snapshot traversal in secret-free processes under the
+  OpenClaw UID. Stream staged snapshot bytes to the trusted supervisor for
+  bucket upload, so filesystem races cannot make root follow agent-controlled
+  paths into wrapper-only credentials.
 - Run a loopback-only MCP integration server in the wrapper. OpenClaw receives
   only local MCP URLs and an internal capability token, never the Hugging Face
   OAuth credential.

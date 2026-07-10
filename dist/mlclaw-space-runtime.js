@@ -7238,12 +7238,14 @@ var McpIntegrationServer = class {
     });
   }
   async handleResearchCall(req, res, body, request, accessToken, signal) {
+    const deadline = Date.now() + this.config.researchTimeoutMs;
     const initial = await forwardBuffered({
       method: req.method ?? "POST",
       requestHeaders: req.headers,
       body,
       url: this.config.researchMcpUrl,
       accessToken,
+      timeoutMs: remainingUpstreamTimeout(deadline),
       signal
     });
     const message = parseMcpResponse(initial.body);
@@ -7259,16 +7261,17 @@ var McpIntegrationServer = class {
       return;
     }
     try {
+      const startToken = await this.integrationAccessToken();
       await this.callResearchBackend({
         sessionId,
         tool: prefab.startTool,
         arguments: { job_id: prefab.jobId },
-        accessToken: await this.integrationAccessToken(),
+        accessToken: startToken,
         id: `${String(request.id ?? "research")}:start`,
         protocolVersion,
+        timeoutMs: remainingUpstreamTimeout(deadline),
         signal
       });
-      const deadline = Date.now() + this.config.researchTimeoutMs;
       let status;
       while (Date.now() < deadline) {
         if (res.destroyed) {
@@ -7677,6 +7680,9 @@ function timedAbortSignal(parent, timeoutMs) {
 }
 function isTimeoutError(err) {
   return err instanceof Error && err.name === "TimeoutError";
+}
+function remainingUpstreamTimeout(deadline) {
+  return Math.max(1, Math.min(UPSTREAM_TIMEOUT_MS, deadline - Date.now()));
 }
 
 // src/mlclaw-space-runtime/openclaw-config.ts

@@ -8,6 +8,7 @@ import type { SyncConfig } from "../src/hf-state-sync/paths.js";
 import { createMountedBucketHub } from "../src/hf-state-sync/hub.js";
 import { runRestore } from "../src/hf-state-sync/restore.js";
 import { runSnapshot } from "../src/hf-state-sync/snapshot.js";
+import { snapshotWorkerEnvironment, unprivilegedStageArchive } from "../src/hf-state-sync/stage-worker.js";
 import { createFakeHub } from "./fake-hub.js";
 
 const PREFIX = "openclaw-state";
@@ -57,6 +58,36 @@ async function writeState(liveDir: string, marker: string): Promise<void> {
 const BOOT = "2026-06-11T00:00:00.000Z";
 
 describe("snapshot/restore round-trip", () => {
+  it("stages snapshots in a secret-free unprivileged worker", async () => {
+    const hub = createFakeHub();
+    const live = path.join(dir, "live-worker");
+    await writeState(live, "worker");
+    const uid = process.getuid?.();
+    const gid = process.getgid?.();
+    if (uid === undefined || gid === undefined) {
+      return;
+    }
+
+    const snap = await runSnapshot({
+      config: configFor(live),
+      hub,
+      bootTime: BOOT,
+      stageArchive: unprivilegedStageArchive({
+        uid,
+        gid,
+        scriptPath: path.resolve("dist/hf-state-sync.js"),
+      }),
+    });
+
+    expect(snap.kind).toBe("uploaded");
+    expect(snapshotWorkerEnvironment({
+      PATH: "/bin",
+      HF_TOKEN: "hf_secret",
+      MLCLAW_CREDENTIAL_KEY: "credential-secret",
+      MLCLAW_SESSION_SECRET: "session-secret",
+    })).toEqual({ HOME: "/home/node", PATH: "/bin", TMPDIR: undefined });
+  });
+
   it("snapshots state and workspace, then restores into a fresh live dir", async () => {
     const hub = createFakeHub();
     const liveA = path.join(dir, "live-a");

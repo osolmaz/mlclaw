@@ -27,9 +27,9 @@ CONFIG_PATH="$OPENCLAW_CONFIG_PATH"
 echo "[hf-state-sync] starting restore"
 RESTORE_TIMEOUT_SECONDS="${MLCLAW_RESTORE_TIMEOUT_SECONDS:-180}"
 if command -v timeout >/dev/null 2>&1; then
-  timeout "${RESTORE_TIMEOUT_SECONDS}s" node /app/hf-state-sync.js restore
+  timeout "${RESTORE_TIMEOUT_SECONDS}s" gosu node node /app/hf-state-sync.js restore
 else
-  node /app/hf-state-sync.js restore
+  gosu node node /app/hf-state-sync.js restore
 fi
 echo "[hf-state-sync] restore complete"
 
@@ -96,5 +96,6 @@ fi
 chown -R node:node "$LIVE_DIR"
 # The wrapper remains the trusted root supervisor so its OAuth credentials and
 # process environment are not readable by the unprivileged OpenClaw child. The
-# wrapper itself drops the OpenClaw process to the node uid/gid.
+# state supervisor stages live files in a separate secret-free node process;
+# only the trusted parent uploads the resulting archive.
 exec node /app/hf-state-sync.js supervise -- node /app/mlclaw-space-runtime.js

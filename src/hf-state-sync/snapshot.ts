@@ -18,6 +18,15 @@ export type SnapshotOutcome =
   | { kind: "skipped"; reason: "no-bucket" | "empty-state" }
   | { kind: "failed"; detail: string };
 
+export type StagedArchiveOutcome =
+  | { kind: "staged"; databaseCount: number }
+  | { kind: "corrupt-database"; database: string; detail: string };
+
+export type StageArchive = (params: {
+  liveDir: string;
+  archivePath: string;
+}) => Promise<StagedArchiveOutcome>;
+
 // Object names must be unique across overlapping containers (run-id suffix)
 // AND within one run (counter): a final snapshot can land in the same second
 // as the last interval snapshot, and an overwritten tarball behind a distinct
@@ -61,6 +70,7 @@ export async function runSnapshot(params: {
   hub: BucketHub;
   bootTime: string;
   now?: () => Date;
+  stageArchive?: StageArchive;
 }): Promise<SnapshotOutcome> {
   const { config, hub } = params;
   if (!config.bucket) {
@@ -74,20 +84,19 @@ export async function runSnapshot(params: {
 
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "hf-state-snapshot-"));
   try {
-    const stagingDir = path.join(workDir, "stage");
-    const staged = await stageLiveDir(config.liveDir, stagingDir);
+    const now = (params.now ?? (() => new Date()))();
+    const id = snapshotId(now, config.runId);
+    const archiveName = `state-${id}.tar.zst`;
+    const archivePath = path.join(workDir, archiveName);
+    const staged = params.stageArchive
+      ? await params.stageArchive({ liveDir: config.liveDir, archivePath })
+      : await stageArchiveInProcess(config.liveDir, path.join(workDir, "stage"), archivePath);
     if (staged.kind === "corrupt-database") {
       return {
         kind: "failed",
         detail: `live database ${staged.database} failed integrity check: ${staged.detail}`,
       };
     }
-
-    const now = (params.now ?? (() => new Date()))();
-    const id = snapshotId(now, config.runId);
-    const archiveName = `state-${id}.tar.zst`;
-    const archivePath = path.join(workDir, archiveName);
-    await createTarZst(stagingDir, archivePath);
 
     const entry: SnapshotEntry = {
       id,
@@ -123,11 +132,24 @@ export async function runSnapshot(params: {
     if (expired.length > 0) {
       await hub.delete(expired.map((e) => e.path));
     }
-    log(`snapshot ${entry.id} uploaded (${entry.sizeBytes} bytes, ${staged.databases.length} dbs)`);
+    log(`snapshot ${entry.id} uploaded (${entry.sizeBytes} bytes, ${staged.databaseCount} dbs)`);
     return { kind: "uploaded", entry };
   } catch (err) {
     return { kind: "failed", detail: err instanceof Error ? err.message : String(err) };
   } finally {
     await fs.rm(workDir, { recursive: true, force: true });
   }
+}
+
+async function stageArchiveInProcess(
+  liveDir: string,
+  stagingDir: string,
+  archivePath: string,
+): Promise<StagedArchiveOutcome> {
+  const staged = await stageLiveDir(liveDir, stagingDir);
+  if (staged.kind === "corrupt-database") {
+    return staged;
+  }
+  await createTarZst(stagingDir, archivePath);
+  return { kind: "staged", databaseCount: staged.databases.length };
 }

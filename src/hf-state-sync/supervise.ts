@@ -6,6 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { BucketHub } from "./hub.js";
 import { type SyncConfig, log, logError, remotePath } from "./paths.js";
 import { runSnapshot, type SnapshotOutcome } from "./snapshot.js";
+import { unprivilegedStageArchive } from "./stage-worker.js";
 
 const LEASE_HEARTBEAT_MS = 60_000;
 const HANDOFF_REQUEST_TTL_MS = 10 * 60 * 1000;
@@ -28,6 +29,14 @@ export async function supervise(params: {
     throw new Error("supervise: missing child command");
   }
   const bootTime = new Date().toISOString();
+  const scriptPath = process.argv[1];
+  const stageArchive = process.getuid?.() === 0 && scriptPath && config.snapshotUid !== undefined && config.snapshotGid !== undefined
+    ? unprivilegedStageArchive({
+      uid: config.snapshotUid,
+      gid: config.snapshotGid,
+      scriptPath,
+    })
+    : undefined;
   let lastSnapshotId: string | undefined;
   const handoffState: { request: RuntimeHandoffRequest | null } = { request: null };
 
@@ -117,7 +126,12 @@ export async function supervise(params: {
   let inFlight: Promise<SnapshotOutcome> | null = null;
   const runOnce = async (label: string): Promise<SnapshotOutcome> => {
     try {
-      const outcome = await runSnapshot({ config, hub, bootTime });
+      const outcome = await runSnapshot({
+        config,
+        hub,
+        bootTime,
+        ...(stageArchive ? { stageArchive } : {}),
+      });
       if (outcome.kind === "failed") {
         logError(`${label}: snapshot failed: ${outcome.detail}`);
       } else if (outcome.kind === "uploaded") {

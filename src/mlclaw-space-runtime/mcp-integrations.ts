@@ -132,12 +132,14 @@ export class McpIntegrationServer {
     accessToken: string,
     signal: AbortSignal,
   ): Promise<void> {
+    const deadline = Date.now() + this.config.researchTimeoutMs;
     const initial = await forwardBuffered({
       method: req.method ?? "POST",
       requestHeaders: req.headers,
       body,
       url: this.config.researchMcpUrl,
       accessToken,
+      timeoutMs: remainingUpstreamTimeout(deadline),
       signal,
     });
     const message = parseMcpResponse(initial.body);
@@ -153,17 +155,18 @@ export class McpIntegrationServer {
       return;
     }
     try {
+      const startToken = await this.integrationAccessToken();
       await this.callResearchBackend({
         sessionId,
         tool: prefab.startTool,
         arguments: { job_id: prefab.jobId },
-        accessToken: await this.integrationAccessToken(),
+        accessToken: startToken,
         id: `${String(request.id ?? "research")}:start`,
         protocolVersion,
+        timeoutMs: remainingUpstreamTimeout(deadline),
         signal,
       });
 
-      const deadline = Date.now() + this.config.researchTimeoutMs;
       let status: Record<string, unknown> | undefined;
       while (Date.now() < deadline) {
         if (res.destroyed) {
@@ -643,4 +646,8 @@ function timedAbortSignal(parent: AbortSignal, timeoutMs: number): {
 
 function isTimeoutError(err: unknown): boolean {
   return err instanceof Error && err.name === "TimeoutError";
+}
+
+function remainingUpstreamTimeout(deadline: number): number {
+  return Math.max(1, Math.min(UPSTREAM_TIMEOUT_MS, deadline - Date.now()));
 }
