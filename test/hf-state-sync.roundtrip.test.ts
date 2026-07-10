@@ -29,7 +29,7 @@ function configFor(liveDir: string, overrides?: Partial<SyncConfig>): SyncConfig
   return {
     liveDir,
     bucket: "tester/bucket",
-      stateMountDir: null,
+    stateMountDir: null,
     bucketPrefix: PREFIX,
     intervalSeconds: 60,
     handoffPollSeconds: 5,
@@ -71,6 +71,9 @@ describe("snapshot/restore round-trip", () => {
     const credentialDir = path.join(prefixDir, ".mlclaw");
     await fs.mkdir(snapshotsDir, { recursive: true });
     await fs.mkdir(credentialDir, { recursive: true });
+    await Promise.all(
+      [mountDir, prefixDir, snapshotsDir, credentialDir].map((directory) => fs.chmod(directory, 0o700)),
+    );
     const manifest = path.join(prefixDir, "manifest.json");
     const archive = path.join(snapshotsDir, "state-test.tar.zst");
     const credential = path.join(credentialDir, "mcp-oauth.enc");
@@ -80,15 +83,21 @@ describe("snapshot/restore round-trip", () => {
     await Promise.all([manifest, archive, credential].map((file) => fs.chmod(file, 0o600)));
     const liveDir = path.join(dir, "new-volume", "openclaw-live");
 
-    await prepareRestore(configFor(liveDir, {
-      stateMountDir: mountDir,
-      snapshotUid: uid,
-      snapshotGid: gid,
-    }));
+    await prepareRestore(
+      configFor(liveDir, {
+        stateMountDir: mountDir,
+        snapshotUid: uid,
+        snapshotGid: gid,
+      }),
+    );
 
     expect((await fs.stat(manifest)).mode & 0o777).toBe(0o644);
     expect((await fs.stat(archive)).mode & 0o777).toBe(0o644);
     expect((await fs.stat(credential)).mode & 0o777).toBe(0o600);
+    expect((await fs.stat(mountDir)).mode & 0o777).toBe(0o711);
+    expect((await fs.stat(prefixDir)).mode & 0o777).toBe(0o711);
+    expect((await fs.stat(snapshotsDir)).mode & 0o777).toBe(0o711);
+    expect((await fs.stat(credentialDir)).mode & 0o777).toBe(0o700);
     await expect(fs.access(path.dirname(liveDir))).resolves.toBeUndefined();
   });
 
@@ -114,13 +123,15 @@ describe("snapshot/restore round-trip", () => {
     });
 
     expect(snap.kind).toBe("uploaded");
-    expect(snapshotWorkerEnvironment({
-      PATH: "/bin",
-      HF_TOKEN: "hf_secret",
-      MLCLAW_STATE_HF_TOKEN: "hf_state_secret",
-      MLCLAW_CREDENTIAL_KEY: "credential-secret",
-      MLCLAW_SESSION_SECRET: "session-secret",
-    })).toEqual({ HOME: "/home/node", PATH: "/bin", TMPDIR: undefined });
+    expect(
+      snapshotWorkerEnvironment({
+        PATH: "/bin",
+        HF_TOKEN: "hf_secret",
+        MLCLAW_STATE_HF_TOKEN: "hf_state_secret",
+        MLCLAW_CREDENTIAL_KEY: "credential-secret",
+        MLCLAW_SESSION_SECRET: "session-secret",
+      }),
+    ).toEqual({ HOME: "/home/node", PATH: "/bin", TMPDIR: undefined });
   });
 
   it("snapshots state and workspace, then restores into a fresh live dir", async () => {
@@ -135,13 +146,9 @@ describe("snapshot/restore round-trip", () => {
     const liveB = path.join(dir, "live-b");
     const restore = await runRestore({ config: configFor(liveB), hub });
     expect(restore.kind).toBe("restored");
-    expect(await fs.readFile(path.join(liveB, ".openclaw/openclaw.json"), "utf8")).toContain(
-      "turn-1",
-    );
+    expect(await fs.readFile(path.join(liveB, ".openclaw/openclaw.json"), "utf8")).toContain("turn-1");
     // Workspace files are part of the durability contract, not just .openclaw.
-    expect(await fs.readFile(path.join(liveB, "workspace/notes.md"), "utf8")).toBe(
-      "workspace turn-1",
-    );
+    expect(await fs.readFile(path.join(liveB, "workspace/notes.md"), "utf8")).toBe("workspace turn-1");
     const db = new DatabaseSync(path.join(liveB, ".openclaw/agents/main/agent/agent.sqlite"), {
       readOnly: true,
     });
@@ -172,9 +179,7 @@ describe("snapshot/restore round-trip", () => {
       hub,
     });
     expect(restore.kind).toBe("restored");
-    expect(await fs.readFile(path.join(liveB, "workspace/notes.md"), "utf8")).toBe(
-      "workspace mounted-bucket",
-    );
+    expect(await fs.readFile(path.join(liveB, "workspace/notes.md"), "utf8")).toBe("workspace mounted-bucket");
   });
 
   it("fails closed when the configured mounted bucket root is missing", async () => {
@@ -194,10 +199,12 @@ describe("snapshot/restore round-trip", () => {
       expect(snap.detail).toContain("mounted bucket root is missing");
     }
     await expect(fs.access(mountDir)).rejects.toThrow();
-    await expect(runRestore({
-      config: configFor(path.join(dir, "restore-missing-mount"), { stateMountDir: mountDir }),
-      hub,
-    })).rejects.toThrow("mounted bucket root is missing");
+    await expect(
+      runRestore({
+        config: configFor(path.join(dir, "restore-missing-mount"), { stateMountDir: mountDir }),
+        hub,
+      }),
+    ).rejects.toThrow("mounted bucket root is missing");
   });
 
   it("restores into a live dir child under an existing mounted volume root", async () => {
@@ -341,11 +348,7 @@ describe("snapshot/restore round-trip", () => {
     }
     expect(parsed.manifest.current.id).toBe(ids[2]);
     expect(parsed.manifest.previous.map((e) => e.id)).toEqual([ids[1]]);
-    const storedSnapshots = [...hub.objects.keys()].filter((k) =>
-      k.startsWith(`${PREFIX}/snapshots/`),
-    );
-    expect(storedSnapshots.sort()).toEqual(
-      [parsed.manifest.current.path, parsed.manifest.previous[0]?.path].sort(),
-    );
+    const storedSnapshots = [...hub.objects.keys()].filter((k) => k.startsWith(`${PREFIX}/snapshots/`));
+    expect(storedSnapshots.sort()).toEqual([parsed.manifest.current.path, parsed.manifest.previous[0]?.path].sort());
   });
 });

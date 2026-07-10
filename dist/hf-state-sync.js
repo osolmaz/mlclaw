@@ -9259,9 +9259,16 @@ async function prepareRestore(config) {
   if (!config.stateMountDir) {
     return;
   }
+  await makeTraversableDirectory(config.stateMountDir);
   const prefixRoot = confinedPath(config.stateMountDir, config.bucketPrefix);
+  let prefixPart = config.stateMountDir;
+  for (const part of config.bucketPrefix.split("/").filter(Boolean)) {
+    prefixPart = path5.join(prefixPart, part);
+    await makeTraversableDirectory(prefixPart);
+  }
   await makeReadableIfFile(path5.join(prefixRoot, "manifest.json"));
   const snapshotsDir = path5.join(prefixRoot, "snapshots");
+  await makeTraversableDirectory(snapshotsDir);
   let entries;
   try {
     entries = await fs5.readdir(snapshotsDir, { withFileTypes: true });
@@ -9274,6 +9281,18 @@ async function prepareRestore(config) {
   for (const entry of entries) {
     if (entry.isFile()) {
       await fs5.chmod(path5.join(snapshotsDir, entry.name), 420);
+    }
+  }
+}
+async function makeTraversableDirectory(directory) {
+  try {
+    const stat = await fs5.lstat(directory);
+    if (stat.isDirectory()) {
+      await fs5.chmod(directory, 457);
+    }
+  } catch (err) {
+    if (!isNotFound2(err)) {
+      throw err;
     }
   }
 }
