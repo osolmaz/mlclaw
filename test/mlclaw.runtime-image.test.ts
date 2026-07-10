@@ -59,7 +59,8 @@ describe("runtime image Dockerfile", () => {
     expect(entrypoint).toContain('RESTORED_PROTECTED_STATE_DIR="$LIVE_DIR/.mlclaw-protected"');
     expect(entrypoint).toContain('PROTECTED_STATE_DIR="/var/lib/mlclaw-protected"');
     expect(entrypoint).toContain('HF_BROKER_STATE_DIR="$PROTECTED_STATE_DIR/hf-broker"');
-    expect(entrypoint).toContain("MLCLAW_ROUTER_TOKEN:-${HF_ROUTER_TOKEN:-${HF_TOKEN:-");
+    expect(entrypoint).toContain("HF_TOKEN:-${HUGGINGFACE_HUB_TOKEN:-${MLCLAW_ROUTER_TOKEN:-");
+    expect(entrypoint).toContain('export MLCLAW_TRUSTED_HF_TOKEN_FILE="$token_file"');
     expect(entrypoint).toContain('export MLCLAW_PROTECTED_STATE_DIR="$PROTECTED_STATE_DIR"');
     expect(entrypoint).toContain('env MLCLAW_STATE_HF_TOKEN="$STATE_HF_TOKEN" timeout');
     expect(entrypoint).toContain('export MLCLAW_STATE_HF_TOKEN="$STATE_HF_TOKEN"');

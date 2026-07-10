@@ -15,7 +15,7 @@ PROTECTED_STATE_DIR="/var/lib/mlclaw-protected"
 HF_BROKER_STATE_DIR="$PROTECTED_STATE_DIR/hf-broker"
 
 prepare_hf_broker() {
-  local broker_token="${MLCLAW_BROKER_HF_TOKEN:-${MLCLAW_ROUTER_TOKEN:-${HF_ROUTER_TOKEN:-${HF_TOKEN:-${HUGGINGFACE_HUB_TOKEN:-}}}}}"
+  local broker_token="${MLCLAW_BROKER_HF_TOKEN:-${HF_TOKEN:-${HUGGINGFACE_HUB_TOKEN:-${MLCLAW_ROUTER_TOKEN:-${HF_ROUTER_TOKEN:-}}}}}"
   if [ -z "$broker_token" ]; then
     echo "[hf-broker] MLCLAW_BROKER_HF_TOKEN is not configured; broker disabled"
     return
@@ -47,6 +47,9 @@ prepare_hf_broker() {
 
   export MLCLAW_HF_BROKER_URL="http://127.0.0.1:7863"
   export MLCLAW_HF_BROKER_AGENT_SECRET_FILE="$agent_secret_file"
+  if [ "${MLCLAW_GATEWAY_LOCATION:-}" = "local" ]; then
+    export MLCLAW_TRUSTED_HF_TOKEN_FILE="$token_file"
+  fi
   if [ -z "${MLCLAW_OPERATOR_BROKERS_FILE:-}" ]; then
     export MLCLAW_OPERATOR_BROKERS_FILE="$operator_brokers_file"
   fi

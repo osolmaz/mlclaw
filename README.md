@@ -283,8 +283,8 @@ through a root-only `.mlclaw-protected` staging step, then restored outside the
 agent-owned live directory before OpenClaw starts. Rebuildable Git mirrors, the
 broad token, and operator credentials are never included in snapshots.
 Local gateways pass the broad credential only to the trusted state-sync
-supervisor for bucket I/O; the supervisor removes it before starting the web
-control process or OpenClaw.
+supervisor for bucket I/O and to the trusted MCP integration proxy through a
+protected token file. Neither path passes it to OpenClaw.
 
 ## Costs
 

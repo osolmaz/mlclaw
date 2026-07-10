@@ -1484,6 +1484,7 @@ describe("ML Claw Space runtime", () => {
       "SESSION_SECRET",
       "OAUTH_CLIENT_SECRET",
       "MLCLAW_BROKER_HF_TOKEN",
+      "MLCLAW_TRUSTED_HF_TOKEN_FILE",
       "MLCLAW_OPERATOR_BROKERS_FILE",
     ];
     const keys = [...secretKeys, "HOME", "USER", "LOGNAME"];
@@ -1756,6 +1757,23 @@ describe("ML Claw Space runtime", () => {
 
     expect(config.adminUsers).toEqual(["osolmaz"]);
     expect(config.allowedUsers).toEqual(["alice", "bob", "osolmaz"]);
+  });
+
+  it("loads the trusted local integration token from a protected file", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "mlclaw-trusted-token-"));
+    cleanups.push(() => fs.rm(root, { recursive: true, force: true }));
+    const tokenFile = path.join(root, "hf-token");
+    await fs.writeFile(tokenFile, "hf_trusted_local\n", { mode: 0o600 });
+
+    const config = loadConfig({
+      SPACE_ID: "osolmaz/research",
+      MLCLAW_GATEWAY_LOCATION: "local",
+      MLCLAW_TRUSTED_HF_TOKEN_FILE: tokenFile,
+      MLCLAW_SESSION_SECRET: "x".repeat(48),
+      MLCLAW_CREDENTIAL_KEY: "k".repeat(48),
+    });
+
+    expect(config.hfToken).toBe("hf_trusted_local");
   });
 
   it("implicitly allows explicit admins", () => {
