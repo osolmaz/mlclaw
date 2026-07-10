@@ -401,6 +401,72 @@ describe("automatic MCP integrations", () => {
     });
     expect(calls).toEqual(["initialize", "research", "abc_start_research", "xyz_research_status"]);
   });
+
+  it("returns a Research Agent JSON-RPC error without polling again", async () => {
+    const calls: string[] = [];
+    const upstream = http.createServer(async (req, res) => {
+      const body = JSON.parse(await text(req)) as Record<string, unknown>;
+      const params = object(body.params);
+      const tool = String(params?.name ?? "");
+      calls.push(tool);
+      const id = body.id ?? null;
+      res.setHeader("content-type", "text/event-stream");
+      res.setHeader("mcp-session-id", "research-error-session");
+      if (tool === "research") {
+        sse(res, {
+          jsonrpc: "2.0",
+          id,
+          result: {
+            structuredContent: {
+              $prefab: {
+                state: { job_id: "research-error" },
+                view: {
+                  onMount: [
+                    { action: "toolCall", tool: "abc_start_research" },
+                    { action: "setInterval", onTick: { action: "toolCall", tool: "xyz_research_status" } },
+                  ],
+                },
+              },
+            },
+          },
+        });
+        return;
+      }
+      if (tool === "abc_start_research") {
+        sse(res, { jsonrpc: "2.0", id, result: { structuredContent: { done: false } } });
+        return;
+      }
+      sse(res, { jsonrpc: "2.0", id, error: { code: -32042, message: "research session expired" } });
+    });
+    const upstreamPort = await listen(upstream);
+    cleanups.push(() => closeServer(upstream));
+
+    const fixture = await integrationFixture({
+      researchMcpUrl: `http://127.0.0.1:${upstreamPort}/mcp`,
+      researchPollMs: 1,
+    });
+    const response = await fetch(`http://127.0.0.1:${fixture.config.mcpPort}/mcp/research`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "mcp-session-id": "research-error-session",
+        "x-mlclaw-mcp-key": deriveInternalToken(fixture.config.sessionSecret),
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 7,
+        method: "tools/call",
+        params: { name: "research", arguments: { topic: "test" } },
+      }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      jsonrpc: "2.0",
+      id: 7,
+      error: { code: -32042, message: "research session expired" },
+    });
+    expect(calls).toEqual(["research", "abc_start_research", "xyz_research_status"]);
+  });
 });
 
 async function integrationFixture(overrides: Partial<SpaceRuntimeConfig> = {}): Promise<{

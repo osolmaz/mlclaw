@@ -134,58 +134,66 @@ export class McpIntegrationServer {
       writeJson(res, 502, mcpError(request.id ?? null, -32603, "Research Agent did not establish an MCP session"));
       return;
     }
-    await this.callResearchBackend({
-      sessionId,
-      tool: prefab.startTool,
-      arguments: { job_id: prefab.jobId },
-      accessToken,
-      id: `${String(request.id ?? "research")}:start`,
-    });
-
-    const deadline = Date.now() + this.config.researchTimeoutMs;
-    let status: Record<string, unknown> | undefined;
-    while (Date.now() < deadline) {
-      if (res.destroyed) {
-        return;
-      }
-      const result = await this.callResearchBackend({
+    try {
+      await this.callResearchBackend({
         sessionId,
-        tool: prefab.statusTool,
+        tool: prefab.startTool,
         arguments: { job_id: prefab.jobId },
         accessToken,
-        id: `${String(request.id ?? "research")}:status`,
+        id: `${String(request.id ?? "research")}:start`,
       });
-      status = toolResultObject(result);
-      if (status?.done === true) {
-        const error = stringValue(status.error);
-        const resultText = stringValue(status.result);
-        writeJson(res, 200, {
-          jsonrpc: "2.0",
-          id: request.id ?? null,
-          result: {
-            content: [{
-              type: "text",
-              text: error
-                ? `Research failed: ${error}`
-                : resultText ?? `Research completed. Job: ${prefab.jobId}`,
-            }],
-            structuredContent: redactResearchStatus(status),
-            isError: Boolean(error),
-          },
+
+      const deadline = Date.now() + this.config.researchTimeoutMs;
+      let status: Record<string, unknown> | undefined;
+      while (Date.now() < deadline) {
+        if (res.destroyed) {
+          return;
+        }
+        const result = await this.callResearchBackend({
+          sessionId,
+          tool: prefab.statusTool,
+          arguments: { job_id: prefab.jobId },
+          accessToken,
+          id: `${String(request.id ?? "research")}:status`,
         });
+        status = toolResultObject(result);
+        if (status?.done === true) {
+          const error = stringValue(status.error);
+          const resultText = stringValue(status.result);
+          writeJson(res, 200, {
+            jsonrpc: "2.0",
+            id: request.id ?? null,
+            result: {
+              content: [{
+                type: "text",
+                text: error
+                  ? `Research failed: ${error}`
+                  : resultText ?? `Research completed. Job: ${prefab.jobId}`,
+              }],
+              structuredContent: redactResearchStatus(status),
+              isError: Boolean(error),
+            },
+          });
+          return;
+        }
+        await delay(this.config.researchPollMs);
+      }
+      writeJson(res, 200, {
+        jsonrpc: "2.0",
+        id: request.id ?? null,
+        result: {
+          content: [{ type: "text", text: `Research is still running. Job: ${prefab.jobId}` }],
+          structuredContent: redactResearchStatus(status ?? { job_id: prefab.jobId, status: "running", done: false }),
+          isError: false,
+        },
+      });
+    } catch (err) {
+      if (err instanceof ResearchRpcError) {
+        writeJson(res, 200, mcpError(request.id ?? null, err.code, err.message));
         return;
       }
-      await delay(this.config.researchPollMs);
+      throw err;
     }
-    writeJson(res, 200, {
-      jsonrpc: "2.0",
-      id: request.id ?? null,
-      result: {
-        content: [{ type: "text", text: `Research is still running. Job: ${prefab.jobId}` }],
-        structuredContent: redactResearchStatus(status ?? { job_id: prefab.jobId, status: "running", done: false }),
-        isError: false,
-      },
-    });
   }
 
   private async callResearchBackend(params: {
@@ -218,7 +226,21 @@ export class McpIntegrationServer {
     if (!parsed || typeof parsed !== "object") {
       throw new Error("Research Agent returned an invalid MCP response");
     }
+    const rpcError = objectValue(parsed.error);
+    if (rpcError) {
+      throw new ResearchRpcError(
+        numberValue(rpcError.code) ?? -32603,
+        stringValue(rpcError.message) ?? "Research Agent request failed",
+      );
+    }
     return parsed;
+  }
+}
+
+class ResearchRpcError extends Error {
+  constructor(readonly code: number, message: string) {
+    super(message);
+    this.name = "ResearchRpcError";
   }
 }
 
@@ -503,6 +525,10 @@ function objectValue(value: unknown): Record<string, unknown> | undefined {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function safeError(err: unknown): string {

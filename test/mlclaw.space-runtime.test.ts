@@ -145,6 +145,26 @@ describe("ML Claw Space runtime", () => {
     expect(response.headers.get("location")).toBe("/oauth/login?next=%2Fchat%3Fthread%3D1");
   });
 
+  it("recovers unreadable MCP credentials through OAuth", async () => {
+    const config = await testConfig();
+    await fs.mkdir(path.dirname(config.mcpCredentialFile), { recursive: true });
+    await fs.writeFile(config.mcpCredentialFile, "invalid encrypted credential");
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(() => closeServer(server), () => runtime.stop());
+
+    const response = await fetch(`http://127.0.0.1:${config.port}/chat`, {
+      headers: {
+        cookie: sessionCookie(config, "alice"),
+        accept: "text/html",
+      },
+      redirect: "manual",
+    });
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("/oauth/login?next=%2Fchat");
+  });
+
   it("returns dynamic Hugging Face Router model/provider options", async () => {
     const routerPort = await freePort();
     const router = http.createServer((_req, res) => {

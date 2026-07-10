@@ -161,7 +161,9 @@ export class SpaceRuntimeServer {
     }
     if (this.isAdmin(session.username) && this.config.oauthClientId && this.config.oauthClientSecret && isBrowserNavigation(req)) {
       const credentialSlot = integrationCredentialSlot(this.config);
-      const authorization = credentialSlot ? await this.mcpCredentials.status(credentialSlot) : undefined;
+      const authorization = credentialSlot
+        ? await this.mcpCredentials.status(credentialSlot).catch(() => undefined)
+        : undefined;
       if (!authorization?.configured) {
         const next = normalizeNext(`${url.pathname}${url.search}`);
         this.sendRedirect(res, `/oauth/login?next=${encodeURIComponent(next)}`);

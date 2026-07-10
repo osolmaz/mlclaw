@@ -7525,55 +7525,63 @@ var McpIntegrationServer = class {
       writeJson(res, 502, mcpError(request.id ?? null, -32603, "Research Agent did not establish an MCP session"));
       return;
     }
-    await this.callResearchBackend({
-      sessionId,
-      tool: prefab.startTool,
-      arguments: { job_id: prefab.jobId },
-      accessToken,
-      id: `${String(request.id ?? "research")}:start`
-    });
-    const deadline = Date.now() + this.config.researchTimeoutMs;
-    let status;
-    while (Date.now() < deadline) {
-      if (res.destroyed) {
-        return;
-      }
-      const result = await this.callResearchBackend({
+    try {
+      await this.callResearchBackend({
         sessionId,
-        tool: prefab.statusTool,
+        tool: prefab.startTool,
         arguments: { job_id: prefab.jobId },
         accessToken,
-        id: `${String(request.id ?? "research")}:status`
+        id: `${String(request.id ?? "research")}:start`
       });
-      status = toolResultObject(result);
-      if (status?.done === true) {
-        const error = stringValue2(status.error);
-        const resultText = stringValue2(status.result);
-        writeJson(res, 200, {
-          jsonrpc: "2.0",
-          id: request.id ?? null,
-          result: {
-            content: [{
-              type: "text",
-              text: error ? `Research failed: ${error}` : resultText ?? `Research completed. Job: ${prefab.jobId}`
-            }],
-            structuredContent: redactResearchStatus(status),
-            isError: Boolean(error)
-          }
+      const deadline = Date.now() + this.config.researchTimeoutMs;
+      let status;
+      while (Date.now() < deadline) {
+        if (res.destroyed) {
+          return;
+        }
+        const result = await this.callResearchBackend({
+          sessionId,
+          tool: prefab.statusTool,
+          arguments: { job_id: prefab.jobId },
+          accessToken,
+          id: `${String(request.id ?? "research")}:status`
         });
+        status = toolResultObject(result);
+        if (status?.done === true) {
+          const error = stringValue2(status.error);
+          const resultText = stringValue2(status.result);
+          writeJson(res, 200, {
+            jsonrpc: "2.0",
+            id: request.id ?? null,
+            result: {
+              content: [{
+                type: "text",
+                text: error ? `Research failed: ${error}` : resultText ?? `Research completed. Job: ${prefab.jobId}`
+              }],
+              structuredContent: redactResearchStatus(status),
+              isError: Boolean(error)
+            }
+          });
+          return;
+        }
+        await delay(this.config.researchPollMs);
+      }
+      writeJson(res, 200, {
+        jsonrpc: "2.0",
+        id: request.id ?? null,
+        result: {
+          content: [{ type: "text", text: `Research is still running. Job: ${prefab.jobId}` }],
+          structuredContent: redactResearchStatus(status ?? { job_id: prefab.jobId, status: "running", done: false }),
+          isError: false
+        }
+      });
+    } catch (err) {
+      if (err instanceof ResearchRpcError) {
+        writeJson(res, 200, mcpError(request.id ?? null, err.code, err.message));
         return;
       }
-      await delay(this.config.researchPollMs);
+      throw err;
     }
-    writeJson(res, 200, {
-      jsonrpc: "2.0",
-      id: request.id ?? null,
-      result: {
-        content: [{ type: "text", text: `Research is still running. Job: ${prefab.jobId}` }],
-        structuredContent: redactResearchStatus(status ?? { job_id: prefab.jobId, status: "running", done: false }),
-        isError: false
-      }
-    });
   }
   async callResearchBackend(params) {
     const response = await forwardBuffered({
@@ -7599,7 +7607,21 @@ var McpIntegrationServer = class {
     if (!parsed || typeof parsed !== "object") {
       throw new Error("Research Agent returned an invalid MCP response");
     }
+    const rpcError = objectValue(parsed.error);
+    if (rpcError) {
+      throw new ResearchRpcError(
+        numberValue(rpcError.code) ?? -32603,
+        stringValue2(rpcError.message) ?? "Research Agent request failed"
+      );
+    }
     return parsed;
+  }
+};
+var ResearchRpcError = class extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+    this.name = "ResearchRpcError";
   }
 };
 function deriveInternalToken(secret) {
@@ -7842,6 +7864,9 @@ function objectValue(value) {
 }
 function stringValue2(value) {
   return typeof value === "string" && value.trim() ? value.trim() : void 0;
+}
+function numberValue(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : void 0;
 }
 function safeError(err) {
   return err instanceof Error ? err.message : "unknown error";
@@ -9222,7 +9247,7 @@ var McpCredentialStore = class {
       if (!accessToken) {
         throw new Error("Hugging Face MCP token refresh returned an invalid response");
       }
-      const expiresIn = numberValue(body.expires_in);
+      const expiresIn = numberValue2(body.expires_in);
       const { expiresAt: _expired, ...credentialWithoutExpiry } = credential;
       const refreshed = {
         ...credentialWithoutExpiry,
@@ -9287,7 +9312,7 @@ function decodeDocument(value) {
     const item = raw2;
     const accessToken = stringValue4(item.accessToken);
     const refreshToken = stringValue4(item.refreshToken);
-    const expiresAt = numberValue(item.expiresAt);
+    const expiresAt = numberValue2(item.expiresAt);
     const credentialUsername = stringValue4(item.username);
     if (!accessToken || !credentialUsername) {
       throw new Error("invalid credential");
@@ -9299,7 +9324,7 @@ function decodeDocument(value) {
       tokenType: stringValue4(item.tokenType) ?? "Bearer",
       scope: scopeValue(item.scope) ?? [],
       ...expiresAt ? { expiresAt } : {},
-      updatedAt: numberValue(item.updatedAt) ?? 0
+      updatedAt: numberValue2(item.updatedAt) ?? 0
     };
   }
   return { version: 1, credentials };
@@ -9311,7 +9336,7 @@ function scopeValue(value) {
 function stringValue4(value) {
   return typeof value === "string" && value.trim() ? value.trim() : void 0;
 }
-function numberValue(value) {
+function numberValue2(value) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : void 0;
 }
 function isNotFound(err) {
@@ -9618,7 +9643,7 @@ var SpaceRuntimeServer = class {
     }
     if (this.isAdmin(session.username) && this.config.oauthClientId && this.config.oauthClientSecret && isBrowserNavigation2(req)) {
       const credentialSlot = integrationCredentialSlot(this.config);
-      const authorization = credentialSlot ? await this.mcpCredentials.status(credentialSlot) : void 0;
+      const authorization = credentialSlot ? await this.mcpCredentials.status(credentialSlot).catch(() => void 0) : void 0;
       if (!authorization?.configured) {
         const next = normalizeNext(`${url.pathname}${url.search}`);
         this.sendRedirect(res, `/oauth/login?next=${encodeURIComponent(next)}`);
