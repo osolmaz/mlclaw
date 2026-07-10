@@ -50,6 +50,10 @@ describe("generated Space repository", () => {
     expect(files).not.toContain("scripts/parity-probe.ts");
     expect(files.some((file) => file.startsWith("dist/"))).toBe(false);
     await expect(fs.readFile(path.join(outDir, "README.md"), "utf8")).resolves.toContain("assets/mlclaw.svg");
+    const readme = await fs.readFile(path.join(outDir, "README.md"), "utf8");
+    expect(readme).toContain("hf_oauth_scopes:");
+    expect(readme).toContain("  - read-mcp");
+    expect(readme).toContain("  - jobs");
     await expect(fs.readFile(path.join(outDir, "Dockerfile"), "utf8")).resolves.toBe("FROM example/runtime:test\n");
   });
 

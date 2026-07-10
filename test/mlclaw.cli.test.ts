@@ -904,6 +904,7 @@ describe("mlclaw CLI", () => {
       MLCLAW_RUNTIME_ID: "space-research",
       MLCLAW_RUNTIME_IMAGE: DEFAULT_RUNTIME_IMAGE,
       MLCLAW_SESSION_SECRET: "session-secret",
+      MLCLAW_CREDENTIAL_KEY: "credential-key",
       MLCLAW_ROUTER_TOKEN: "hf_router_saved",
     });
 
@@ -1445,6 +1446,7 @@ describe("mlclaw CLI", () => {
     expect(code).toBe(0);
     expect(output.join("\n")).toContain("deleted stale secrets HF_TOKEN, HUGGINGFACE_HUB_TOKEN");
     expect(output.join("\n")).toContain("mounted bucket alice/research-data at /data/mlclaw-state");
+    expect(output.join("\n")).toContain("set secret MLCLAW_CREDENTIAL_KEY");
     expect(hub.calls).toContainEqual({
       name: "addSpaceVariable",
       args: ["alice/research", "MLCLAW_STATE_MOUNT_DIR", "/data/mlclaw-state"],
@@ -1455,6 +1457,10 @@ describe("mlclaw CLI", () => {
     });
     expect(hub.calls).toContainEqual({ name: "deleteSpaceSecret", args: ["alice/research", "HF_TOKEN"] });
     expect(hub.calls).toContainEqual({ name: "deleteSpaceSecret", args: ["alice/research", "HUGGINGFACE_HUB_TOKEN"] });
+    expect(hub.calls).toContainEqual({
+      name: "addSpaceSecret",
+      args: ["alice/research", "MLCLAW_CREDENTIAL_KEY", expect.any(String)],
+    });
     expect(hub.calls).toContainEqual({
       name: "setSpaceVolumes",
       args: ["alice/research", [
@@ -1492,6 +1498,7 @@ describe("mlclaw CLI", () => {
     await hub.addSpaceVariable("alice/research", "MLCLAW_ALLOWED_USERS", "alice");
     await hub.addSpaceVariable("alice/research", "MLCLAW_ADMINS", "alice");
     await hub.addSpaceSecret("alice/research", "MLCLAW_SESSION_SECRET", "session");
+    await hub.addSpaceSecret("alice/research", "MLCLAW_CREDENTIAL_KEY", "credential-key");
     hub.calls.length = 0;
 
     const { prompt } = createPrompt([]);
@@ -1521,6 +1528,7 @@ describe("mlclaw CLI", () => {
     await hub.addSpaceVariable("alice/research", "MLCLAW_ADMINS", "alice");
     await hub.addSpaceSecret("alice/research", "HF_TOKEN", "hf_old");
     await hub.addSpaceSecret("alice/research", "MLCLAW_SESSION_SECRET", "session");
+    await hub.addSpaceSecret("alice/research", "MLCLAW_CREDENTIAL_KEY", "credential-key");
     hub.calls.length = 0;
 
     const { prompt } = createPrompt([]);
@@ -1551,6 +1559,7 @@ describe("mlclaw CLI", () => {
     await hub.addSpaceVariable("alice/research", "MLCLAW_ALLOWED_USERS", "alice");
     await hub.addSpaceVariable("alice/research", "MLCLAW_ADMINS", "alice");
     await hub.addSpaceSecret("alice/research", "MLCLAW_SESSION_SECRET", "session");
+    await hub.addSpaceSecret("alice/research", "MLCLAW_CREDENTIAL_KEY", "credential-key");
     hub.calls.length = 0;
 
     const { prompt } = createPrompt([]);
@@ -1664,6 +1673,7 @@ describe("mlclaw CLI", () => {
       MLCLAW_RUNTIME_ID: "local-research-existing",
       MLCLAW_RUNTIME_IMAGE: DEFAULT_RUNTIME_IMAGE,
       MLCLAW_SESSION_SECRET: "session-secret",
+      MLCLAW_CREDENTIAL_KEY: "credential-key",
       MLCLAW_ROUTER_TOKEN: "hf_router_saved",
     });
 
@@ -2427,6 +2437,7 @@ describe("mlclaw CLI", () => {
       MLCLAW_RUNTIME_ID: "space-research",
       MLCLAW_RUNTIME_IMAGE: DEFAULT_RUNTIME_IMAGE,
       MLCLAW_SESSION_SECRET: "session-secret",
+      MLCLAW_CREDENTIAL_KEY: "credential-key",
     });
 
     await expect(main(["gateway", "migrate", "research", "--to", "local", "--no-pull"], runtime)).resolves.toBe(0);

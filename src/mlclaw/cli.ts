@@ -572,10 +572,11 @@ async function resolveBootstrapPlan(params: {
 }): Promise<BootstrapResolvedPlan> {
   const { opts, owner, agentName, requestedGatewayLocation, hfToken, telegramToken, telegramUserId, model, runtimeImage, hub, runtime } = params;
   const names = namesFor(owner, agentName);
-  const sessionSecret = randomBytes(48).toString("base64url");
   const now = runtime.now().toISOString();
   const existingManifest = await readManifest(runtime.configRoot, agentName).catch(() => null);
-  const existingSecrets = await readSecretEnv(runtime.configRoot, agentName).catch(() => ({}));
+  const existingSecrets: Record<string, string> = await readSecretEnv(runtime.configRoot, agentName).catch(() => ({}));
+  const sessionSecret = existingSecrets.MLCLAW_SESSION_SECRET ?? randomBytes(48).toString("base64url");
+  const credentialKey = existingSecrets.MLCLAW_CREDENTIAL_KEY ?? randomBytes(32).toString("base64url");
   const gatewayLocation = requestedGatewayLocation ?? existingManifest?.gatewayLocation ?? DEFAULT_GATEWAY_LOCATION;
   if (opts.dockerContext && gatewayLocation !== "local") {
     throw new Error("--docker-context only applies to local gateway mode");
@@ -632,6 +633,7 @@ async function resolveBootstrapPlan(params: {
     ...(telegramToken ? { telegramToken } : {}),
     ...(telegramUserId ? { telegramUserId } : {}),
     sessionSecret,
+    credentialKey,
     bucket,
     model,
     agentName,
@@ -965,6 +967,7 @@ function deploymentSecrets(params: {
   telegramToken?: string;
   telegramUserId?: string;
   sessionSecret: string;
+  credentialKey: string;
   bucket: string;
   model: string;
   agentName: string;
@@ -986,6 +989,7 @@ function deploymentSecrets(params: {
     MLCLAW_RUNTIME_IMAGE: params.runtimeImage,
     MLCLAW_RUNTIME_ID: params.runtimeId,
     MLCLAW_SESSION_SECRET: params.sessionSecret,
+    MLCLAW_CREDENTIAL_KEY: params.credentialKey,
     MLCLAW_OPENCLAW_PORT: String(DEFAULT_SPACE_OPENCLAW_PORT),
     OPENCLAW_GATEWAY_PORT: String(DEFAULT_SPACE_OPENCLAW_PORT),
     ...(params.telegramToken ? { TELEGRAM_BOT_TOKEN: params.telegramToken } : {}),
@@ -1064,6 +1068,7 @@ async function deploySpaceGateway(params: {
   await clearSpaceGatewayDisabled(hub, manifest.space);
   await setDeploymentSecrets(hub, manifest.space, {
     MLCLAW_SESSION_SECRET: requiredSecret(secrets, "MLCLAW_SESSION_SECRET"),
+    MLCLAW_CREDENTIAL_KEY: requiredSecret(secrets, "MLCLAW_CREDENTIAL_KEY"),
     ...(secrets.MLCLAW_ROUTER_TOKEN ? { MLCLAW_ROUTER_TOKEN: secrets.MLCLAW_ROUTER_TOKEN } : {}),
     ...(secrets.TELEGRAM_BOT_TOKEN ? { TELEGRAM_BOT_TOKEN: secrets.TELEGRAM_BOT_TOKEN } : {}),
     ...(secrets.TELEGRAM_ALLOWED_USERS ? { TELEGRAM_ALLOWED_USERS: secrets.TELEGRAM_ALLOWED_USERS } : {}),
@@ -1861,6 +1866,14 @@ async function doctor(repoId: string, opts: DoctorOptions, hub: HubApi, runtime:
       fixed.push("set secret MLCLAW_SESSION_SECRET");
     } else {
       issues.push("secret MLCLAW_SESSION_SECRET is missing");
+    }
+  }
+  if (!secrets.has("MLCLAW_CREDENTIAL_KEY")) {
+    if (fix) {
+      await hub.addSpaceSecret(repoId, "MLCLAW_CREDENTIAL_KEY", randomBytes(32).toString("base64url"));
+      fixed.push("set secret MLCLAW_CREDENTIAL_KEY");
+    } else {
+      issues.push("secret MLCLAW_CREDENTIAL_KEY is missing");
     }
   }
   if (!variables.has("MLCLAW_TEMPLATE_REV") && !variables.has("OPENCLAW_HF_TEMPLATE_REV")) {

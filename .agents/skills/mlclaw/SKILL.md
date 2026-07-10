@@ -9,7 +9,9 @@ description: Use when setting up, operating, migrating, repairing, or explaining
 
 Use the `mlclaw` CLI as the source of truth. Do not hand-create Hugging Face
 Spaces, buckets, secrets, or Docker containers unless debugging a failed
-`mlclaw` operation. Keep credentials local to the user's machine.
+`mlclaw` operation. Keep bootstrap credentials local to the user's machine.
+Space OAuth credentials may be stored only through ML Claw's encrypted,
+process-isolated integration store.
 
 Default to the browser Space gateway unless the user explicitly asks for local
 gateway mode.
@@ -25,6 +27,8 @@ An ML Claw deployment has:
   hardware is used;
 - a prebuilt `ghcr.io/osolmaz/mlclaw` runtime image by default;
 - Hugging Face OAuth enabled on the Space;
+- automatic Hugging Face MCP and Research Agent integrations authorized by the
+  same OAuth sign-in;
 - a local deployment manifest under `~/.config/mlclaw/deployments/`;
 - local secrets under `~/.config/mlclaw/secrets/`;
 - app Spaces mount the private Storage Bucket read-write at
@@ -245,8 +249,14 @@ After signing into the Space, use the ML Claw control UI:
 - `/mlclaw/settings` chooses Router model/provider rows. App Spaces without a
   Hub token save the selection into snapshotted runtime state and restart only
   OpenClaw; the CLI remains responsible for privileged Space variable changes.
-- `/mlclaw/status` shows runtime, bucket, model, and OAuth status.
-- `/mlclaw/credentials` stores an OpenAI API key.
+- `/mlclaw/status` shows runtime, bucket, model, OAuth, and integration status.
+- `/mlclaw/credentials` connects or disconnects Hugging Face MCP and Research
+  Agent access, and stores an OpenAI API key.
+
+The trusted ML Claw wrapper stores Hugging Face OAuth tokens encrypted on the
+mounted private state volume. OpenClaw runs as a separate unprivileged Unix
+user and receives only local MCP server URLs plus an internal capability
+header; never place the OAuth token in OpenClaw config or environment.
 
 The OpenAI key is stored as a 0600 runtime file for immediate use. For
 restart-durable OpenAI credentials, use the local `mlclaw` CLI or Space

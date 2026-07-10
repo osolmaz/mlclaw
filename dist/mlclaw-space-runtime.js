@@ -914,6 +914,7 @@ function positiveNumber(value) {
 function loadConfig(env = process.env) {
   const port = integer(env.PORT ?? env.MLCLAW_SPACE_PORT, 7860);
   const openclawPort = integer(env.MLCLAW_OPENCLAW_PORT ?? env.OPENCLAW_GATEWAY_PORT, 7861);
+  const mcpPort = integer(env.MLCLAW_MCP_PORT, 7862);
   const spaceId = trim(env.SPACE_ID);
   const canonicalSpaceId = trim(env.MLCLAW_CANONICAL_SPACE_ID) ?? "osolmaz/mlclaw";
   const canonicalCreatorUserId = trim(env.MLCLAW_CANONICAL_CREATOR_USER_ID);
@@ -936,22 +937,30 @@ function loadConfig(env = process.env) {
   ]);
   const publicUrl = publicUrlFromEnv(env, port);
   const sessionSecret = trim(env.MLCLAW_SESSION_SECRET ?? env.SESSION_SECRET) ?? randomBytes(48).toString("base64url");
+  const credentialKey = trim(env.MLCLAW_CREDENTIAL_KEY) ?? randomBytes(32).toString("base64url");
   const openclawCommand = trim(env.MLCLAW_OPENCLAW_COMMAND) ?? "openclaw";
   const openclawArgs = splitArgs(env.MLCLAW_OPENCLAW_ARGS) ?? ["gateway"];
   const runtimeSettingsFile = trim(env.MLCLAW_RUNTIME_SETTINGS_FILE) ?? "/home/node/.local/share/mlclaw/live/.mlclaw/settings.json";
+  const stateMountDir = trim(env.MLCLAW_STATE_MOUNT_DIR);
+  const mcpCredentialFile = trim(env.MLCLAW_MCP_CREDENTIAL_FILE) ?? (stateMountDir ? `${stateMountDir.replace(/\/+$/, "")}/.mlclaw/mcp-oauth.enc` : `${pathDirname(runtimeSettingsFile)}/mcp-oauth.enc`);
   const runtimeSettings2 = readRuntimeSettings(runtimeSettingsFile);
   const model = runtimeSettings2.model ?? trim(env.OPENCLAW_MODEL) ?? DEFAULT_MODEL;
   const agentName = trim(env.OPENCLAW_AGENT_NAME);
   return {
     port,
     openclawPort,
+    mcpPort,
     openclawHost: trim(env.MLCLAW_OPENCLAW_HOST) ?? "127.0.0.1",
+    openclawUid: integer(env.MLCLAW_OPENCLAW_UID, 1e3),
+    openclawGid: integer(env.MLCLAW_OPENCLAW_GID, 1e3),
     publicUrl,
     providerUrl: trim(env.OPENID_PROVIDER_URL) ?? "https://huggingface.co",
     oauthClientId: trim(env.OAUTH_CLIENT_ID),
     oauthClientSecret: trim(env.OAUTH_CLIENT_SECRET),
     sessionSecret,
     sessionSecretGenerated: !trim(env.MLCLAW_SESSION_SECRET ?? env.SESSION_SECRET),
+    credentialKey,
+    credentialKeyGenerated: !trim(env.MLCLAW_CREDENTIAL_KEY),
     cookieSecure: env.MLCLAW_COOKIE_SECURE === "0" ? false : !publicUrl.startsWith("http://"),
     spaceId,
     canonicalSpaceId,
@@ -965,6 +974,11 @@ function loadConfig(env = process.env) {
     routerToken: trim(env.MLCLAW_ROUTER_TOKEN ?? env.HF_ROUTER_TOKEN),
     hubUrl: trim(env.HF_ENDPOINT) ?? "https://huggingface.co",
     openaiCredentialFile: trim(env.MLCLAW_OPENAI_CREDENTIAL_FILE) ?? "/tmp/mlclaw-secrets/openai.env",
+    mcpCredentialFile,
+    hfMcpUrl: trim(env.MLCLAW_HF_MCP_URL) ?? "https://huggingface.co/mcp?bouquet=hf",
+    researchMcpUrl: trim(env.MLCLAW_RESEARCH_MCP_URL) ?? "https://evalstate-research-agent-two.hf.space/mcp",
+    researchTimeoutMs: integer(env.MLCLAW_RESEARCH_TIMEOUT_MS, 30 * 60 * 1e3),
+    researchPollMs: integer(env.MLCLAW_RESEARCH_POLL_MS, 1500),
     runtimeSettingsFile,
     openclawConfigPath: trim(env.OPENCLAW_CONFIG_PATH) ?? "/home/node/.local/share/mlclaw/live/.openclaw/openclaw.json",
     openclawCommand,
@@ -974,7 +988,7 @@ function loadConfig(env = process.env) {
     modelChoices: runtimeSettings2.modelChoices ?? parseModelChoicesEnv(env.MLCLAW_MODEL_CHOICES, model),
     routerModelsUrl: trim(env.MLCLAW_ROUTER_MODELS_URL) ?? "https://router.huggingface.co/v1/models",
     stateBucket: trim(env.OPENCLAW_HF_STATE_BUCKET),
-    stateMountDir: trim(env.MLCLAW_STATE_MOUNT_DIR),
+    stateMountDir,
     statePrefix: trim(env.OPENCLAW_HF_STATE_PREFIX),
     gatewayLocation: trim(env.MLCLAW_GATEWAY_LOCATION),
     runtimeImage: trim(env.MLCLAW_RUNTIME_IMAGE),
@@ -983,6 +997,10 @@ function loadConfig(env = process.env) {
     assetsDir: trim(env.MLCLAW_ASSETS_DIR) ?? "/app/assets",
     branding: resolveBranding(env, agentName)
   };
+}
+function pathDirname(file) {
+  const slash = file.lastIndexOf("/");
+  return slash > 0 ? file.slice(0, slash) : ".";
 }
 function resolveMode(params) {
   if (params.env.MLCLAW_FORCE_TEMPLATE === "1") {
@@ -1051,8 +1069,8 @@ function readRuntimeSettings(file) {
 
 // src/mlclaw-space-runtime/server.ts
 import { spawn } from "node:child_process";
-import http2 from "node:http";
-import { Readable } from "node:stream";
+import http3 from "node:http";
+import { Readable as Readable2 } from "node:stream";
 
 // src/mlclaw-space-runtime/app.ts
 import fs4 from "node:fs/promises";
@@ -1197,26 +1215,26 @@ var handleParsingNestedValues = (form, key, value) => {
 };
 
 // node_modules/hono/dist/utils/url.js
-var splitPath = (path5) => {
-  const paths = path5.split("/");
+var splitPath = (path6) => {
+  const paths = path6.split("/");
   if (paths[0] === "") {
     paths.shift();
   }
   return paths;
 };
 var splitRoutingPath = (routePath) => {
-  const { groups, path: path5 } = extractGroupsFromPath(routePath);
-  const paths = splitPath(path5);
+  const { groups, path: path6 } = extractGroupsFromPath(routePath);
+  const paths = splitPath(path6);
   return replaceGroupMarks(paths, groups);
 };
-var extractGroupsFromPath = (path5) => {
+var extractGroupsFromPath = (path6) => {
   const groups = [];
-  path5 = path5.replace(/\{[^}]+\}/g, (match2, index) => {
+  path6 = path6.replace(/\{[^}]+\}/g, (match2, index) => {
     const mark = `@${index}`;
     groups.push([mark, match2]);
     return mark;
   });
-  return { groups, path: path5 };
+  return { groups, path: path6 };
 };
 var replaceGroupMarks = (paths, groups) => {
   for (let i = groups.length - 1; i >= 0; i--) {
@@ -1273,8 +1291,8 @@ var getPath = (request) => {
       const queryIndex = url.indexOf("?", i);
       const hashIndex = url.indexOf("#", i);
       const end = queryIndex === -1 ? hashIndex === -1 ? void 0 : hashIndex : hashIndex === -1 ? queryIndex : Math.min(queryIndex, hashIndex);
-      const path5 = url.slice(start, end);
-      return tryDecodeURI(path5.includes("%25") ? path5.replace(/%25/g, "%2525") : path5);
+      const path6 = url.slice(start, end);
+      return tryDecodeURI(path6.includes("%25") ? path6.replace(/%25/g, "%2525") : path6);
     } else if (charCode === 63 || charCode === 35) {
       break;
     }
@@ -1291,11 +1309,11 @@ var mergePath = (base, sub, ...rest) => {
   }
   return `${base?.[0] === "/" ? "" : "/"}${base}${sub === "/" ? "" : `${base?.at(-1) === "/" ? "" : "/"}${sub?.[0] === "/" ? sub.slice(1) : sub}`}`;
 };
-var checkOptionalParameter = (path5) => {
-  if (path5.charCodeAt(path5.length - 1) !== 63 || !path5.includes(":")) {
+var checkOptionalParameter = (path6) => {
+  if (path6.charCodeAt(path6.length - 1) !== 63 || !path6.includes(":")) {
     return null;
   }
-  const segments = path5.split("/");
+  const segments = path6.split("/");
   const results = [];
   let basePath = "";
   segments.forEach((segment) => {
@@ -1436,9 +1454,9 @@ var HonoRequest = class {
    */
   path;
   bodyCache = {};
-  constructor(request, path5 = "/", matchResult = [[]]) {
+  constructor(request, path6 = "/", matchResult = [[]]) {
     this.raw = request;
-    this.path = path5;
+    this.path = path6;
     this.#matchResult = matchResult;
     this.#validatedData = {};
   }
@@ -1998,31 +2016,31 @@ var Context = class {
     return Object.fromEntries(this.#var);
   }
   #newResponse(data, arg, headers) {
-    const responseHeaders = this.#res ? new Headers(this.#res.headers) : this.#preparedHeaders ?? new Headers();
+    const responseHeaders2 = this.#res ? new Headers(this.#res.headers) : this.#preparedHeaders ?? new Headers();
     if (typeof arg === "object" && "headers" in arg) {
       const argHeaders = arg.headers instanceof Headers ? arg.headers : new Headers(arg.headers);
       for (const [key, value] of argHeaders) {
         if (key.toLowerCase() === "set-cookie") {
-          responseHeaders.append(key, value);
+          responseHeaders2.append(key, value);
         } else {
-          responseHeaders.set(key, value);
+          responseHeaders2.set(key, value);
         }
       }
     }
     if (headers) {
       for (const [k, v] of Object.entries(headers)) {
         if (typeof v === "string") {
-          responseHeaders.set(k, v);
+          responseHeaders2.set(k, v);
         } else {
-          responseHeaders.delete(k);
+          responseHeaders2.delete(k);
           for (const v2 of v) {
-            responseHeaders.append(k, v2);
+            responseHeaders2.append(k, v2);
           }
         }
       }
     }
     const status = typeof arg === "number" ? arg : arg?.status ?? this.#status;
-    return createResponseInstance(data, { status, headers: responseHeaders });
+    return createResponseInstance(data, { status, headers: responseHeaders2 });
   }
   newResponse = (...args) => this.#newResponse(...args);
   /**
@@ -2190,8 +2208,8 @@ var Hono = class _Hono {
         return this;
       };
     });
-    this.on = (method, path5, ...handlers) => {
-      for (const p of [path5].flat()) {
+    this.on = (method, path6, ...handlers) => {
+      for (const p of [path6].flat()) {
         this.#path = p;
         for (const m of [method].flat()) {
           handlers.map((handler) => {
@@ -2248,8 +2266,8 @@ var Hono = class _Hono {
    * app.route("/api", app2) // GET /api/user
    * ```
    */
-  route(path5, app) {
-    const subApp = this.basePath(path5);
+  route(path6, app) {
+    const subApp = this.basePath(path6);
     app.routes.map((r) => {
       let handler;
       if (app.errorHandler === errorHandler) {
@@ -2275,9 +2293,9 @@ var Hono = class _Hono {
    * const api = new Hono().basePath('/api')
    * ```
    */
-  basePath(path5) {
+  basePath(path6) {
     const subApp = this.#clone();
-    subApp._basePath = mergePath(this._basePath, path5);
+    subApp._basePath = mergePath(this._basePath, path6);
     return subApp;
   }
   /**
@@ -2351,7 +2369,7 @@ var Hono = class _Hono {
    * })
    * ```
    */
-  mount(path5, applicationHandler, options) {
+  mount(path6, applicationHandler, options) {
     let replaceRequest;
     let optionHandler;
     if (options) {
@@ -2378,7 +2396,7 @@ var Hono = class _Hono {
       return [c.env, executionContext];
     };
     replaceRequest ||= (() => {
-      const mergedPath = mergePath(this._basePath, path5);
+      const mergedPath = mergePath(this._basePath, path6);
       const pathPrefixLength = mergedPath === "/" ? 0 : mergedPath.length;
       return (request) => {
         const url = new URL(request.url);
@@ -2393,19 +2411,19 @@ var Hono = class _Hono {
       }
       await next();
     };
-    this.#addRoute(METHOD_NAME_ALL, mergePath(path5, "*"), handler);
+    this.#addRoute(METHOD_NAME_ALL, mergePath(path6, "*"), handler);
     return this;
   }
-  #addRoute(method, path5, handler, baseRoutePath) {
+  #addRoute(method, path6, handler, baseRoutePath) {
     method = method.toUpperCase();
-    path5 = mergePath(this._basePath, path5);
+    path6 = mergePath(this._basePath, path6);
     const r = {
       basePath: baseRoutePath !== void 0 ? mergePath(this._basePath, baseRoutePath) : this._basePath,
-      path: path5,
+      path: path6,
       method,
       handler
     };
-    this.router.add(method, path5, [handler, r]);
+    this.router.add(method, path6, [handler, r]);
     this.routes.push(r);
   }
   #handleError(err, c) {
@@ -2418,10 +2436,10 @@ var Hono = class _Hono {
     if (method === "HEAD") {
       return (async () => new Response(null, await this.#dispatch(request, executionCtx, env, "GET")))();
     }
-    const path5 = this.getPath(request, { env });
-    const matchResult = this.router.match(method, path5);
+    const path6 = this.getPath(request, { env });
+    const matchResult = this.router.match(method, path6);
     const c = new Context(request, {
-      path: path5,
+      path: path6,
       matchResult,
       env,
       executionCtx,
@@ -2521,7 +2539,7 @@ var Hono = class _Hono {
 
 // node_modules/hono/dist/router/reg-exp-router/matcher.js
 var emptyParam = [];
-function match(method, path5) {
+function match(method, path6) {
   const matchers = this.buildAllMatchers();
   const match2 = ((method2, path22) => {
     const matcher = matchers[method2] || matchers[METHOD_NAME_ALL];
@@ -2537,7 +2555,7 @@ function match(method, path5) {
     return [matcher[1][index], match3];
   });
   this.match = match2;
-  return match2(method, path5);
+  return match2(method, path6);
 }
 
 // node_modules/hono/dist/router/reg-exp-router/node.js
@@ -2652,12 +2670,12 @@ var Node = class _Node {
 var Trie = class {
   #context = { varIndex: 0 };
   #root = new Node();
-  insert(path5, index, pathErrorCheckOnly) {
+  insert(path6, index, pathErrorCheckOnly) {
     const paramAssoc = [];
     const groups = [];
     for (let i = 0; ; ) {
       let replaced = false;
-      path5 = path5.replace(/\{[^}]+\}/g, (m) => {
+      path6 = path6.replace(/\{[^}]+\}/g, (m) => {
         const mark = `@\\${i}`;
         groups[i] = [mark, m];
         i++;
@@ -2668,7 +2686,7 @@ var Trie = class {
         break;
       }
     }
-    const tokens = path5.match(/(?::[^\/]+)|(?:\/\*$)|./g) || [];
+    const tokens = path6.match(/(?::[^\/]+)|(?:\/\*$)|./g) || [];
     for (let i = groups.length - 1; i >= 0; i--) {
       const [mark] = groups[i];
       for (let j = tokens.length - 1; j >= 0; j--) {
@@ -2707,9 +2725,9 @@ var Trie = class {
 // node_modules/hono/dist/router/reg-exp-router/router.js
 var nullMatcher = [/^$/, [], /* @__PURE__ */ Object.create(null)];
 var wildcardRegExpCache = /* @__PURE__ */ Object.create(null);
-function buildWildcardRegExp(path5) {
-  return wildcardRegExpCache[path5] ??= new RegExp(
-    path5 === "*" ? "" : `^${path5.replace(
+function buildWildcardRegExp(path6) {
+  return wildcardRegExpCache[path6] ??= new RegExp(
+    path6 === "*" ? "" : `^${path6.replace(
       /\/\*$|([.\\+*[^\]$()])/g,
       (_, metaChar) => metaChar ? `\\${metaChar}` : "(?:|/.*)"
     )}$`
@@ -2731,17 +2749,17 @@ function buildMatcherFromPreprocessedRoutes(routes) {
   );
   const staticMap = /* @__PURE__ */ Object.create(null);
   for (let i = 0, j = -1, len = routesWithStaticPathFlag.length; i < len; i++) {
-    const [pathErrorCheckOnly, path5, handlers] = routesWithStaticPathFlag[i];
+    const [pathErrorCheckOnly, path6, handlers] = routesWithStaticPathFlag[i];
     if (pathErrorCheckOnly) {
-      staticMap[path5] = [handlers.map(([h]) => [h, /* @__PURE__ */ Object.create(null)]), emptyParam];
+      staticMap[path6] = [handlers.map(([h]) => [h, /* @__PURE__ */ Object.create(null)]), emptyParam];
     } else {
       j++;
     }
     let paramAssoc;
     try {
-      paramAssoc = trie.insert(path5, j, pathErrorCheckOnly);
+      paramAssoc = trie.insert(path6, j, pathErrorCheckOnly);
     } catch (e) {
-      throw e === PATH_ERROR ? new UnsupportedPathError(path5) : e;
+      throw e === PATH_ERROR ? new UnsupportedPathError(path6) : e;
     }
     if (pathErrorCheckOnly) {
       continue;
@@ -2775,12 +2793,12 @@ function buildMatcherFromPreprocessedRoutes(routes) {
   }
   return [regexp, handlerMap, staticMap];
 }
-function findMiddleware(middleware, path5) {
+function findMiddleware(middleware, path6) {
   if (!middleware) {
     return void 0;
   }
   for (const k of Object.keys(middleware).sort((a, b) => b.length - a.length)) {
-    if (buildWildcardRegExp(k).test(path5)) {
+    if (buildWildcardRegExp(k).test(path6)) {
       return [...middleware[k]];
     }
   }
@@ -2794,7 +2812,7 @@ var RegExpRouter = class {
     this.#middleware = { [METHOD_NAME_ALL]: /* @__PURE__ */ Object.create(null) };
     this.#routes = { [METHOD_NAME_ALL]: /* @__PURE__ */ Object.create(null) };
   }
-  add(method, path5, handler) {
+  add(method, path6, handler) {
     const middleware = this.#middleware;
     const routes = this.#routes;
     if (!middleware || !routes) {
@@ -2809,18 +2827,18 @@ var RegExpRouter = class {
         });
       });
     }
-    if (path5 === "/*") {
-      path5 = "*";
+    if (path6 === "/*") {
+      path6 = "*";
     }
-    const paramCount = (path5.match(/\/:/g) || []).length;
-    if (/\*$/.test(path5)) {
-      const re = buildWildcardRegExp(path5);
+    const paramCount = (path6.match(/\/:/g) || []).length;
+    if (/\*$/.test(path6)) {
+      const re = buildWildcardRegExp(path6);
       if (method === METHOD_NAME_ALL) {
         Object.keys(middleware).forEach((m) => {
-          middleware[m][path5] ||= findMiddleware(middleware[m], path5) || findMiddleware(middleware[METHOD_NAME_ALL], path5) || [];
+          middleware[m][path6] ||= findMiddleware(middleware[m], path6) || findMiddleware(middleware[METHOD_NAME_ALL], path6) || [];
         });
       } else {
-        middleware[method][path5] ||= findMiddleware(middleware[method], path5) || findMiddleware(middleware[METHOD_NAME_ALL], path5) || [];
+        middleware[method][path6] ||= findMiddleware(middleware[method], path6) || findMiddleware(middleware[METHOD_NAME_ALL], path6) || [];
       }
       Object.keys(middleware).forEach((m) => {
         if (method === METHOD_NAME_ALL || method === m) {
@@ -2838,7 +2856,7 @@ var RegExpRouter = class {
       });
       return;
     }
-    const paths = checkOptionalParameter(path5) || [path5];
+    const paths = checkOptionalParameter(path6) || [path6];
     for (let i = 0, len = paths.length; i < len; i++) {
       const path22 = paths[i];
       Object.keys(routes).forEach((m) => {
@@ -2865,13 +2883,13 @@ var RegExpRouter = class {
     const routes = [];
     let hasOwnRoute = method === METHOD_NAME_ALL;
     [this.#middleware, this.#routes].forEach((r) => {
-      const ownRoute = r[method] ? Object.keys(r[method]).map((path5) => [path5, r[method][path5]]) : [];
+      const ownRoute = r[method] ? Object.keys(r[method]).map((path6) => [path6, r[method][path6]]) : [];
       if (ownRoute.length !== 0) {
         hasOwnRoute ||= true;
         routes.push(...ownRoute);
       } else if (method !== METHOD_NAME_ALL) {
         routes.push(
-          ...Object.keys(r[METHOD_NAME_ALL]).map((path5) => [path5, r[METHOD_NAME_ALL][path5]])
+          ...Object.keys(r[METHOD_NAME_ALL]).map((path6) => [path6, r[METHOD_NAME_ALL][path6]])
         );
       }
     });
@@ -2891,13 +2909,13 @@ var SmartRouter = class {
   constructor(init) {
     this.#routers = init.routers;
   }
-  add(method, path5, handler) {
+  add(method, path6, handler) {
     if (!this.#routes) {
       throw new Error(MESSAGE_MATCHER_IS_ALREADY_BUILT);
     }
-    this.#routes.push([method, path5, handler]);
+    this.#routes.push([method, path6, handler]);
   }
-  match(method, path5) {
+  match(method, path6) {
     if (!this.#routes) {
       throw new Error("Fatal error");
     }
@@ -2912,7 +2930,7 @@ var SmartRouter = class {
         for (let i2 = 0, len2 = routes.length; i2 < len2; i2++) {
           router.add(...routes[i2]);
         }
-        res = router.match(method, path5);
+        res = router.match(method, path6);
       } catch (e) {
         if (e instanceof UnsupportedPathError) {
           continue;
@@ -2962,10 +2980,10 @@ var Node2 = class _Node2 {
     }
     this.#patterns = [];
   }
-  insert(method, path5, handler) {
+  insert(method, path6, handler) {
     this.#order = ++this.#order;
     let curNode = this;
-    const parts = splitRoutingPath(path5);
+    const parts = splitRoutingPath(path6);
     const possibleKeys = [];
     for (let i = 0, len = parts.length; i < len; i++) {
       const p = parts[i];
@@ -3014,12 +3032,12 @@ var Node2 = class _Node2 {
       }
     }
   }
-  search(method, path5) {
+  search(method, path6) {
     const handlerSets = [];
     this.#params = emptyParams;
     const curNode = this;
     let curNodes = [curNode];
-    const parts = splitPath(path5);
+    const parts = splitPath(path6);
     const curNodesQueue = [];
     const len = parts.length;
     let partOffsets = null;
@@ -3061,13 +3079,13 @@ var Node2 = class _Node2 {
           if (matcher instanceof RegExp) {
             if (partOffsets === null) {
               partOffsets = new Array(len);
-              let offset = path5[0] === "/" ? 1 : 0;
+              let offset = path6[0] === "/" ? 1 : 0;
               for (let p = 0; p < len; p++) {
                 partOffsets[p] = offset;
                 offset += parts[p].length + 1;
               }
             }
-            const restPathString = path5.substring(partOffsets[i]);
+            const restPathString = path6.substring(partOffsets[i]);
             const m = matcher.exec(restPathString);
             if (m) {
               params[name] = m[0];
@@ -3120,18 +3138,18 @@ var TrieRouter = class {
   constructor() {
     this.#node = new Node2();
   }
-  add(method, path5, handler) {
-    const results = checkOptionalParameter(path5);
+  add(method, path6, handler) {
+    const results = checkOptionalParameter(path6);
     if (results) {
       for (let i = 0, len = results.length; i < len; i++) {
         this.#node.insert(method, results[i], handler);
       }
       return;
     }
-    this.#node.insert(method, path5, handler);
+    this.#node.insert(method, path6, handler);
   }
-  match(method, path5) {
-    return this.#node.search(method, path5);
+  match(method, path6) {
+    return this.#node.search(method, path6);
   }
 };
 
@@ -3245,8 +3263,8 @@ async function restartCurrentSpace(config2) {
   });
   return true;
 }
-async function hubRequest(config2, path5, init) {
-  const response = await fetch(`${config2.hubUrl.replace(/\/+$/, "")}${path5}`, {
+async function hubRequest(config2, path6, init) {
+  const response = await fetch(`${config2.hubUrl.replace(/\/+$/, "")}${path6}`, {
     ...init,
     headers: {
       authorization: `Bearer ${config2.hfToken}`,
@@ -3737,8 +3755,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path5, errorMaps, issueData } = params;
-  const fullPath = [...path5, ...issueData.path || []];
+  const { data, path: path6, errorMaps, issueData } = params;
+  const fullPath = [...path6, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -3854,11 +3872,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path5, key) {
+  constructor(parent, value, path6, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path5;
+    this._path = path6;
     this._key = key;
   }
   get path() {
@@ -7301,8 +7319,23 @@ var coerce = {
 var NEVER = INVALID;
 
 // src/mlclaw-space-runtime/oauth.ts
+var HF_MCP_OAUTH_SCOPES = [
+  "openid",
+  "profile",
+  "read-mcp",
+  "read-repos",
+  "contribute-repos",
+  "write-repos",
+  "manage-repos",
+  "inference-api",
+  "jobs"
+];
 var tokenResponseSchema = external_exports.object({
-  access_token: external_exports.string().min(1)
+  access_token: external_exports.string().min(1),
+  refresh_token: external_exports.string().min(1).optional(),
+  token_type: external_exports.string().min(1).optional().default("Bearer"),
+  scope: external_exports.union([external_exports.string(), external_exports.array(external_exports.string())]).optional(),
+  expires_in: external_exports.number().positive().optional()
 }).passthrough();
 var userInfoSchema = external_exports.object({
   preferred_username: external_exports.string().min(1)
@@ -7312,7 +7345,7 @@ function authorizeUrl(settings, state) {
   url.searchParams.set("client_id", settings.clientId);
   url.searchParams.set("redirect_uri", settings.redirectUri);
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", "openid profile");
+  url.searchParams.set("scope", HF_MCP_OAUTH_SCOPES.join(" "));
   url.searchParams.set("state", state);
   return url.toString();
 }
@@ -7350,12 +7383,458 @@ async function exchangeCodeForIdentity(settings, code) {
   if (!userBody.success) {
     return void 0;
   }
-  return { username: userBody.data.preferred_username };
+  return {
+    username: userBody.data.preferred_username,
+    accessToken: tokenBody.data.access_token,
+    ...tokenBody.data.refresh_token ? { refreshToken: tokenBody.data.refresh_token } : {},
+    tokenType: tokenBody.data.token_type,
+    scope: normalizeScope(tokenBody.data.scope),
+    ...tokenBody.data.expires_in ? { expiresAt: Date.now() + tokenBody.data.expires_in * 1e3 } : {}
+  };
+}
+function normalizeScope(value) {
+  const scopes = Array.isArray(value) ? value : (value ?? "").split(/\s+/);
+  return [...new Set(scopes.map((scope) => scope.trim()).filter(Boolean))];
 }
 
 // src/mlclaw-space-runtime/openclaw-config.ts
 import fs2 from "node:fs/promises";
 import path2 from "node:path";
+
+// src/mlclaw-space-runtime/mcp-integrations.ts
+import { createHmac as createHmac2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import http from "node:http";
+import { Readable } from "node:stream";
+var MAX_REQUEST_BYTES = 16 * 1024 * 1024;
+var UPSTREAM_TIMEOUT_MS = 12e4;
+var INTERNAL_HEADER = "x-mlclaw-mcp-key";
+var McpIntegrationServer = class {
+  constructor(config2, credentials) {
+    this.config = config2;
+    this.credentials = credentials;
+    this.internalToken = deriveInternalToken(config2.sessionSecret);
+  }
+  server;
+  internalToken;
+  managedServerConfig() {
+    return managedMcpServerConfig(this.config);
+  }
+  async start() {
+    if (this.server) {
+      return;
+    }
+    const server2 = http.createServer((req, res) => {
+      this.handle(req, res).catch((err) => {
+        process.stderr.write(`[mlclaw] MCP integration request failed: ${safeError(err)}
+`);
+        if (!res.headersSent) {
+          writeJson(res, 502, mcpError(null, -32603, "MCP integration request failed"));
+        } else {
+          res.end();
+        }
+      });
+    });
+    await new Promise((resolve, reject) => {
+      server2.once("error", reject);
+      server2.listen(this.config.mcpPort, "127.0.0.1", () => {
+        server2.off("error", reject);
+        resolve();
+      });
+    });
+    this.server = server2;
+    process.stdout.write(`[mlclaw] MCP integrations listening on 127.0.0.1:${this.config.mcpPort}
+`);
+  }
+  async stop() {
+    const server2 = this.server;
+    this.server = void 0;
+    if (!server2) {
+      return;
+    }
+    await new Promise((resolve) => server2.close(() => resolve()));
+  }
+  async handle(req, res) {
+    if (!validInternalToken(req.headers[INTERNAL_HEADER], this.internalToken)) {
+      writeJson(res, 401, mcpError(null, -32001, "Unauthorized"));
+      return;
+    }
+    const pathname = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
+    if (pathname !== "/mcp/huggingface" && pathname !== "/mcp/research") {
+      writeJson(res, 404, mcpError(null, -32601, "Not found"));
+      return;
+    }
+    if (!this.config.adminUsers[0]) {
+      writeJson(res, 503, mcpError(null, -32002, "ML Claw has no primary admin"));
+      return;
+    }
+    let accessToken;
+    try {
+      accessToken = await this.credentials.accessToken(this.config.adminUsers[0]);
+    } catch (err) {
+      writeJson(res, 503, mcpError(null, -32002, safeError(err)));
+      return;
+    }
+    const body = await readBody(req, MAX_REQUEST_BYTES);
+    if (pathname === "/mcp/research" && req.method === "POST") {
+      const parsed = parseJsonRpc(body);
+      if (parsed?.method === "tools/call" && toolName(parsed) === "research") {
+        await this.handleResearchCall(req, res, body, parsed, accessToken);
+        return;
+      }
+    }
+    await forwardStreaming({
+      req,
+      res,
+      body,
+      url: pathname === "/mcp/huggingface" ? this.config.hfMcpUrl : this.config.researchMcpUrl,
+      accessToken
+    });
+  }
+  async handleResearchCall(req, res, body, request, accessToken) {
+    const initial = await forwardBuffered({
+      method: req.method ?? "POST",
+      requestHeaders: req.headers,
+      body,
+      url: this.config.researchMcpUrl,
+      accessToken
+    });
+    const message = parseMcpResponse(initial.body);
+    const prefab = prefabJob(message);
+    if (!prefab) {
+      writeBuffered(res, initial);
+      return;
+    }
+    const sessionId = requestHeader(req.headers, "mcp-session-id");
+    if (!sessionId) {
+      writeJson(res, 502, mcpError(request.id ?? null, -32603, "Research Agent did not establish an MCP session"));
+      return;
+    }
+    await this.callResearchBackend({
+      sessionId,
+      tool: prefab.startTool,
+      arguments: { job_id: prefab.jobId },
+      accessToken,
+      id: `${String(request.id ?? "research")}:start`
+    });
+    const deadline = Date.now() + this.config.researchTimeoutMs;
+    let status;
+    while (Date.now() < deadline) {
+      if (res.destroyed) {
+        return;
+      }
+      const result = await this.callResearchBackend({
+        sessionId,
+        tool: prefab.statusTool,
+        arguments: { job_id: prefab.jobId },
+        accessToken,
+        id: `${String(request.id ?? "research")}:status`
+      });
+      status = toolResultObject(result);
+      if (status?.done === true) {
+        const error = stringValue2(status.error);
+        const resultText = stringValue2(status.result);
+        writeJson(res, 200, {
+          jsonrpc: "2.0",
+          id: request.id ?? null,
+          result: {
+            content: [{
+              type: "text",
+              text: error ? `Research failed: ${error}` : resultText ?? `Research completed. Job: ${prefab.jobId}`
+            }],
+            structuredContent: redactResearchStatus(status),
+            isError: Boolean(error)
+          }
+        });
+        return;
+      }
+      await delay(this.config.researchPollMs);
+    }
+    writeJson(res, 200, {
+      jsonrpc: "2.0",
+      id: request.id ?? null,
+      result: {
+        content: [{ type: "text", text: `Research is still running. Job: ${prefab.jobId}` }],
+        structuredContent: redactResearchStatus(status ?? { job_id: prefab.jobId, status: "running", done: false }),
+        isError: false
+      }
+    });
+  }
+  async callResearchBackend(params) {
+    const response = await forwardBuffered({
+      method: "POST",
+      requestHeaders: {
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+        "mcp-session-id": params.sessionId
+      },
+      body: Buffer.from(JSON.stringify({
+        jsonrpc: "2.0",
+        id: params.id,
+        method: "tools/call",
+        params: { name: params.tool, arguments: params.arguments }
+      })),
+      url: this.config.researchMcpUrl,
+      accessToken: params.accessToken
+    });
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`Research Agent returned HTTP ${response.status}`);
+    }
+    const parsed = parseMcpResponse(response.body);
+    if (!parsed || typeof parsed !== "object") {
+      throw new Error("Research Agent returned an invalid MCP response");
+    }
+    return parsed;
+  }
+};
+function deriveInternalToken(secret) {
+  return createHmac2("sha256", secret).update("mlclaw:mcp-integrations:v1").digest("base64url");
+}
+function managedMcpServerConfig(config2) {
+  const headers = { [INTERNAL_HEADER]: deriveInternalToken(config2.sessionSecret) };
+  return {
+    huggingface: {
+      url: `http://127.0.0.1:${config2.mcpPort}/mcp/huggingface`,
+      transport: "streamable-http",
+      headers,
+      timeout: 120,
+      connectTimeout: 10,
+      supportsParallelToolCalls: true
+    },
+    "research-agent": {
+      url: `http://127.0.0.1:${config2.mcpPort}/mcp/research`,
+      transport: "streamable-http",
+      headers,
+      timeout: Math.ceil(config2.researchTimeoutMs / 1e3) + 30,
+      connectTimeout: 10,
+      supportsParallelToolCalls: false
+    }
+  };
+}
+async function forwardStreaming(params) {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  const timeout = setTimeout(abort, UPSTREAM_TIMEOUT_MS);
+  params.req.once("aborted", abort);
+  params.res.once("close", abort);
+  try {
+    const response = await fetch(params.url, {
+      method: params.req.method ?? "POST",
+      headers: upstreamHeaders(params.req.headers, params.accessToken),
+      ...params.body.byteLength > 0 ? { body: Buffer.from(params.body) } : {},
+      redirect: "error",
+      signal: controller.signal
+    });
+    params.res.writeHead(response.status, responseHeaders(response.headers));
+    if (!response.body) {
+      params.res.end();
+      return;
+    }
+    await new Promise((resolve, reject) => {
+      const stream = Readable.fromWeb(response.body);
+      stream.once("error", reject);
+      params.res.once("error", reject);
+      params.res.once("finish", resolve);
+      stream.pipe(params.res);
+    });
+  } finally {
+    clearTimeout(timeout);
+    params.req.off("aborted", abort);
+    params.res.off("close", abort);
+  }
+}
+async function forwardBuffered(params) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+  try {
+    const response = await fetch(params.url, {
+      method: params.method,
+      headers: upstreamHeaders(params.requestHeaders, params.accessToken),
+      ...params.body.byteLength > 0 ? { body: Buffer.from(params.body) } : {},
+      redirect: "error",
+      signal: controller.signal
+    });
+    return {
+      status: response.status,
+      headers: response.headers,
+      body: new Uint8Array(await response.arrayBuffer())
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+function upstreamHeaders(headers, accessToken) {
+  const out = new Headers({ authorization: `Bearer ${accessToken}` });
+  for (const name of ["accept", "content-type", "mcp-session-id", "mcp-protocol-version", "last-event-id"]) {
+    const value = requestHeader(headers, name);
+    if (value) {
+      out.set(name, value);
+    }
+  }
+  return out;
+}
+function responseHeaders(headers) {
+  const out = {};
+  for (const name of ["content-type", "cache-control", "mcp-session-id", "mcp-protocol-version", "www-authenticate", "retry-after"]) {
+    const value = headers.get(name);
+    if (value) {
+      out[name] = value;
+    }
+  }
+  return out;
+}
+function writeBuffered(res, response) {
+  const headers = responseHeaders(response.headers);
+  headers["content-length"] = response.body.byteLength;
+  res.writeHead(response.status, headers);
+  res.end(response.body);
+}
+async function readBody(req, limit) {
+  const chunks = [];
+  let length = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    length += buffer.length;
+    if (length > limit) {
+      throw new Error("MCP request body is too large");
+    }
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks);
+}
+function parseJsonRpc(body) {
+  try {
+    const value = JSON.parse(Buffer.from(body).toString("utf8"));
+    return value && typeof value === "object" && !Array.isArray(value) ? value : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function parseMcpResponse(body) {
+  const text = Buffer.from(body).toString("utf8").trim();
+  if (!text) {
+    return void 0;
+  }
+  const candidates = text.startsWith("{") ? [text] : text.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim());
+  for (const candidate of candidates.reverse()) {
+    try {
+      const value = JSON.parse(candidate);
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        return value;
+      }
+    } catch {
+    }
+  }
+  return void 0;
+}
+function prefabJob(message) {
+  const result = objectValue(message?.result);
+  const structured = objectValue(result?.structuredContent);
+  const prefab = objectValue(structured?.$prefab);
+  const state = objectValue(prefab?.state);
+  const view = objectValue(prefab?.view);
+  const jobId = stringValue2(state?.job_id);
+  const startTool = findActionTool(view, "_start_research");
+  const statusTool = findActionTool(view, "_research_status");
+  return jobId && startTool && statusTool ? { jobId, startTool, statusTool } : void 0;
+}
+function findActionTool(value, suffix) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findActionTool(item, suffix);
+      if (found) {
+        return found;
+      }
+    }
+    return void 0;
+  }
+  if (!value || typeof value !== "object") {
+    return void 0;
+  }
+  const record = value;
+  const tool = stringValue2(record.tool);
+  if (record.action === "toolCall" && tool?.endsWith(suffix)) {
+    return tool;
+  }
+  for (const item of Object.values(record)) {
+    const found = findActionTool(item, suffix);
+    if (found) {
+      return found;
+    }
+  }
+  return void 0;
+}
+function toolName(request) {
+  return stringValue2(objectValue(request.params)?.name);
+}
+function toolResultObject(message) {
+  const result = objectValue(message.result);
+  const structured = objectValue(result?.structuredContent);
+  if (structured) {
+    return structured;
+  }
+  const content = Array.isArray(result?.content) ? result.content : [];
+  for (const item of content) {
+    const text = stringValue2(objectValue(item)?.text);
+    if (!text) {
+      continue;
+    }
+    try {
+      const value = JSON.parse(text);
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        return value;
+      }
+    } catch {
+    }
+  }
+  return void 0;
+}
+function redactResearchStatus(status) {
+  return Object.fromEntries(Object.entries(status).filter(([key]) => ![
+    "auth",
+    "token",
+    "access_token",
+    "refresh_token"
+  ].includes(key.toLowerCase())));
+}
+function mcpError(id, code, message) {
+  return { jsonrpc: "2.0", id, error: { code, message } };
+}
+function writeJson(res, status, value) {
+  const body = `${JSON.stringify(value)}
+`;
+  res.writeHead(status, {
+    "cache-control": "no-store",
+    "content-length": Buffer.byteLength(body),
+    "content-type": "application/json; charset=utf-8"
+  });
+  res.end(body);
+}
+function validInternalToken(value, expected) {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const actualBuffer = Buffer.from(value);
+  const expectedBuffer = Buffer.from(expected);
+  return actualBuffer.length === expectedBuffer.length && timingSafeEqual2(actualBuffer, expectedBuffer);
+}
+function requestHeader(headers, name) {
+  const value = headers[name];
+  return Array.isArray(value) ? value[0] : value;
+}
+function objectValue(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : void 0;
+}
+function stringValue2(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : void 0;
+}
+function safeError(err) {
+  return err instanceof Error ? err.message : "unknown error";
+}
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// src/mlclaw-space-runtime/openclaw-config.ts
 async function configureOpenClawGateway(config2) {
   const raw2 = await fs2.readFile(config2.openclawConfigPath, "utf8");
   const openclawConfig = JSON.parse(raw2);
@@ -7378,10 +7857,28 @@ async function configureOpenClawGateway(config2) {
     allowedOrigins: [config2.publicUrl]
   };
   configureOpenClawModels(openclawConfig, config2);
+  configureManagedMcpServers(openclawConfig, config2);
   await fs2.mkdir(path2.dirname(config2.openclawConfigPath), { recursive: true });
   await fs2.writeFile(config2.openclawConfigPath, `${JSON.stringify(openclawConfig, null, 2)}
 `, { mode: 384 });
   await fs2.chmod(config2.openclawConfigPath, 384);
+  if (process.getuid?.() === 0) {
+    await fs2.chown(config2.openclawConfigPath, config2.openclawUid, config2.openclawGid);
+  }
+}
+function configureManagedMcpServers(openclawConfig, config2) {
+  const mcp = object(openclawConfig, "mcp");
+  const servers = object(mcp, "servers");
+  for (const [name, managed] of Object.entries(managedMcpServerConfig(config2))) {
+    const existing = servers[name];
+    const userFields = existing && typeof existing === "object" && !Array.isArray(existing) ? existing : {};
+    servers[name] = {
+      ...userFields,
+      ...managed,
+      ...userFields.enabled === false ? { enabled: false } : { enabled: true },
+      ...userFields.toolFilter && typeof userFields.toolFilter === "object" ? { toolFilter: userFields.toolFilter } : {}
+    };
+  }
 }
 function configureOpenClawModels(openclawConfig, config2) {
   const agents = object(openclawConfig, "agents");
@@ -7640,7 +8137,7 @@ function normalizeRouterModelsPayload(payload) {
       continue;
     }
     const record = model;
-    const modelId = stringValue2(record.id);
+    const modelId = stringValue3(record.id);
     if (!modelId || !modelId.includes("/")) {
       continue;
     }
@@ -7670,11 +8167,11 @@ function normalizeProviderChoice(params) {
     return void 0;
   }
   const provider = params.provider;
-  const providerId = stringValue2(provider.provider);
+  const providerId = stringValue3(provider.provider);
   if (!providerId || !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(providerId)) {
     return void 0;
   }
-  const status = stringValue2(provider.status) ?? "live";
+  const status = stringValue3(provider.status) ?? "live";
   if (status !== "live") {
     return void 0;
   }
@@ -7721,7 +8218,7 @@ function compareChoices(left, right) {
   }
   return left.openclawModel.localeCompare(right.openclawModel);
 }
-function stringValue2(value) {
+function stringValue3(value) {
   return typeof value === "string" && value.trim() ? value.trim() : void 0;
 }
 function normalizeModalities2(value) {
@@ -7763,7 +8260,7 @@ function positiveNumber2(value) {
 }
 
 // src/mlclaw-space-runtime/cookies.ts
-import { createHmac as createHmac2, randomBytes as randomBytes3, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { createHmac as createHmac3, randomBytes as randomBytes3, timingSafeEqual as timingSafeEqual3 } from "node:crypto";
 function createSignedCookie(options, payload) {
   const body = Buffer.from(JSON.stringify({
     ...payload,
@@ -7815,12 +8312,12 @@ function randomState() {
   return randomBytes3(24).toString("base64url");
 }
 function sign2(value, secret) {
-  return createHmac2("sha256", secret).update(value).digest("base64url");
+  return createHmac3("sha256", secret).update(value).digest("base64url");
 }
 function signatureMatches2(a, b) {
   const left = Buffer.from(a);
   const right = Buffer.from(b);
-  return left.length === right.length && timingSafeEqual2(left, right);
+  return left.length === right.length && timingSafeEqual3(left, right);
 }
 function parseCookies(header) {
   const cookies = /* @__PURE__ */ new Map();
@@ -8081,7 +8578,7 @@ function createSpaceRuntimeApp(config2, controls) {
     }
   }));
   app.get("/oauth/login", (c) => handleOauthLogin(c, config2));
-  app.get("/oauth/callback", (c) => handleOauthCallback(c, config2));
+  app.get("/oauth/callback", (c) => handleOauthCallback(c, config2, controls));
   app.get("/login", (c) => c.html(loginPage(config2, void 0, normalizeNext(c.req.query("next") ?? "/"))));
   app.get("/logout", (c) => logoutResponse(config2, false));
   app.get("/mlclaw/logout", (c) => logoutResponse(config2, false));
@@ -8115,6 +8612,19 @@ function createSpaceRuntimeApp(config2, controls) {
       return auth;
     }
     return c.json(await statusPayload(config2, controls));
+  });
+  app.post("/mlclaw/api/integrations/huggingface/disconnect", async (c) => {
+    const auth = requireAdmin(c, config2);
+    if (auth instanceof Response) {
+      return auth;
+    }
+    const csrf = requireCsrf(c, config2, auth.username);
+    if (csrf) {
+      return csrf;
+    }
+    const integrationUser = config2.adminUsers[0] ?? auth.username;
+    await controls.clearMcpCredentials(integrationUser);
+    return c.json({ ok: true, configured: false });
   });
   app.get("/mlclaw/api/settings", (c) => {
     const auth = requireAllowed(c, config2);
@@ -8262,7 +8772,7 @@ function handleOauthLogin(c, config2) {
   headers.append("set-cookie", cookie);
   return new Response(null, { status: 302, headers });
 }
-async function handleOauthCallback(c, config2) {
+async function handleOauthCallback(c, config2, controls) {
   const stateCookie = readOauthState(c.req.header("cookie"), config2.sessionSecret);
   const state = c.req.query("state");
   const code = c.req.query("code");
@@ -8277,6 +8787,15 @@ async function handleOauthCallback(c, config2) {
   }, code);
   if (!identity) {
     return c.html(loginPage(config2, "Hugging Face sign-in failed. Try again."), 401);
+  }
+  if (isAdmin(config2, identity.username)) {
+    try {
+      await controls.saveMcpCredentials(identity);
+    } catch (err) {
+      process.stderr.write(`[mlclaw] failed to store MCP authorization: ${formatError(err)}
+`);
+      return c.html(loginPage(config2, "Hugging Face sign-in succeeded, but MCP authorization could not be stored."), 500);
+    }
   }
   const headers = new Headers({ location: normalizeNext(typeof stateCookie.next === "string" ? stateCookie.next : "/") });
   headers.append("set-cookie", createSessionCookie({
@@ -8356,6 +8875,16 @@ function isAdmin(config2, username) {
   return config2.adminUsers.includes(username);
 }
 async function statusPayload(config2, controls) {
+  const integrationUser = config2.adminUsers[0] ?? "";
+  let mcpCredentials;
+  let mcpCredentialError;
+  if (integrationUser) {
+    try {
+      mcpCredentials = await controls.mcpCredentialStatus(integrationUser);
+    } catch {
+      mcpCredentialError = "Encrypted MCP credentials could not be loaded";
+    }
+  }
   return {
     ok: true,
     mode: config2.mode,
@@ -8384,6 +8913,19 @@ async function statusPayload(config2, controls) {
       configured: await controls.openAiConfigured(),
       environmentConfigured: openAiConfigured(),
       runtimeFileConfigured: Boolean(await loadOpenAiCredentialFile(config2.openaiCredentialFile))
+    },
+    integrations: {
+      automatic: true,
+      identity: integrationUser || null,
+      configured: mcpCredentials?.configured ?? false,
+      scope: mcpCredentials?.scope ?? [],
+      expiresAt: mcpCredentials?.expiresAt ?? null,
+      refreshable: mcpCredentials?.refreshable ?? false,
+      error: mcpCredentialError ?? null,
+      servers: [
+        { id: "huggingface", name: "Hugging Face MCP", enabled: true },
+        { id: "research-agent", name: "Research Agent", enabled: true }
+      ]
     },
     branding: publicBranding(config2.branding)
   };
@@ -8476,8 +9018,238 @@ function contentType(file) {
   return "application/octet-stream";
 }
 
+// src/mlclaw-space-runtime/mcp-credentials.ts
+import { createCipheriv, createDecipheriv, hkdfSync, randomBytes as randomBytes4 } from "node:crypto";
+import fs5 from "node:fs/promises";
+import path5 from "node:path";
+var McpCredentialStore = class {
+  constructor(options) {
+    this.options = options;
+    this.key = Buffer.from(hkdfSync(
+      "sha256",
+      Buffer.from(options.secret, "utf8"),
+      Buffer.alloc(0),
+      Buffer.from("mlclaw:mcp-oauth:v1", "utf8"),
+      32
+    ));
+    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.now = options.now ?? Date.now;
+  }
+  key;
+  fetchImpl;
+  now;
+  loaded = false;
+  document = { version: 1, credentials: {} };
+  refreshes = /* @__PURE__ */ new Map();
+  async save(identity) {
+    await this.load();
+    this.document.credentials[identity.username] = {
+      username: identity.username,
+      accessToken: identity.accessToken,
+      ...identity.refreshToken ? { refreshToken: identity.refreshToken } : {},
+      tokenType: identity.tokenType,
+      scope: [...identity.scope],
+      ...identity.expiresAt ? { expiresAt: identity.expiresAt } : {},
+      updatedAt: this.now()
+    };
+    await this.persist();
+  }
+  async clear(username) {
+    await this.load();
+    if (!(username in this.document.credentials)) {
+      return;
+    }
+    delete this.document.credentials[username];
+    await this.persist();
+  }
+  async status(username) {
+    await this.load();
+    const credential = this.document.credentials[username];
+    return credential ? {
+      configured: true,
+      username,
+      scope: [...credential.scope],
+      expiresAt: credential.expiresAt ? new Date(credential.expiresAt).toISOString() : null,
+      refreshable: Boolean(credential.refreshToken)
+    } : {
+      configured: false,
+      username,
+      scope: [],
+      expiresAt: null,
+      refreshable: false
+    };
+  }
+  async accessToken(username) {
+    await this.load();
+    const credential = this.document.credentials[username];
+    if (!credential) {
+      throw new Error(`Hugging Face MCP authorization is not configured for ${username}`);
+    }
+    if (!credential.expiresAt || credential.expiresAt > this.now() + 6e4) {
+      return credential.accessToken;
+    }
+    const existing = this.refreshes.get(username);
+    if (existing) {
+      return existing;
+    }
+    const refreshing = this.refresh(username, credential).finally(() => {
+      this.refreshes.delete(username);
+    });
+    this.refreshes.set(username, refreshing);
+    return refreshing;
+  }
+  async load() {
+    if (this.loaded) {
+      return;
+    }
+    this.loaded = true;
+    let raw2;
+    try {
+      raw2 = await fs5.readFile(this.options.file, "utf8");
+    } catch (err) {
+      if (isNotFound(err)) {
+        return;
+      }
+      this.loaded = false;
+      throw new Error("Could not read encrypted MCP credentials");
+    }
+    try {
+      this.document = decodeDocument(decryptEnvelope(raw2, this.key));
+    } catch {
+      this.loaded = false;
+      throw new Error("Encrypted MCP credentials are invalid or cannot be decrypted");
+    }
+  }
+  async persist() {
+    const directory = path5.dirname(this.options.file);
+    await fs5.mkdir(directory, { recursive: true, mode: 448 });
+    const temporary = `${this.options.file}.${process.pid}.${randomBytes4(6).toString("hex")}.tmp`;
+    const encrypted = encryptDocument(this.document, this.key);
+    try {
+      await fs5.writeFile(temporary, `${JSON.stringify(encrypted)}
+`, { encoding: "utf8", mode: 384 });
+      await fs5.chmod(temporary, 384);
+      await fs5.rename(temporary, this.options.file);
+      await fs5.chmod(this.options.file, 384);
+    } finally {
+      await fs5.rm(temporary, { force: true });
+    }
+  }
+  async refresh(username, credential) {
+    if (!credential.refreshToken || !this.options.clientId || !this.options.clientSecret) {
+      throw new Error("Hugging Face MCP authorization expired; sign in again");
+    }
+    const providerUrl = this.options.providerUrl.replace(/\/+$/, "");
+    const basic = Buffer.from(`${this.options.clientId}:${this.options.clientSecret}`).toString("base64");
+    const response = await this.fetchImpl(`${providerUrl}/oauth/token`, {
+      method: "POST",
+      headers: {
+        authorization: `Basic ${basic}`,
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: credential.refreshToken,
+        client_id: this.options.clientId
+      })
+    });
+    if (!response.ok) {
+      throw new Error("Hugging Face MCP authorization expired; sign in again");
+    }
+    const body = await response.json();
+    const accessToken = stringValue4(body.access_token);
+    if (!accessToken) {
+      throw new Error("Hugging Face MCP token refresh returned an invalid response");
+    }
+    const expiresIn = numberValue(body.expires_in);
+    const refreshed = {
+      ...credential,
+      accessToken,
+      refreshToken: stringValue4(body.refresh_token) ?? credential.refreshToken,
+      tokenType: stringValue4(body.token_type) ?? credential.tokenType,
+      scope: scopeValue(body.scope) ?? credential.scope,
+      ...expiresIn ? { expiresAt: this.now() + expiresIn * 1e3 } : {},
+      updatedAt: this.now()
+    };
+    this.document.credentials[username] = refreshed;
+    await this.persist();
+    return accessToken;
+  }
+};
+function encryptDocument(document, key) {
+  const iv = randomBytes4(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const plaintext = Buffer.from(JSON.stringify(document), "utf8");
+  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  return {
+    version: 1,
+    algorithm: "aes-256-gcm",
+    iv: iv.toString("base64url"),
+    tag: cipher.getAuthTag().toString("base64url"),
+    ciphertext: ciphertext.toString("base64url")
+  };
+}
+function decryptEnvelope(raw2, key) {
+  const envelope = JSON.parse(raw2);
+  if (envelope.version !== 1 || envelope.algorithm !== "aes-256-gcm" || !envelope.iv || !envelope.tag || !envelope.ciphertext) {
+    throw new Error("invalid envelope");
+  }
+  const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(envelope.iv, "base64url"));
+  decipher.setAuthTag(Buffer.from(envelope.tag, "base64url"));
+  const plaintext = Buffer.concat([
+    decipher.update(Buffer.from(envelope.ciphertext, "base64url")),
+    decipher.final()
+  ]);
+  return JSON.parse(plaintext.toString("utf8"));
+}
+function decodeDocument(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("invalid credential document");
+  }
+  const record = value;
+  if (record.version !== 1 || !record.credentials || typeof record.credentials !== "object" || Array.isArray(record.credentials)) {
+    throw new Error("invalid credential document");
+  }
+  const credentials = {};
+  for (const [username, raw2] of Object.entries(record.credentials)) {
+    if (!raw2 || typeof raw2 !== "object" || Array.isArray(raw2)) {
+      throw new Error("invalid credential");
+    }
+    const item = raw2;
+    const accessToken = stringValue4(item.accessToken);
+    const refreshToken = stringValue4(item.refreshToken);
+    const expiresAt = numberValue(item.expiresAt);
+    if (!accessToken || stringValue4(item.username) !== username) {
+      throw new Error("invalid credential");
+    }
+    credentials[username] = {
+      username,
+      accessToken,
+      ...refreshToken ? { refreshToken } : {},
+      tokenType: stringValue4(item.tokenType) ?? "Bearer",
+      scope: scopeValue(item.scope) ?? [],
+      ...expiresAt ? { expiresAt } : {},
+      updatedAt: numberValue(item.updatedAt) ?? 0
+    };
+  }
+  return { version: 1, credentials };
+}
+function scopeValue(value) {
+  const values = Array.isArray(value) ? value.filter((item) => typeof item === "string") : typeof value === "string" ? value.split(/\s+/) : void 0;
+  return values ? [...new Set(values.map((item) => item.trim()).filter(Boolean))] : void 0;
+}
+function stringValue4(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : void 0;
+}
+function numberValue(value) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : void 0;
+}
+function isNotFound(err) {
+  return Boolean(err && typeof err === "object" && "code" in err && err.code === "ENOENT");
+}
+
 // src/mlclaw-space-runtime/proxy.ts
-import http from "node:http";
+import http2 from "node:http";
 import net from "node:net";
 var ADMIN_CONTROL_UI_SCOPES = [
   "operator.admin",
@@ -8509,14 +9281,14 @@ async function proxyHttp(req, res, config2, identity) {
     delete headers["Accept-Encoding"];
   }
   addTrustedProxyHeaders(headers, config2, identity);
-  const upstream = http.request({
+  const upstream = http2.request({
     host: config2.openclawHost,
     port: config2.openclawPort,
     method: req.method,
     path: req.url,
     headers
   }, (upstreamResponse) => {
-    const responseHeaders = sanitizeHeaders(upstreamResponse.headers);
+    const responseHeaders2 = sanitizeHeaders(upstreamResponse.headers);
     const inject = shouldInjectShell({
       method: req.method,
       requestAccept: String(req.headers.accept ?? ""),
@@ -8524,7 +9296,7 @@ async function proxyHttp(req, res, config2, identity) {
       responseContentEncoding: headerValue(upstreamResponse.headers["content-encoding"])
     });
     if (!inject) {
-      res.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders);
+      res.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders2);
       upstreamResponse.pipe(res);
       return;
     }
@@ -8534,9 +9306,9 @@ async function proxyHttp(req, res, config2, identity) {
     });
     upstreamResponse.on("end", () => {
       const body = rewriteOpenClawHtml(Buffer.concat(chunks).toString("utf8"), config2.branding);
-      delete responseHeaders["content-length"];
-      delete responseHeaders["Content-Length"];
-      res.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders);
+      delete responseHeaders2["content-length"];
+      delete responseHeaders2["Content-Length"];
+      res.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders2);
       res.end(body);
     });
   });
@@ -8641,6 +9413,14 @@ var SpaceRuntimeServer = class {
   constructor(config2, options = {}) {
     this.config = config2;
     this.exitProcess = options.exitProcess ?? ((code) => process.exit(code));
+    this.mcpCredentials = new McpCredentialStore({
+      file: config2.mcpCredentialFile,
+      secret: config2.credentialKey,
+      providerUrl: config2.providerUrl,
+      ...config2.oauthClientId ? { clientId: config2.oauthClientId } : {},
+      ...config2.oauthClientSecret ? { clientSecret: config2.oauthClientSecret } : {}
+    });
+    this.mcpIntegrations = new McpIntegrationServer(config2, this.mcpCredentials);
     this.app = createSpaceRuntimeApp(config2, {
       openclawRunning: () => Boolean(this.openclaw && !this.openclaw.killed),
       openAiConfigured: async () => openAiConfigured() || Boolean(await loadOpenAiCredentialFile(this.config.openaiCredentialFile)),
@@ -8649,7 +9429,10 @@ var SpaceRuntimeServer = class {
       setModelSettings: (model, choices) => {
         this.config.model = model;
         this.config.modelChoices = choices;
-      }
+      },
+      saveMcpCredentials: (identity) => this.mcpCredentials.save(identity),
+      clearMcpCredentials: (username) => this.mcpCredentials.clear(username),
+      mcpCredentialStatus: (username) => this.mcpCredentials.status(username)
     });
   }
   openclaw;
@@ -8657,11 +9440,14 @@ var SpaceRuntimeServer = class {
   openclawStopping = false;
   app;
   exitProcess;
+  mcpCredentials;
+  mcpIntegrations;
   async start() {
     if (this.config.mode === "app") {
+      await this.mcpIntegrations.start();
       await this.startOpenClaw();
     }
-    const server2 = http2.createServer((req, res) => {
+    const server2 = http3.createServer((req, res) => {
       this.handle(req, res).catch((err) => {
         process.stderr.write(`[mlclaw] request failed: ${formatError2(err)}
 `);
@@ -8710,6 +9496,10 @@ var SpaceRuntimeServer = class {
     return server2;
   }
   async stop() {
+    await this.stopOpenClaw();
+    await this.mcpIntegrations.stop();
+  }
+  async stopOpenClaw() {
     const child = this.openclaw;
     if (!child || child.killed) {
       return;
@@ -8749,6 +9539,14 @@ var SpaceRuntimeServer = class {
       this.sendHtml(res, unauthorizedPage(session.username), 403);
       return;
     }
+    if (this.isAdmin(session.username) && this.config.oauthClientId && this.config.oauthClientSecret && isBrowserNavigation2(req)) {
+      const authorization = await this.mcpCredentials.status(session.username);
+      if (!authorization.configured) {
+        const next = normalizeNext(`${url.pathname}${url.search}`);
+        this.sendRedirect(res, `/oauth/login?next=${encodeURIComponent(next)}`);
+        return;
+      }
+    }
     await proxyHttp(req, res, this.config, { username: session.username });
   }
   shouldRouteToMlClaw(pathname) {
@@ -8773,9 +9571,13 @@ var SpaceRuntimeServer = class {
         env.HF_TOKEN = this.config.routerToken;
         env.HUGGINGFACE_HUB_TOKEN = this.config.routerToken;
       }
+      for (const key of WRAPPER_ONLY_ENV) {
+        delete env[key];
+      }
       this.openclaw = spawn(this.config.openclawCommand, this.config.openclawArgs, {
         stdio: "inherit",
-        env
+        env,
+        ...process.getuid?.() === 0 ? { uid: this.config.openclawUid, gid: this.config.openclawGid } : {}
       });
       this.openclaw.once("exit", (code, signal) => {
         process.stdout.write(`[mlclaw] openclaw exited code=${code ?? "null"} signal=${signal ?? "null"}
@@ -8791,15 +9593,18 @@ var SpaceRuntimeServer = class {
     }
   }
   async restartOpenClawWithOpenAi(apiKey) {
-    await this.stop();
+    await this.stopOpenClaw();
     await this.startOpenClaw({ OPENAI_API_KEY: apiKey });
   }
   async restartOpenClaw() {
-    await this.stop();
+    await this.stopOpenClaw();
     await this.startOpenClaw();
   }
   isAllowed(username) {
     return this.config.allowAnySignedIn || this.config.allowedUsers.includes(username);
+  }
+  isAdmin(username) {
+    return this.config.adminUsers.includes(username);
   }
   sendUnauthenticated(req, res, url) {
     const next = normalizeNext(`${url.pathname}${url.search}`);
@@ -8828,6 +9633,12 @@ var SpaceRuntimeServer = class {
     res.end(body);
   }
 };
+var WRAPPER_ONLY_ENV = [
+  "MLCLAW_CREDENTIAL_KEY",
+  "MLCLAW_SESSION_SECRET",
+  "SESSION_SECRET",
+  "OAUTH_CLIENT_SECRET"
+];
 function nodeRequestToWebRequest(req, publicUrl) {
   const headers = new Headers();
   for (const [key, value] of Object.entries(req.headers)) {
@@ -8844,7 +9655,7 @@ function nodeRequestToWebRequest(req, publicUrl) {
     headers
   };
   if (req.method !== "GET" && req.method !== "HEAD") {
-    init.body = Readable.toWeb(req);
+    init.body = Readable2.toWeb(req);
     init.duplex = "half";
   }
   return new Request(new URL(req.url ?? "/", publicUrl).toString(), init);
@@ -8899,6 +9710,9 @@ var server = new SpaceRuntimeServer(config);
 var toolingSeedAbort = new AbortController();
 if (config.sessionSecretGenerated && config.mode === "app") {
   process2.stderr.write("[mlclaw] MLCLAW_SESSION_SECRET is missing; generated an ephemeral session secret for this boot\n");
+}
+if (config.credentialKeyGenerated && config.mode === "app") {
+  process2.stderr.write("[mlclaw] MLCLAW_CREDENTIAL_KEY is missing; generated an ephemeral credential key for this boot\n");
 }
 var httpServer = await server.start();
 if (config.mode === "app") {

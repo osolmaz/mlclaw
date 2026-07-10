@@ -110,6 +110,24 @@ describe("ML Claw Space runtime", () => {
     });
   });
 
+  it("automatically requests MCP authorization for an admin entering the gateway", async () => {
+    const config = await testConfig();
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(() => closeServer(server), () => runtime.stop());
+
+    const response = await fetch(`http://127.0.0.1:${config.port}/chat?thread=1`, {
+      headers: {
+        cookie: sessionCookie(config, "alice"),
+        accept: "text/html",
+      },
+      redirect: "manual",
+    });
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("/oauth/login?next=%2Fchat%3Fthread%3D1");
+  });
+
   it("returns dynamic Hugging Face Router model/provider options", async () => {
     const routerPort = await freePort();
     const router = http.createServer((_req, res) => {
@@ -680,7 +698,11 @@ describe("ML Claw Space runtime", () => {
     await listen(upstream, openclawPort);
     cleanups.push(() => closeServer(upstream));
 
-    const config = await testConfig({ openclawPort });
+    const config = await testConfig({
+      openclawPort,
+      oauthClientId: undefined,
+      oauthClientSecret: undefined,
+    });
     const runtime = new SpaceRuntimeServer(config);
     const server = await runtime.start();
     cleanups.push(() => closeServer(server), () => runtime.stop());
@@ -880,6 +902,39 @@ describe("ML Claw Space runtime", () => {
     });
   });
 
+  it("does not expose wrapper-only secrets to the OpenClaw child", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "mlclaw-wrapper-secrets-"));
+    cleanups.push(() => fs.rm(root, { recursive: true, force: true }));
+    const envFile = path.join(root, "env.json");
+    const keys = ["MLCLAW_CREDENTIAL_KEY", "MLCLAW_SESSION_SECRET", "SESSION_SECRET", "OAUTH_CLIENT_SECRET"];
+    const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    for (const key of keys) {
+      process.env[key] = `secret-${key}`;
+    }
+    cleanups.push(() => {
+      for (const key of keys) {
+        if (previous[key] === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = previous[key];
+        }
+      }
+    });
+    const config = await testConfig({
+      openclawArgs: [
+        "-e",
+        `require("fs").writeFileSync(${JSON.stringify(envFile)},JSON.stringify(Object.fromEntries(${JSON.stringify(keys)}.map(k=>[k,process.env[k]]))));setInterval(()=>undefined,100000)`,
+      ],
+    });
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(() => closeServer(server), () => runtime.stop());
+
+    await waitFor(async () => fileExists(envFile));
+    const env = JSON.parse(await fs.readFile(envFile, "utf8")) as Record<string, string>;
+    expect(env).toEqual({});
+  });
+
   it("preserves legacy broad Hub tokens when no Router token exists", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "mlclaw-legacy-hub-token-"));
     cleanups.push(() => fs.rm(root, { recursive: true, force: true }));
@@ -929,6 +984,15 @@ describe("ML Claw Space runtime", () => {
         restartCount += 1;
       },
       setModelSettings: () => undefined,
+      saveMcpCredentials: async () => undefined,
+      clearMcpCredentials: async () => undefined,
+      mcpCredentialStatus: async (username) => ({
+        configured: false,
+        username,
+        scope: [],
+        expiresAt: null,
+        refreshable: false,
+      }),
     });
     const cookie = sessionCookie(config, "alice");
     const csrf = createCsrfToken({ username: "alice", sessionSecret: config.sessionSecret });
@@ -954,6 +1018,18 @@ describe("ML Claw Space runtime", () => {
       gateway: {
         controlUi: {
           allowedOrigins: ["https://old.example"],
+        },
+      },
+      mcp: {
+        servers: {
+          custom: {
+            command: "custom-mcp",
+          },
+          huggingface: {
+            enabled: false,
+            toolFilter: { include: ["paper_search"] },
+            url: "https://stale.example/mcp",
+          },
         },
       },
     }));
@@ -1014,6 +1090,18 @@ describe("ML Claw Space runtime", () => {
         }),
       ]),
     );
+    expect(rewritten.mcp.servers.custom).toEqual({ command: "custom-mcp" });
+    expect(rewritten.mcp.servers.huggingface).toMatchObject({
+      enabled: false,
+      url: `http://127.0.0.1:${config.mcpPort}/mcp/huggingface`,
+      transport: "streamable-http",
+      toolFilter: { include: ["paper_search"] },
+    });
+    expect(rewritten.mcp.servers["research-agent"]).toMatchObject({
+      enabled: true,
+      url: `http://127.0.0.1:${config.mcpPort}/mcp/research`,
+      transport: "streamable-http",
+    });
   });
 
   it("makes the duplicated Space owner the default admin", () => {
@@ -1133,16 +1221,22 @@ async function testConfig(overrides: Partial<SpaceRuntimeConfig> = {}): Promise<
   await fs.writeFile(configPath, JSON.stringify({ gateway: {} }), "utf8");
   const port = overrides.port ?? await freePort();
   const openclawPort = overrides.openclawPort ?? await freePort();
+  const mcpPort = overrides.mcpPort ?? await freePort();
   return {
     port,
     openclawPort,
+    mcpPort,
     openclawHost: "127.0.0.1",
+    openclawUid: process.getuid?.() ?? 1000,
+    openclawGid: process.getgid?.() ?? 1000,
     publicUrl: `http://127.0.0.1:${port}`,
     providerUrl: "https://huggingface.co",
     oauthClientId: "client",
     oauthClientSecret: "secret",
     sessionSecret: "x".repeat(48),
     sessionSecretGenerated: false,
+    credentialKey: "k".repeat(48),
+    credentialKeyGenerated: false,
     cookieSecure: false,
     spaceId: "alice/research",
     canonicalSpaceId: "osolmaz/mlclaw",
@@ -1156,6 +1250,11 @@ async function testConfig(overrides: Partial<SpaceRuntimeConfig> = {}): Promise<
     routerToken: undefined,
     hubUrl: "https://huggingface.co",
     openaiCredentialFile: path.join(root, "secrets", "openai.env"),
+    mcpCredentialFile: path.join(root, "secrets", "mcp-oauth.enc"),
+    hfMcpUrl: "https://huggingface.co/mcp?bouquet=hf",
+    researchMcpUrl: "https://evalstate-research-agent-two.hf.space/mcp",
+    researchTimeoutMs: 30 * 60 * 1000,
+    researchPollMs: 1500,
     runtimeSettingsFile: path.join(root, ".mlclaw", "settings.json"),
     openclawConfigPath: configPath,
     openclawCommand: process.execPath,

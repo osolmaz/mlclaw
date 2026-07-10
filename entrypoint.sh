@@ -87,4 +87,7 @@ if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ "${OPENCLAW_TELEGRAM_CONNECTIVITY_PROBE
 fi
 
 chown -R node:node "$LIVE_DIR"
-exec gosu node node /app/hf-state-sync.js supervise -- node /app/mlclaw-space-runtime.js
+# The wrapper remains the trusted root supervisor so its OAuth credentials and
+# process environment are not readable by the unprivileged OpenClaw child. The
+# wrapper itself drops the OpenClaw process to the node uid/gid.
+exec node /app/hf-state-sync.js supervise -- node /app/mlclaw-space-runtime.js

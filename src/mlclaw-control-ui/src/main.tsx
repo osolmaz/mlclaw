@@ -91,6 +91,16 @@ type Status = {
     environmentConfigured: boolean;
     runtimeFileConfigured: boolean;
   };
+  integrations: {
+    automatic: boolean;
+    identity: string | null;
+    configured: boolean;
+    scope: string[];
+    expiresAt: string | null;
+    refreshable: boolean;
+    error: string | null;
+    servers: Array<{ id: string; name: string; enabled: boolean }>;
+  };
   branding: Branding;
 };
 
@@ -245,6 +255,7 @@ function Overview(props: { settings: Settings; status: Status; onNavigate: (view
         <Metric label="Model" value={props.settings.model} />
         <Metric label="Bucket" value={props.settings.stateBucket ?? "Not set"} />
         <Metric label="OpenAI" value={props.status.openai.configured ? "Configured" : "Not configured"} tone={props.status.openai.configured ? "good" : "neutral"} />
+        <Metric label="HF integrations" value={props.status.integrations.configured ? "Connected" : "Sign in again"} tone={props.status.integrations.configured ? "good" : "warn"} />
       </div>
       <section className="panel">
         <h2>Actions</h2>
@@ -460,6 +471,7 @@ function CredentialsPage(props: {
 }) {
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
 
   const save = async () => {
     props.onNotice(undefined);
@@ -486,9 +498,60 @@ function CredentialsPage(props: {
     }
   };
 
+  const disconnectHuggingFace = async () => {
+    props.onNotice(undefined);
+    if (!props.session.admin || !window.confirm("Disconnect both Hugging Face MCP integrations?")) {
+      return;
+    }
+    setDisconnecting(true);
+    try {
+      await apiPost(
+        "/mlclaw/api/integrations/huggingface/disconnect",
+        {},
+        props.session.csrfToken,
+      );
+      props.onNotice("Hugging Face MCP and Research Agent were disconnected.");
+      await props.onRefresh();
+    } catch (err) {
+      props.onNotice(errorMessage(err));
+    } finally {
+      setDisconnecting(false);
+    }
+  };
+
   return (
     <>
       <Header title="Credentials" subtitle="Secrets used by this Space runtime" />
+      <section className="panel">
+        <h2>Hugging Face integrations</h2>
+        <p className={props.status.integrations.configured ? "statusGood" : "statusWarn"}>
+          {props.status.integrations.configured
+            ? `Connected as ${props.status.integrations.identity}.`
+            : "Sign in again to authorize Hugging Face MCP and Research Agent."}
+        </p>
+        <div className="integrationList">
+          {props.status.integrations.servers.map((server) => (
+            <div className="integrationRow" key={server.id}>
+              <strong>{server.name}</strong>
+              <span>{props.status.integrations.configured && server.enabled ? "Ready" : "Disconnected"}</span>
+            </div>
+          ))}
+        </div>
+        {props.status.integrations.error ? <p className="statusWarn">{props.status.integrations.error}</p> : null}
+        <div className="buttonRow">
+          <a className="primaryButton" href="/oauth/login?next=%2Fmlclaw%2Fcredentials">
+            {props.status.integrations.configured ? "Reconnect" : "Connect"}
+          </a>
+          <button
+            className="secondaryButton"
+            type="button"
+            disabled={disconnecting || !props.session.admin || !props.status.integrations.configured}
+            onClick={disconnectHuggingFace}
+          >
+            {disconnecting ? "Disconnecting" : "Disconnect"}
+          </button>
+        </div>
+      </section>
       <section className="panel">
         <h2>OpenAI</h2>
         <p className={props.status.openai.configured ? "statusGood" : "statusNeutral"}>

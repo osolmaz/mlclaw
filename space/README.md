@@ -7,10 +7,21 @@ sdk: docker
 app_port: 7860
 hf_oauth: true
 hf_oauth_expiration_minutes: 43200
+hf_oauth_scopes:
+  - openid
+  - profile
+  - read-mcp
+  - read-repos
+  - contribute-repos
+  - write-repos
+  - manage-repos
+  - inference-api
+  - jobs
 pinned: false
 secrets:
   - MLCLAW_ROUTER_TOKEN
   - MLCLAW_SESSION_SECRET
+  - MLCLAW_CREDENTIAL_KEY
   - OPENAI_API_KEY
 ---
 
