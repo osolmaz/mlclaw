@@ -19,6 +19,7 @@ const STATE_EXCLUDED_SUFFIXES = [".log"];
 // are replaced by VACUUM INTO copies during staging.
 const SIDECAR_SUFFIXES = [".sqlite-wal", ".sqlite-shm"];
 const STATE_DIR_NAME = ".openclaw";
+export const BROKER_STATE_DIR_NAME = ".mlclaw-broker";
 
 function isExcluded(name: string, inStateDir: boolean): boolean {
   if (SIDECAR_SUFFIXES.some((suffix) => name.endsWith(suffix))) {
@@ -27,10 +28,7 @@ function isExcluded(name: string, inStateDir: boolean): boolean {
   if (!inStateDir) {
     return false;
   }
-  return (
-    STATE_EXCLUDED_NAMES.has(name) ||
-    STATE_EXCLUDED_SUFFIXES.some((suffix) => name.endsWith(suffix))
-  );
+  return STATE_EXCLUDED_NAMES.has(name) || STATE_EXCLUDED_SUFFIXES.some((suffix) => name.endsWith(suffix));
 }
 
 /**
@@ -46,11 +44,15 @@ async function copyTreeFiltered(params: {
   rootDir: string;
   inStateDir: boolean;
   depth: number;
+  excludeBrokerState: boolean;
 }): Promise<void> {
-  const { sourceDir, destDir, databases, rootDir, inStateDir, depth } = params;
+  const { sourceDir, destDir, databases, rootDir, inStateDir, depth, excludeBrokerState } = params;
   await fs.mkdir(destDir, { recursive: true });
   const entries = await fs.readdir(sourceDir, { withFileTypes: true });
   for (const entry of entries) {
+    if (excludeBrokerState && depth === 0 && entry.name === BROKER_STATE_DIR_NAME) {
+      continue;
+    }
     if (isExcluded(entry.name, inStateDir)) {
       continue;
     }
@@ -66,6 +68,7 @@ async function copyTreeFiltered(params: {
         // project may legitimately contain its own .openclaw directory.
         inStateDir: inStateDir || (depth === 0 && entry.name === STATE_DIR_NAME),
         depth: depth + 1,
+        excludeBrokerState,
       });
     } else if (entry.isFile()) {
       if (entry.name.endsWith(".sqlite")) {
@@ -82,14 +85,17 @@ async function copyTreeFiltered(params: {
 }
 
 export type StageResult =
-  | { kind: "staged"; databases: string[] }
-  | { kind: "corrupt-database"; database: string; detail: string };
+  { kind: "staged"; databases: string[] } | { kind: "corrupt-database"; database: string; detail: string };
 
 /**
  * Stage a snapshot of the live dir: filtered file copy plus a consistent,
  * integrity-checked VACUUM INTO copy of every live SQLite DB.
  */
-export async function stageLiveDir(liveDir: string, stagingDir: string): Promise<StageResult> {
+export async function stageLiveDir(
+  liveDir: string,
+  stagingDir: string,
+  options: { excludeBrokerState?: boolean } = {},
+): Promise<StageResult> {
   const databases: string[] = [];
   await copyTreeFiltered({
     sourceDir: liveDir,
@@ -98,6 +104,7 @@ export async function stageLiveDir(liveDir: string, stagingDir: string): Promise
     rootDir: liveDir,
     inStateDir: false,
     depth: 0,
+    excludeBrokerState: options.excludeBrokerState ?? false,
   });
   for (const relative of databases) {
     const staged = path.join(stagingDir, relative);

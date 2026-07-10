@@ -415,6 +415,9 @@ async function health(c: Context, config: SpaceRuntimeConfig, controls: RuntimeC
     return c.text("openclaw is not running\n", 503);
   }
   const broker = await brokerStatus(config);
+  if (parseOpenClawModelRef(config.model) && !broker.configured) {
+    return c.text("HF Broker is required for the configured model\n", 503);
+  }
   if (broker.configured && !broker.agentHealthy) {
     return c.text("HF Broker agent listener is not healthy\n", 503);
   }

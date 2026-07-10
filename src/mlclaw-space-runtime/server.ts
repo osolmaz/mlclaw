@@ -26,7 +26,10 @@ export class SpaceRuntimeServer {
   private readonly mcpCredentials: McpCredentialStore;
   private readonly mcpIntegrations: McpIntegrationServer;
 
-  constructor(private readonly config: SpaceRuntimeConfig, options: SpaceRuntimeServerOptions = {}) {
+  constructor(
+    private readonly config: SpaceRuntimeConfig,
+    options: SpaceRuntimeServerOptions = {},
+  ) {
     this.exitProcess = options.exitProcess ?? ((code) => process.exit(code));
     this.mcpCredentials = new McpCredentialStore({
       file: config.mcpCredentialFile,
@@ -67,6 +70,9 @@ export class SpaceRuntimeServer {
 
     const server = http.createServer((req, res) => {
       this.handle(req, res).catch((err) => {
+        if (res.destroyed && err instanceof Error && err.name === "AbortError") {
+          return;
+        }
         process.stderr.write(`[mlclaw] request failed: ${formatError(err)}\n`);
         if (!res.headersSent) {
           res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
@@ -143,10 +149,17 @@ export class SpaceRuntimeServer {
       return;
     }
     if (this.shouldRouteToMlClaw(url.pathname)) {
-      const response = await this.app.fetch(nodeRequestToWebRequest(req, this.config.publicUrl));
-      if (!response.headers.has("x-mlclaw-fallback")) {
-        await sendWebResponse(res, response);
-        return;
+      const requestAbort = new AbortController();
+      const abortRequest = () => requestAbort.abort();
+      res.once("close", abortRequest);
+      try {
+        const response = await this.app.fetch(nodeRequestToWebRequest(req, this.config.publicUrl, requestAbort.signal));
+        if (!response.headers.has("x-mlclaw-fallback")) {
+          await sendWebResponse(res, response);
+          return;
+        }
+      } finally {
+        res.off("close", abortRequest);
       }
     }
 
@@ -159,7 +172,12 @@ export class SpaceRuntimeServer {
       this.sendHtml(res, unauthorizedPage(session.username), 403);
       return;
     }
-    if (this.isAdmin(session.username) && this.config.oauthClientId && this.config.oauthClientSecret && isBrowserNavigation(req)) {
+    if (
+      this.isAdmin(session.username) &&
+      this.config.oauthClientId &&
+      this.config.oauthClientSecret &&
+      isBrowserNavigation(req)
+    ) {
       const integrations = await managedMcpServerStatus(this.config);
       const credentialSlot = integrationCredentialSlot(this.config);
       const authorization = credentialSlot
@@ -175,7 +193,8 @@ export class SpaceRuntimeServer {
   }
 
   private shouldRouteToMlClaw(pathname: string): boolean {
-    return pathname === "/health" ||
+    return (
+      pathname === "/health" ||
       pathname === "/healthz" ||
       pathname === "/favicon.svg" ||
       pathname === "/favicon-32.png" ||
@@ -192,7 +211,8 @@ export class SpaceRuntimeServer {
       pathname === "/logout" ||
       pathname.startsWith("/oauth/") ||
       pathname === "/mlclaw" ||
-      pathname.startsWith("/mlclaw/");
+      pathname.startsWith("/mlclaw/")
+    );
   }
 
   private async startOpenClaw(extraEnv: Record<string, string> = {}): Promise<void> {
@@ -220,9 +240,7 @@ export class SpaceRuntimeServer {
       this.openclaw = spawn(this.config.openclawCommand, this.config.openclawArgs, {
         stdio: "inherit",
         env,
-        ...(process.getuid?.() === 0
-          ? { uid: this.config.openclawUid, gid: this.config.openclawGid }
-          : {}),
+        ...(process.getuid?.() === 0 ? { uid: this.config.openclawUid, gid: this.config.openclawGid } : {}),
       });
       this.openclaw.once("exit", (code, signal) => {
         process.stdout.write(`[mlclaw] openclaw exited code=${code ?? "null"} signal=${signal ?? "null"}\n`);
@@ -312,7 +330,7 @@ function allowedOpenClawEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEn
   return env;
 }
 
-function nodeRequestToWebRequest(req: http.IncomingMessage, publicUrl: string): Request {
+function nodeRequestToWebRequest(req: http.IncomingMessage, publicUrl: string, signal: AbortSignal): Request {
   const headers = new Headers();
   for (const [key, value] of Object.entries(req.headers)) {
     if (Array.isArray(value)) {
@@ -326,6 +344,7 @@ function nodeRequestToWebRequest(req: http.IncomingMessage, publicUrl: string): 
   const init: RequestInit & { duplex?: "half" } = {
     method: req.method ?? "GET",
     headers,
+    signal,
   };
   if (req.method !== "GET" && req.method !== "HEAD") {
     init.body = Readable.toWeb(req) as ReadableStream<Uint8Array>;
@@ -341,7 +360,8 @@ async function sendWebResponse(res: http.ServerResponse, response: Response): Pr
       headers[key] = value;
     }
   });
-  const setCookies = (response.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ??
+  const setCookies =
+    (response.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ??
     (response.headers.get("set-cookie") ? [response.headers.get("set-cookie") as string] : []);
   if (setCookies.length > 0) {
     headers["set-cookie"] = setCookies;
@@ -352,16 +372,36 @@ async function sendWebResponse(res: http.ServerResponse, response: Response): Pr
     return;
   }
   const reader = response.body.getReader();
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
+  try {
+    while (!res.destroyed) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (!res.write(Buffer.from(value))) {
+        await waitForDrainOrClose(res);
+      }
     }
-    if (!res.write(Buffer.from(value))) {
-      await new Promise<void>((resolve) => res.once("drain", resolve));
+  } finally {
+    if (res.destroyed) {
+      void reader.cancel().catch(() => undefined);
     }
   }
-  res.end();
+  if (!res.destroyed && !res.writableEnded) {
+    res.end();
+  }
+}
+
+async function waitForDrainOrClose(res: http.ServerResponse): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const done = () => {
+      res.off("drain", done);
+      res.off("close", done);
+      resolve();
+    };
+    res.once("drain", done);
+    res.once("close", done);
+  });
 }
 
 function isBrowserNavigation(req: http.IncomingMessage): boolean {
@@ -376,7 +416,8 @@ function isApiPath(pathname: string): boolean {
 }
 
 function isTemplateRuntimePath(pathname: string): boolean {
-  return pathname === "/health" ||
+  return (
+    pathname === "/health" ||
     pathname === "/healthz" ||
     pathname === "/favicon.svg" ||
     pathname === "/favicon-32.png" ||
@@ -386,9 +427,10 @@ function isTemplateRuntimePath(pathname: string): boolean {
     pathname === "/assets/hf-logo.svg" ||
     pathname === "/assets/mlclaw.svg" ||
     pathname === "/assets/assistant-avatar.svg" ||
-    pathname === "/assets/brand/logo";
+    pathname === "/assets/brand/logo"
+  );
 }
 
 function formatError(err: unknown): string {
-  return err instanceof Error ? err.stack ?? err.message : String(err);
+  return err instanceof Error ? (err.stack ?? err.message) : String(err);
 }

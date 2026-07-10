@@ -178,13 +178,18 @@ At container startup, before OpenClaw exists:
 1. The root initializer writes the secret to a broker-owned runtime file.
 2. The initializer clears the secret from the environment inherited by all
    later ML Claw and OpenClaw processes.
-3. It starts `hf-broker` under the broker user with the token-file path.
-4. It starts the trusted ML Claw control plane under its own user.
-5. It starts OpenClaw under `node` with only its broker client secret and
+3. It restores the durable live tree, including protected broker grant state.
+4. It reasserts broker-only ownership and starts `hf-broker` under the broker
+   user with the token-file path.
+5. It starts the trusted ML Claw control plane under its own user.
+6. It starts OpenClaw under `node` with only its broker client secret and
    broker URL.
 
 The token file lives on ephemeral runtime storage and is never included in the
 bucket snapshot, Space repository, logs, diagnostics, or browser responses.
+Broker grant and event state is durable: the OpenClaw-owned staging worker
+excludes it, then the trusted root supervisor overlays it into the verified
+snapshot. Restore completes before either broker or agent starts.
 
 ### Removed Credentials
 

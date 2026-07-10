@@ -15,6 +15,23 @@ import { SpaceRuntimeServer } from "../src/mlclaw-space-runtime/server.js";
 
 const cleanups: Array<() => Promise<void> | void> = [];
 
+function brokerApproval(id: string, status: string, revision: number) {
+  return {
+    id,
+    revision,
+    client: "bob",
+    operation: "repo.update",
+    status,
+    requested_at: "2026-07-11T00:00:00Z",
+    pending_expires_at: "2026-07-11T00:05:00Z",
+    requested_duration_seconds: 300,
+    max_uses: 1,
+    used_count: 0,
+    reserved_count: 0,
+    presentation: { risk: "medium", title: "Update repository", target: "osolmaz/example" },
+  };
+}
+
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) {
     await cleanup();
@@ -155,9 +172,9 @@ describe("ML Claw Space runtime", () => {
       });
       res.writeHead(200, { "content-type": "application/json" });
       if (req.method === "POST") {
-        res.end(JSON.stringify({ id: "grant-1", revision: 2, status: "active" }));
+        res.end(JSON.stringify(brokerApproval("grant-1", "active", 2)));
       } else {
-        res.end(JSON.stringify({ items: [{ id: "grant-1", revision: 1, status: "pending" }], has_more: false }));
+        res.end(JSON.stringify({ items: [brokerApproval("grant-1", "pending", 1)], has_more: false }));
       }
     });
     await listen(broker, brokerPort);
@@ -254,12 +271,12 @@ describe("ML Claw Space runtime", () => {
         }
         res.writeHead(200, { "content-type": "application/json" });
         if (req.method === "POST") {
-          res.end(JSON.stringify({ id: "shared-id", revision: 2, status: "denied" }));
+          res.end(JSON.stringify(brokerApproval("shared-id", "denied", 2)));
           return;
         }
         res.end(
           JSON.stringify({
-            items: [{ id: "shared-id", revision: 1, status: "pending", requested_at: "2026-07-11T00:00:00Z" }],
+            items: [brokerApproval("shared-id", "pending", 1)],
             has_more: false,
           }),
         );
@@ -329,6 +346,59 @@ describe("ML Claw Space runtime", () => {
     expect(stillHealthy.status).toBe(200);
   });
 
+  it("cancels a broker event stream when the browser disconnects", async () => {
+    const brokerPort = await freePort();
+    let markUpstreamClosed: (() => void) | undefined;
+    const upstreamClosed = new Promise<void>((resolve) => {
+      markUpstreamClosed = resolve;
+    });
+    const broker = http.createServer((req, res) => {
+      res.once("close", () => markUpstreamClosed?.());
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write(": connected\n\n");
+    });
+    await listen(broker, brokerPort);
+    cleanups.push(() => closeServer(broker));
+
+    const config = await testConfig({
+      operatorBrokers: [
+        { id: "hf-broker", label: "Hugging Face", baseUrl: `http://127.0.0.1:${brokerPort}`, token: "h".repeat(32) },
+      ],
+    });
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(
+      () => closeServer(server),
+      () => runtime.stop(),
+    );
+
+    await new Promise<void>((resolve, reject) => {
+      const request = http.get(
+        {
+          hostname: "127.0.0.1",
+          port: config.port,
+          path: "/mlclaw/api/approvals/events?broker=hf-broker",
+          headers: { cookie: sessionCookie(config, "alice") },
+        },
+        (response) => {
+          response.once("data", () => {
+            request.destroy();
+            resolve();
+          });
+        },
+      );
+      request.once("error", (err) => {
+        if (!request.destroyed) {
+          reject(err);
+        }
+      });
+    });
+    await Promise.race([
+      upstreamClosed,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("upstream SSE stayed open")), 1_000)),
+    ]);
+  });
+
   it("fails health checks closed until broker inference routes are ready", async () => {
     const brokerPort = await freePort();
     let inferenceReady = false;
@@ -367,6 +437,19 @@ describe("ML Claw Space runtime", () => {
     const ready = await fetch(`http://127.0.0.1:${config.port}/health`);
     expect(ready.status).toBe(200);
     await expect(ready.text()).resolves.toBe("ok\n");
+  });
+
+  it("fails health checks closed when an HF model has no broker", async () => {
+    const config = await testConfig({ brokerAgentUrl: undefined, brokerAgentSecret: undefined });
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(
+      () => closeServer(server),
+      () => runtime.stop(),
+    );
+    const response = await fetch(`http://127.0.0.1:${config.port}/health`);
+    expect(response.status).toBe(503);
+    await expect(response.text()).resolves.toBe("HF Broker is required for the configured model\n");
   });
 
   it("reports trusted local Hub-token integrations as configured", async () => {
@@ -626,7 +709,7 @@ describe("ML Claw Space runtime", () => {
   });
 
   it("rejects malformed-cookie WebSocket upgrades without crashing", async () => {
-    const config = await testConfig();
+    const config = await testConfig({ model: "openai/gpt-5" });
     const runtime = new SpaceRuntimeServer(config);
     const server = await runtime.start();
     cleanups.push(

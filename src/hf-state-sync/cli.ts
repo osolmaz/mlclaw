@@ -5,7 +5,7 @@ import { runRestore } from "./restore.js";
 import { prepareRestore } from "./prepare.js";
 import { runSnapshot } from "./snapshot.js";
 import { supervise } from "./supervise.js";
-import { runStageWorker } from "./stage-worker.js";
+import { runStageWorker, trustedStageArchive } from "./stage-worker.js";
 
 const USAGE = `usage:
   hf-state-sync restore
@@ -68,7 +68,13 @@ async function main(argv: string[]): Promise<number> {
       if (!hub) {
         return 1;
       }
-      const outcome = await runSnapshot({ config, hub, bootTime: new Date().toISOString() });
+      const stageArchive = trustedStageArchive(config, process.argv[1]);
+      const outcome = await runSnapshot({
+        config,
+        hub,
+        bootTime: new Date().toISOString(),
+        ...(stageArchive ? { stageArchive } : {}),
+      });
       if (outcome.kind === "failed") {
         logError(outcome.detail);
         return 1;

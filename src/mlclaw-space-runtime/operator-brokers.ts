@@ -1,5 +1,6 @@
 import { isAbsolute } from "node:path";
 import { readFileSync } from "node:fs";
+import { z } from "zod";
 
 const MAX_CONFIG_BYTES = 64 * 1024;
 const MAX_TOKEN_BYTES = 4096;
@@ -68,6 +69,65 @@ export type BrokerOperatorClientOptions = OperatorBrokerConfig & {
   fetch?: typeof fetch;
 };
 
+const displayFieldSchema = z
+  .object({
+    label: z.string().min(1).max(120),
+    value: z.string().max(4_096),
+  })
+  .passthrough();
+
+const approvalSchema = z
+  .object({
+    id: z.string().min(1).max(200),
+    revision: z.number().int().positive(),
+    client: z.string().min(1).max(200),
+    operation: z.string().min(1).max(200),
+    status: z.string().min(1).max(40),
+    requested_at: z.string().min(1).max(80),
+    pending_expires_at: z.string().min(1).max(80),
+    active_expires_at: z.string().min(1).max(80).optional(),
+    requested_duration_seconds: z.number().int().nonnegative(),
+    max_uses: z.number().int().nonnegative(),
+    used_count: z.number().int().nonnegative(),
+    reserved_count: z.number().int().nonnegative(),
+    reason: z.string().max(2_000).optional(),
+    decided_at: z.string().min(1).max(80).optional(),
+    decided_by: z.string().max(200).optional(),
+    decision_reason: z.string().max(2_000).optional(),
+    presentation: z
+      .object({
+        risk: z.enum(["unknown", "low", "medium", "high", "critical"]),
+        title: z.string().min(1).max(240),
+        summary: z.string().max(4_096).optional(),
+        target: z.string().min(1).max(2_000),
+        fields: z.array(displayFieldSchema).max(100).optional(),
+        plan_hash: z.string().max(256).optional(),
+        audit: z.array(displayFieldSchema).max(100).optional(),
+      })
+      .passthrough(),
+    presentation_unavailable: z.boolean().optional(),
+  })
+  .passthrough();
+
+const approvalPageSchema = z
+  .object({
+    items: z.array(approvalSchema),
+    next_cursor: z.string().min(1).max(4_096).optional(),
+    has_more: z.boolean(),
+  })
+  .passthrough();
+
+const operatorErrorSchema = z
+  .object({
+    error: z
+      .object({
+        code: z.string().min(1).max(200).optional(),
+        message: z.string().min(1).max(2_000).optional(),
+      })
+      .optional(),
+  })
+  .passthrough();
+
 export class BrokerOperatorError extends Error {
   constructor(
     readonly broker: OperatorBrokerSummary,
@@ -104,11 +164,11 @@ export class BrokerOperatorClient {
       query.set("limit", String(params.limit));
     }
     const suffix = query.size > 0 ? `?${query}` : "";
-    return this.request<BrokerApprovalPage>(`/api/grants${suffix}`);
+    return this.request<BrokerApprovalPage>(`/api/grants${suffix}`, undefined, approvalPageSchema, "grant list");
   }
 
   get(id: string): Promise<BrokerApproval> {
-    return this.request<BrokerApproval>(`/api/grants/${approvalId(id)}`);
+    return this.request<BrokerApproval>(`/api/grants/${approvalId(id)}`, undefined, approvalSchema, "grant");
   }
 
   decide(
@@ -116,17 +176,22 @@ export class BrokerOperatorClient {
     action: "approve" | "deny" | "cancel" | "revoke",
     decision: BrokerDecision,
   ): Promise<BrokerApproval> {
-    return this.request<BrokerApproval>(`/api/grants/${approvalId(id)}/${action}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        expected_revision: decision.expectedRevision,
-        ...(decision.expectedStatus ? { expected_status: decision.expectedStatus } : {}),
-        ...(decision.reason ? { reason: decision.reason } : {}),
-        ...(decision.durationSeconds ? { duration_seconds: decision.durationSeconds } : {}),
-        ...(decision.maxUses ? { max_uses: decision.maxUses } : {}),
-      }),
-    });
+    return this.request<BrokerApproval>(
+      `/api/grants/${approvalId(id)}/${action}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          expected_revision: decision.expectedRevision,
+          ...(decision.expectedStatus ? { expected_status: decision.expectedStatus } : {}),
+          ...(decision.reason ? { reason: decision.reason } : {}),
+          ...(decision.durationSeconds ? { duration_seconds: decision.durationSeconds } : {}),
+          ...(decision.maxUses ? { max_uses: decision.maxUses } : {}),
+        }),
+      },
+      approvalSchema,
+      "grant",
+    );
   }
 
   async events(lastEventId?: string, signal?: AbortSignal): Promise<Response> {
@@ -157,25 +222,34 @@ export class BrokerOperatorClient {
     return response;
   }
 
-  private async request<T>(pathname: string, init: RequestInit = {}): Promise<T> {
-    const headers = new Headers(init.headers);
+  private async request<T>(
+    pathname: string,
+    init: RequestInit | undefined,
+    schema: z.ZodTypeAny,
+    label: string,
+  ): Promise<T> {
+    const headers = new Headers(init?.headers);
     headers.set("accept", "application/json");
     headers.set("authorization", `Bearer ${this.options.token}`);
     const response = await this.fetchImpl(`${this.baseUrl}${pathname}`, {
-      ...init,
+      ...(init ?? {}),
       headers,
       redirect: "error",
     });
     if (!response.ok) {
       throw await this.operatorError(response);
     }
-    return await boundedJson<T>(response);
+    return validatedBrokerPayload(await boundedJson(response), schema, label);
   }
 
   private async operatorError(response: Response): Promise<BrokerOperatorError> {
     const fallback = `${this.options.label} operator request failed`;
     try {
-      const value = await boundedJson<{ error?: { code?: string; message?: string } }>(response);
+      const value = validatedBrokerPayload<z.infer<typeof operatorErrorSchema>>(
+        await boundedJson(response),
+        operatorErrorSchema,
+        "error",
+      );
       const message = value.error?.message?.trim() || fallback;
       const code = value.error?.code?.trim();
       return new BrokerOperatorError(this.summary(), response.status, code, message);
@@ -312,7 +386,7 @@ function approvalId(id: string): string {
   return encodeURIComponent(normalized);
 }
 
-async function boundedJson<T>(response: Response): Promise<T> {
+async function boundedJson(response: Response): Promise<unknown> {
   if (!response.body) {
     throw new Error("broker response body is empty");
   }
@@ -331,5 +405,13 @@ async function boundedJson<T>(response: Response): Promise<T> {
     }
     chunks.push(value);
   }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as T;
+  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+}
+
+function validatedBrokerPayload<T>(value: unknown, schema: z.ZodTypeAny, label: string): T {
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) {
+    throw new Error(`broker ${label} response is invalid`);
+  }
+  return parsed.data as T;
 }

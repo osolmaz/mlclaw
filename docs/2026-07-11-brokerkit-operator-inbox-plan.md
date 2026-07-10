@@ -28,13 +28,22 @@ already bounded operator projections.
 - expose an admin-only list of configured brokers;
 - require an explicit broker ID for list, detail, event, and decision routes;
 - proxy one durable SSE stream per broker so native `Last-Event-ID` reconnect
-  semantics remain intact;
+  semantics remain intact, and cancel the upstream stream when the browser
+  disconnects;
 - keep all operator tokens in the backend and out of browser payloads, logs,
   OpenClaw environment, generated snapshots, and status responses;
 - merge broker pages in the React inbox while preserving broker identity;
 - support approve, deny, cancel, and revoke with optimistic revisions;
 - use the same inbox in the control UI and gateway overlay;
 - keep the bundled HF Broker entry as one generated registry record;
+- persist broker grant and event state in a protected directory inside the
+  durable snapshot unit; ordinary OpenClaw-owned staging excludes that
+  directory and the trusted root supervisor overlays it before upload;
+- restore durable state before starting HF Broker, then reassert broker-only
+  ownership before OpenClaw starts;
+- fail health checks when an HF model is configured without a healthy typed
+  inference broker;
+- validate bounded Brokerkit response bodies at the backend network boundary;
 - add Slophammer TypeScript gates locally and in CI.
 
 ## Acceptance

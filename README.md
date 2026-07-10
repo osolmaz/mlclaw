@@ -211,6 +211,7 @@ The inbox merges every Brokerkit-compatible backend configured in
 CSRF-protected, and sent through fixed broker-scoped API routes. Operator
 tokens remain in backend-only files and are never sent to the browser or
 OpenClaw. See [Operator Broker Configuration](docs/operator-brokers-config.md).
+
 - `/mlclaw/credentials`: connect or disconnect Hugging Face MCP and Research
   Agent access, or submit an OpenAI API key.
 - `/mlclaw/logout`: clear the ML Claw session cookie.
@@ -273,7 +274,11 @@ across Space rebuilds, local container replacement, and gateway migration. The
 Space does not use `HF_TOKEN` or `HUGGINGFACE_HUB_TOKEN` secrets. Its broad
 credential is stored as `MLCLAW_BROKER_HF_TOKEN`, written to a broker-owned
 `0600` file during startup, and removed from child-process environments.
-OpenClaw uses only the generated broker agent credential.
+OpenClaw uses only the generated broker agent credential. Broker grant and
+event state is included in the durable snapshot through a root-only staging
+step, then restored with broker-only ownership before OpenClaw starts. The
+broad token and operator credentials remain ephemeral and are never included
+in snapshots.
 
 ## Costs
 

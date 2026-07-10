@@ -12,6 +12,23 @@ import {
 
 const cleanups: Array<() => Promise<void>> = [];
 
+function approval(id: string, status: string, revision: number) {
+  return {
+    id,
+    revision,
+    client: "bob",
+    operation: "repo.update",
+    status,
+    requested_at: "2026-07-11T00:00:00Z",
+    pending_expires_at: "2026-07-11T00:05:00Z",
+    requested_duration_seconds: 300,
+    max_uses: 1,
+    used_count: 0,
+    reserved_count: 0,
+    presentation: { risk: "medium", title: "Update repository", target: "osolmaz/example" },
+  };
+}
+
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
 });
@@ -32,7 +49,7 @@ describe("Brokerkit operator backends", () => {
       });
       res.writeHead(200, { "content-type": "application/json" });
       if (req.url?.includes("/approve")) {
-        res.end(JSON.stringify({ id: "grant-1", revision: 2, status: "active" }));
+        res.end(JSON.stringify(approval("grant-1", "active", 2)));
       } else {
         res.end(JSON.stringify({ items: [], has_more: false }));
       }
@@ -101,7 +118,7 @@ describe("Brokerkit operator backends", () => {
           headers: { "content-type": "application/json" },
         });
       }
-      return new Response(JSON.stringify({ id: "grant-1", revision: 1, status: "pending" }), {
+      return new Response(JSON.stringify(approval("grant-1", "pending", 1)), {
         headers: { "content-type": "application/json" },
       });
     };
@@ -164,6 +181,14 @@ describe("Brokerkit operator backends", () => {
       fetch: async () => new Response(null),
     });
     await expect(empty.list()).rejects.toThrow("broker response body is empty");
+    const malformed = new BrokerOperatorClient({
+      id: "gh-broker",
+      label: "GitHub",
+      baseUrl: "http://broker.example",
+      token: "operator-secret",
+      fetch: async () => new Response(JSON.stringify({ items: null, has_more: false })),
+    });
+    await expect(malformed.list()).rejects.toThrow("broker grant list response is invalid");
   });
 
   it("loads a strict multi-broker file without exposing tokens in summaries", async () => {

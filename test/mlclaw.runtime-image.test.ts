@@ -1,6 +1,11 @@
 import fs from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_RUNTIME_IMAGE, OPENCLAW_BASE_IMAGE, OPENCLAW_VERSION, PACKAGE_VERSION } from "../src/mlclaw/runtime-image.js";
+import {
+  DEFAULT_RUNTIME_IMAGE,
+  OPENCLAW_BASE_IMAGE,
+  OPENCLAW_VERSION,
+  PACKAGE_VERSION,
+} from "../src/mlclaw/runtime-image.js";
 
 describe("runtime image Dockerfile", () => {
   it("healthchecks the ML Claw gateway port", async () => {
@@ -22,12 +27,12 @@ describe("runtime image Dockerfile", () => {
     expect(dockerfile).toContain("process.env.PORT");
     expect(dockerfile).toContain("/health");
     expect(dockerfile).toContain("python3 -m pip install --break-system-packages --no-cache-dir");
-    expect(dockerfile).toContain("\"huggingface_hub==1.19.0\"");
-    expect(dockerfile).toContain("\"datasets==5.0.0\"");
-    expect(dockerfile).toContain("\"safetensors==0.8.0\"");
-    expect(dockerfile).toContain("\"hf-discover==1.3.7\"");
+    expect(dockerfile).toContain('"huggingface_hub==1.19.0"');
+    expect(dockerfile).toContain('"datasets==5.0.0"');
+    expect(dockerfile).toContain('"safetensors==0.8.0"');
+    expect(dockerfile).toContain('"hf-discover==1.3.7"');
     expect(dockerfile).not.toContain("--no-deps");
-    expect(dockerfile).toContain("\"uv==0.11.28\"");
+    expect(dockerfile).toContain('"uv==0.11.28"');
     expect(dockerfile).toContain("COPY --from=sync-build /build/dist/hf-tooling-seed.js /app/hf-tooling-seed.js");
     expect(dockerfile).toContain("COPY package.json package-lock.json tsconfig.json vite.control-ui.config.ts ./");
     expect(dockerfile).not.toContain("18789/healthz");
@@ -48,9 +53,15 @@ describe("runtime image Dockerfile", () => {
       'gosu "$OPENCLAW_IDENTITY" node /app/openclaw.mjs setup --baseline --workspace "$WORKSPACE_DIR"',
     );
     expect(entrypoint).toContain('gosu "$OPENCLAW_IDENTITY" node /app/hf-state-sync.js restore');
-    expect(entrypoint).toContain('node /app/hf-state-sync.js prepare-restore');
+    expect(entrypoint).toContain("node /app/hf-state-sync.js prepare-restore");
     expect(entrypoint).toContain('export MLCLAW_OPENCLAW_UID="$OPENCLAW_UID"');
     expect(entrypoint).toContain('export MLCLAW_OPENCLAW_GID="$OPENCLAW_GID"');
+    expect(entrypoint).toContain('HF_BROKER_STATE_DIR="$LIVE_DIR/.mlclaw-broker"');
+    expect(entrypoint).toContain('export MLCLAW_HF_BROKER_STATE_DIR="$HF_BROKER_STATE_DIR"');
+    expect(entrypoint).toContain("! -name .mlclaw-broker");
+    expect(entrypoint.indexOf("node /app/hf-state-sync.js prepare-restore")).toBeLessThan(
+      entrypoint.lastIndexOf("\nstart_hf_broker\n"),
+    );
     expect(entrypoint).toContain('if [ -z "${MLCLAW_OPERATOR_BROKERS_FILE:-}" ]; then');
     expect(entrypoint).toContain('export MLCLAW_OPERATOR_BROKERS_FILE="$operator_brokers_file"');
     expect(entrypoint).toContain('"id":"hf-broker"');
