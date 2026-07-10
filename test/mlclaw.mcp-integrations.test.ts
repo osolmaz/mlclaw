@@ -325,6 +325,9 @@ describe("automatic MCP integrations", () => {
     const fixture = await integrationFixture({
       gatewayLocation: "local",
       hfToken: "hf_local_wrapper",
+      spaceId: undefined,
+      adminUsers: [],
+      allowedUsers: [],
       hfMcpUrl: `http://127.0.0.1:${upstreamPort}/mcp`,
     }, { skipCredential: true });
     const response = await fetch(`http://127.0.0.1:${fixture.config.mcpPort}/mcp/huggingface`, {

@@ -99,21 +99,19 @@ export class McpIntegrationServer {
       writeJson(res, 404, mcpError(null, -32601, "Not found"));
       return;
     }
-    const credentialSlot = integrationCredentialSlot(this.config);
-    if (!credentialSlot) {
-      writeJson(res, 503, mcpError(null, -32002, "ML Claw has no primary admin"));
-      return;
-    }
-    let accessToken: string;
-    try {
-      accessToken = await this.credentials.accessToken(credentialSlot);
-    } catch (err) {
-      const localToken = this.config.gatewayLocation === "local" ? this.config.hfToken : undefined;
-      if (!localToken) {
+    let accessToken = this.config.gatewayLocation === "local" ? this.config.hfToken : undefined;
+    if (!accessToken) {
+      const credentialSlot = integrationCredentialSlot(this.config);
+      if (!credentialSlot) {
+        writeJson(res, 503, mcpError(null, -32002, "ML Claw has no primary admin"));
+        return;
+      }
+      try {
+        accessToken = await this.credentials.accessToken(credentialSlot);
+      } catch (err) {
         writeJson(res, 503, mcpError(null, -32002, safeError(err)));
         return;
       }
-      accessToken = localToken;
     }
     const body = await readBody(req, MAX_REQUEST_BYTES);
     if (pathname === "/mcp/research" && req.method === "POST") {
