@@ -266,6 +266,10 @@ export class McpIntegrationServer {
         stringValue(rpcError.message) ?? "Research Agent request failed",
       );
     }
+    const toolError = mcpToolError(parsed);
+    if (toolError) {
+      throw new ResearchRpcError(-32003, toolError);
+    }
     return parsed;
   }
 }
@@ -506,6 +510,20 @@ function toolResultObject(message: Record<string, unknown>): Record<string, unkn
     }
   }
   return undefined;
+}
+
+function mcpToolError(message: Record<string, unknown>): string | undefined {
+  const result = objectValue(message.result);
+  if (result?.isError !== true) {
+    return undefined;
+  }
+  const content = Array.isArray(result.content) ? result.content : [];
+  const detail = content
+    .map((item) => stringValue(objectValue(item)?.text))
+    .filter((text): text is string => Boolean(text))
+    .join("\n")
+    .trim();
+  return detail || "Research Agent tool failed";
 }
 
 function redactResearchStatus(status: Record<string, unknown>): Record<string, unknown> {

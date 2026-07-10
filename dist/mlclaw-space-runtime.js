@@ -7360,6 +7360,10 @@ var McpIntegrationServer = class {
         stringValue2(rpcError.message) ?? "Research Agent request failed"
       );
     }
+    const toolError = mcpToolError(parsed);
+    if (toolError) {
+      throw new ResearchRpcError(-32003, toolError);
+    }
     return parsed;
   }
 };
@@ -7564,6 +7568,15 @@ function toolResultObject(message) {
     }
   }
   return void 0;
+}
+function mcpToolError(message) {
+  const result = objectValue(message.result);
+  if (result?.isError !== true) {
+    return void 0;
+  }
+  const content = Array.isArray(result.content) ? result.content : [];
+  const detail = content.map((item) => stringValue2(objectValue(item)?.text)).filter((text) => Boolean(text)).join("\n").trim();
+  return detail || "Research Agent tool failed";
 }
 function redactResearchStatus(status) {
   return Object.fromEntries(Object.entries(status).filter(([key]) => ![

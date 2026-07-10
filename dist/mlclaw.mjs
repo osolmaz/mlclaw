@@ -15356,8 +15356,7 @@ function createProgram(runtimeOverrides = {}) {
     await gatewayStop(agent, runtime);
   });
   gateway.command("restart").argument("<agent>", "Agent name").option("--no-pull", "Do not docker pull before starting a local gateway").option("--takeover", "Start even if another live runtime lease is present", false).action(async (agent, opts) => {
-    await gatewayStop(agent, runtime);
-    await gatewayStart(agent, opts, runtime);
+    await gatewayRestart(agent, opts, runtime);
   });
   gateway.command("status").argument("<agent>", "Agent name").action(async (agent) => {
     await gatewayStatus(agent, runtime);
@@ -15696,6 +15695,10 @@ async function stateAdopt(agent, opts, runtime) {
   const hub = runtime.hubFactory(token);
   const secrets = await readSecretEnv(runtime.configRoot, agent);
   const bucketPrefix = persistedBucketPrefix(secrets);
+  const bucketChanged = current.bucket !== bucket;
+  if (bucketChanged && current.gatewayLocation === "local") {
+    assertDedicatedRouterToken(current.model, secrets);
+  }
   runtime.stdout.log(`Creating or adopting private bucket ${bucket}`);
   await hub.createBucket(bucket, true);
   await inspectStateBucket(hub, bucket, bucketPrefix);
@@ -15706,7 +15709,6 @@ async function stateAdopt(agent, opts, runtime) {
     runtimeId: runtimeIdFor(current),
     takeover: Boolean(opts.takeover)
   });
-  const bucketChanged = current.bucket !== bucket;
   if (bucketChanged) {
     await confirmBucketChange({
       message: `Adopt state bucket ${bucket} for ${agent}, replacing ${current.bucket}?`,
@@ -15997,6 +15999,17 @@ async function gatewayStart(agent, opts, runtime) {
     await hub.restartSpace(manifest.space, true);
     runtime.stdout.log(`Space gateway restart requested: ${manifest.space}`);
   }
+}
+async function gatewayRestart(agent, opts, runtime) {
+  const manifest = await readDeploymentManifest(runtime, agent, { requestedDockerContext: opts.dockerContext });
+  if (manifest.gatewayLocation === "local") {
+    assertDedicatedRouterToken(
+      manifest.model,
+      await readSecretEnv(runtime.configRoot, agent).catch(() => ({}))
+    );
+  }
+  await gatewayStop(agent, runtime);
+  await gatewayStart(agent, opts, runtime);
 }
 async function gatewayStop(agent, runtime) {
   const manifest = await readDeploymentManifest(runtime, agent);

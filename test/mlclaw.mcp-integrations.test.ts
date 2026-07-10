@@ -515,6 +515,76 @@ describe("automatic MCP integrations", () => {
     expect(calls).toEqual(["research", "abc_start_research", "xyz_research_status"]);
   });
 
+  it("stops immediately when a Research Agent tool result is an MCP error", async () => {
+    const calls: string[] = [];
+    const upstream = http.createServer(async (req, res) => {
+      const body = JSON.parse(await text(req)) as Record<string, unknown>;
+      const params = object(body.params);
+      const tool = String(params?.name ?? "");
+      calls.push(tool);
+      const id = body.id ?? null;
+      res.setHeader("content-type", "text/event-stream");
+      res.setHeader("mcp-session-id", "research-tool-error-session");
+      if (tool === "research") {
+        sse(res, {
+          jsonrpc: "2.0",
+          id,
+          result: {
+            structuredContent: {
+              $prefab: {
+                state: { job_id: "research-tool-error" },
+                view: {
+                  onMount: [
+                    { action: "toolCall", tool: "abc_start_research" },
+                    { action: "setInterval", onTick: { action: "toolCall", tool: "xyz_research_status" } },
+                  ],
+                },
+              },
+            },
+          },
+        });
+        return;
+      }
+      sse(res, {
+        jsonrpc: "2.0",
+        id,
+        result: {
+          content: [{ type: "text", text: "Research permission denied" }],
+          isError: true,
+        },
+      });
+    });
+    const upstreamPort = await listen(upstream);
+    cleanups.push(() => closeServer(upstream));
+
+    const fixture = await integrationFixture({
+      researchMcpUrl: `http://127.0.0.1:${upstreamPort}/mcp`,
+      researchPollMs: 1,
+    });
+    const response = await fetch(`http://127.0.0.1:${fixture.config.mcpPort}/mcp/research`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "mcp-session-id": "research-tool-error-session",
+        "x-mlclaw-mcp-key": deriveInternalToken(fixture.config.sessionSecret),
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 8,
+        method: "tools/call",
+        params: { name: "research", arguments: { topic: "test" } },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      jsonrpc: "2.0",
+      id: 8,
+      error: { code: -32003, message: "Research permission denied" },
+    });
+    expect(calls).toEqual(["research", "abc_start_research"]);
+  });
+
   it("aborts active upstream requests during shutdown", async () => {
     let requestStarted!: () => void;
     const started = new Promise<void>((resolve) => {

@@ -329,8 +329,7 @@ export function createProgram(runtimeOverrides: CliRuntime = {}): Command {
     .option("--no-pull", "Do not docker pull before starting a local gateway")
     .option("--takeover", "Start even if another live runtime lease is present", false)
     .action(async (agent: string, opts: GatewayCommandOptions) => {
-      await gatewayStop(agent, runtime);
-      await gatewayStart(agent, opts, runtime);
+      await gatewayRestart(agent, opts, runtime);
     });
 
   gateway
@@ -783,6 +782,10 @@ async function stateAdopt(agent: string, opts: StateAdoptOptions, runtime: Requi
   const hub = runtime.hubFactory(token);
   const secrets = await readSecretEnv(runtime.configRoot, agent);
   const bucketPrefix = persistedBucketPrefix(secrets);
+  const bucketChanged = current.bucket !== bucket;
+  if (bucketChanged && current.gatewayLocation === "local") {
+    assertDedicatedRouterToken(current.model, secrets);
+  }
 
   runtime.stdout.log(`Creating or adopting private bucket ${bucket}`);
   await hub.createBucket(bucket, true);
@@ -795,7 +798,6 @@ async function stateAdopt(agent: string, opts: StateAdoptOptions, runtime: Requi
     takeover: Boolean(opts.takeover),
   });
 
-  const bucketChanged = current.bucket !== bucket;
   if (bucketChanged) {
     await confirmBucketChange({
       message: `Adopt state bucket ${bucket} for ${agent}, replacing ${current.bucket}?`,
@@ -1166,6 +1168,18 @@ async function gatewayStart(agent: string, opts: GatewayCommandOptions, runtime:
     await hub.restartSpace(manifest.space, true);
     runtime.stdout.log(`Space gateway restart requested: ${manifest.space}`);
   }
+}
+
+async function gatewayRestart(agent: string, opts: GatewayCommandOptions, runtime: Required<CliRuntime>): Promise<void> {
+  const manifest = await readDeploymentManifest(runtime, agent, { requestedDockerContext: opts.dockerContext });
+  if (manifest.gatewayLocation === "local") {
+    assertDedicatedRouterToken(
+      manifest.model,
+      await readSecretEnv(runtime.configRoot, agent).catch(() => ({})),
+    );
+  }
+  await gatewayStop(agent, runtime);
+  await gatewayStart(agent, opts, runtime);
 }
 
 async function gatewayStop(agent: string, runtime: Required<CliRuntime>): Promise<void> {

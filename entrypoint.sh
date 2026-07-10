@@ -49,7 +49,14 @@ chown -R node:node "$LIVE_DIR"
 # native onboarding to finish before adding workspace tooling; OpenClaw treats
 # any preinstalled workspace skills as evidence that onboarding already ran.
 echo "[openclaw-setup] initializing baseline workspace"
-gosu node node /app/openclaw.mjs setup --baseline --workspace "$WORKSPACE_DIR"
+env \
+  -u MLCLAW_CREDENTIAL_KEY \
+  -u MLCLAW_SESSION_SECRET \
+  -u SESSION_SECRET \
+  -u OAUTH_CLIENT_SECRET \
+  -u HF_TOKEN \
+  -u HUGGINGFACE_HUB_TOKEN \
+  gosu node node /app/openclaw.mjs setup --baseline --workspace "$WORKSPACE_DIR"
 echo "[openclaw-setup] baseline workspace ready"
 
 if [ -n "${OPENCLAW_MODEL:-}" ]; then

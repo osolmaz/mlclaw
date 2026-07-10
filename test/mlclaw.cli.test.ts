@@ -467,6 +467,38 @@ describe("mlclaw CLI", () => {
     expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(false);
   });
 
+  it("does not stop a legacy local gateway before Router credential validation", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([], false);
+    const stderr: string[] = [];
+    const runtime = { ...await createRuntime(hub, prompt, stderr), env: {} };
+    await writeManifest(runtime.configRoot, {
+      version: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-existing",
+      gatewayLocation: "local",
+      model: DEFAULT_MODEL,
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      localGateway: { engine: "docker", dockerContext: "desktop-linux" },
+      createdAt: "2026-06-16T00:00:00.000Z",
+      updatedAt: "2026-06-16T00:00:00.000Z",
+    });
+    await writeSecretEnv(runtime.configRoot, "research", {
+      HF_TOKEN: "hf_legacy_broad",
+      HUGGINGFACE_HUB_TOKEN: "hf_legacy_broad",
+    });
+    runtime.dockerRunner.inspectValue = { exists: true, running: true, status: "running" };
+
+    const code = await main(["gateway", "restart", "research", "--no-pull"], runtime);
+
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain("dedicated inference token");
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "stop")).toBe(false);
+  });
+
   it("uses an explicit bootstrap bucket as the durable state pointer", async () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt([]);
@@ -1884,6 +1916,47 @@ describe("mlclaw CLI", () => {
     expect(removeVolumeIndex).toBeGreaterThan(removeIndex);
     expect(runIndex).toBeGreaterThan(removeVolumeIndex);
     expect(runtime.dockerRunner.calls.some((call) => call.name === "start")).toBe(false);
+  });
+
+  it("does not hand off a legacy local gateway before Router credential validation", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([], false);
+    const stderr: string[] = [];
+    const runtime = { ...await createRuntime(hub, prompt, stderr), env: {} };
+    await writeManifest(runtime.configRoot, {
+      version: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-existing",
+      gatewayLocation: "local",
+      model: DEFAULT_MODEL,
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      localGateway: { engine: "docker", dockerContext: "desktop-linux" },
+      createdAt: "2026-06-16T00:00:00.000Z",
+      updatedAt: "2026-06-16T00:00:00.000Z",
+    });
+    await writeSecretEnv(runtime.configRoot, "research", {
+      HF_TOKEN: "hf_legacy_broad",
+      HUGGINGFACE_HUB_TOKEN: "hf_legacy_broad",
+    });
+    runtime.dockerRunner.inspectValue = { exists: true, running: true, status: "running" };
+
+    const code = await main([
+      "state",
+      "adopt",
+      "research",
+      "--bucket",
+      "alice/research-archive-data",
+      "--yes",
+      "--no-pull",
+    ], runtime);
+
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain("dedicated inference token");
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "stop")).toBe(false);
+    expect(hub.calls.some((call) => call.name === "bucket.uploadFiles")).toBe(false);
   });
 
   it("rebinds a local gateway to another Docker context through bucket handoff", async () => {
