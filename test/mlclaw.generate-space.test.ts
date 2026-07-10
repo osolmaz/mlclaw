@@ -54,6 +54,8 @@ describe("generated Space repository", () => {
     expect(readme).toContain("hf_oauth_scopes:");
     expect(readme).toContain("  - read-mcp");
     expect(readme).toContain("  - jobs");
+    expect(readme).not.toContain("  - openid");
+    expect(readme).not.toContain("  - profile");
     await expect(fs.readFile(path.join(outDir, "Dockerfile"), "utf8")).resolves.toBe("FROM example/runtime:test\n");
   });
 

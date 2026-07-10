@@ -9068,26 +9068,31 @@ var McpCredentialStore = class {
   loadPromise;
   document = { version: 1, credentials: {} };
   refreshes = /* @__PURE__ */ new Map();
+  mutationTail = Promise.resolve();
   async save(identity, slot = identity.username) {
-    await this.load();
-    this.document.credentials[slot] = {
-      username: identity.username,
-      accessToken: identity.accessToken,
-      ...identity.refreshToken ? { refreshToken: identity.refreshToken } : {},
-      tokenType: identity.tokenType,
-      scope: [...identity.scope],
-      ...identity.expiresAt ? { expiresAt: identity.expiresAt } : {},
-      updatedAt: this.now()
-    };
-    await this.persist();
+    await this.mutate(async () => {
+      await this.loadForRecovery();
+      this.document.credentials[slot] = {
+        username: identity.username,
+        accessToken: identity.accessToken,
+        ...identity.refreshToken ? { refreshToken: identity.refreshToken } : {},
+        tokenType: identity.tokenType,
+        scope: [...identity.scope],
+        ...identity.expiresAt ? { expiresAt: identity.expiresAt } : {},
+        updatedAt: this.now()
+      };
+      await this.persist();
+    });
   }
   async clear(username) {
-    await this.load();
-    if (!(username in this.document.credentials)) {
-      return;
-    }
-    delete this.document.credentials[username];
-    await this.persist();
+    await this.mutate(async () => {
+      const recovered = await this.loadForRecovery();
+      if (!(username in this.document.credentials) && !recovered) {
+        return;
+      }
+      delete this.document.credentials[username];
+      await this.persist();
+    });
   }
   async status(slot) {
     await this.load();
@@ -9149,8 +9154,26 @@ var McpCredentialStore = class {
     try {
       this.document = decodeDocument(decryptEnvelope(raw2, this.key));
     } catch {
-      throw new Error("Encrypted MCP credentials are invalid or cannot be decrypted");
+      throw new InvalidCredentialFileError();
     }
+  }
+  async loadForRecovery() {
+    try {
+      await this.load();
+      return false;
+    } catch (err) {
+      if (!(err instanceof InvalidCredentialFileError)) {
+        throw err;
+      }
+      this.document = { version: 1, credentials: {} };
+      this.loadPromise = Promise.resolve();
+      return true;
+    }
+  }
+  mutate(operation) {
+    const result = this.mutationTail.then(operation);
+    this.mutationTail = result.then(() => void 0, () => void 0);
+    return result;
   }
   async persist() {
     const directory = path5.dirname(this.options.file);
@@ -9168,45 +9191,58 @@ var McpCredentialStore = class {
     }
   }
   async refresh(slot, credential) {
-    if (!credential.refreshToken || !this.options.clientId || !this.options.clientSecret) {
-      throw new Error("Hugging Face MCP authorization expired; sign in again");
-    }
-    const providerUrl = this.options.providerUrl.replace(/\/+$/, "");
-    const basic = Buffer.from(`${this.options.clientId}:${this.options.clientSecret}`).toString("base64");
-    const response = await this.fetchImpl(`${providerUrl}/oauth/token`, {
-      method: "POST",
-      headers: {
-        authorization: `Basic ${basic}`,
-        "content-type": "application/x-www-form-urlencoded"
-      },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        refresh_token: credential.refreshToken,
-        client_id: this.options.clientId
-      })
+    return this.mutate(async () => {
+      if (this.document.credentials[slot] !== credential) {
+        throw new Error("Hugging Face MCP authorization expired; sign in again");
+      }
+      if (!credential.refreshToken || !this.options.clientId || !this.options.clientSecret) {
+        throw new Error("Hugging Face MCP authorization expired; sign in again");
+      }
+      const providerUrl = this.options.providerUrl.replace(/\/+$/, "");
+      const basic = Buffer.from(`${this.options.clientId}:${this.options.clientSecret}`).toString("base64");
+      const response = await this.fetchImpl(`${providerUrl}/oauth/token`, {
+        method: "POST",
+        headers: {
+          authorization: `Basic ${basic}`,
+          "content-type": "application/x-www-form-urlencoded"
+        },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: credential.refreshToken,
+          client_id: this.options.clientId
+        })
+      });
+      if (!response.ok) {
+        delete this.document.credentials[slot];
+        await this.persist();
+        throw new Error("Hugging Face MCP authorization expired; sign in again");
+      }
+      const body = await response.json();
+      const accessToken = stringValue4(body.access_token);
+      if (!accessToken) {
+        throw new Error("Hugging Face MCP token refresh returned an invalid response");
+      }
+      const expiresIn = numberValue(body.expires_in);
+      const { expiresAt: _expired, ...credentialWithoutExpiry } = credential;
+      const refreshed = {
+        ...credentialWithoutExpiry,
+        accessToken,
+        refreshToken: stringValue4(body.refresh_token) ?? credential.refreshToken,
+        tokenType: stringValue4(body.token_type) ?? credential.tokenType,
+        scope: scopeValue(body.scope) ?? credential.scope,
+        ...expiresIn ? { expiresAt: this.now() + expiresIn * 1e3 } : {},
+        updatedAt: this.now()
+      };
+      this.document.credentials[slot] = refreshed;
+      await this.persist();
+      return accessToken;
     });
-    if (!response.ok) {
-      throw new Error("Hugging Face MCP authorization expired; sign in again");
-    }
-    const body = await response.json();
-    const accessToken = stringValue4(body.access_token);
-    if (!accessToken) {
-      throw new Error("Hugging Face MCP token refresh returned an invalid response");
-    }
-    const expiresIn = numberValue(body.expires_in);
-    const { expiresAt: _expired, ...credentialWithoutExpiry } = credential;
-    const refreshed = {
-      ...credentialWithoutExpiry,
-      accessToken,
-      refreshToken: stringValue4(body.refresh_token) ?? credential.refreshToken,
-      tokenType: stringValue4(body.token_type) ?? credential.tokenType,
-      scope: scopeValue(body.scope) ?? credential.scope,
-      ...expiresIn ? { expiresAt: this.now() + expiresIn * 1e3 } : {},
-      updatedAt: this.now()
-    };
-    this.document.credentials[slot] = refreshed;
-    await this.persist();
-    return accessToken;
+  }
+};
+var InvalidCredentialFileError = class extends Error {
+  constructor() {
+    super("Encrypted MCP credentials are invalid or cannot be decrypted");
+    this.name = "InvalidCredentialFileError";
   }
 };
 function encryptDocument(document, key) {
