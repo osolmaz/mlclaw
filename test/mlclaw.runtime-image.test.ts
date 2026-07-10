@@ -49,6 +49,8 @@ describe("runtime image Dockerfile", () => {
     );
     expect(entrypoint).toContain('gosu "$OPENCLAW_IDENTITY" node /app/hf-state-sync.js restore');
     expect(entrypoint).toContain('node /app/hf-state-sync.js prepare-restore');
+    expect(entrypoint).toContain('export MLCLAW_OPENCLAW_UID="$OPENCLAW_UID"');
+    expect(entrypoint).toContain('export MLCLAW_OPENCLAW_GID="$OPENCLAW_GID"');
     for (const secret of [
       "MLCLAW_CREDENTIAL_KEY",
       "MLCLAW_SESSION_SECRET",
