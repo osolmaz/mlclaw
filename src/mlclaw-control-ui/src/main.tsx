@@ -526,7 +526,9 @@ function CredentialsPage(props: {
         <h2>Hugging Face integrations</h2>
         <p className={props.status.integrations.configured ? "statusGood" : "statusWarn"}>
           {props.status.integrations.configured
-            ? `Connected as ${props.status.integrations.identity}.`
+            ? props.status.integrations.identity
+              ? `Connected as ${props.status.integrations.identity}.`
+              : "Connected using the local Hugging Face token."
             : "Sign in again to authorize Hugging Face MCP and Research Agent."}
         </p>
         <div className="integrationList">
