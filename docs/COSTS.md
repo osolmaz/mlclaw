@@ -123,7 +123,7 @@ Cost formula:
 Practical guidance:
 
 Prices below are per 1M tokens from the Hugging Face Router catalog checked for
-the current presets on 2026-07-09. They are provider-specific and can change.
+the current presets on 2026-07-10. They are provider-specific and can change.
 
 | Choice | Fixed cost | Variable cost | Notes |
 | --- | ---: | ---: | --- |
@@ -137,6 +137,13 @@ the current presets on 2026-07-09. They are provider-specific and can change.
 | `huggingface/deepseek-ai/DeepSeek-V4-Flash:deepinfra` | None beyond Space | DeepInfra: $0.09 input / $0.18 output | Low-cost long-context DeepSeek V4 option; supports tools and structured output |
 | `huggingface/deepseek-ai/DeepSeek-V4-Pro:deepinfra` | None beyond Space | DeepInfra: $1.30 input / $2.60 output | Higher-quality long-context DeepSeek V4 option; supports tools and structured output |
 | `huggingface/MiniMaxAI/MiniMax-M3:together` | None beyond Space | Together: $0.30 input / $1.20 output | Long-context MiniMax option; supports tools and structured output |
+| `huggingface/zai-org/GLM-5.2:fireworks-ai` | None beyond Space | Fireworks: $1.40 input / $4.40 output | Fireworks alternative; supports tools |
+| `huggingface/moonshotai/Kimi-K2.7-Code:fireworks-ai` | None beyond Space | Fireworks: $0.95 input / $4.00 output | Fireworks coding alternative; supports tools |
+| `huggingface/openai/gpt-oss-120b:fireworks-ai` | None beyond Space | Fireworks: $0.15 input / $0.60 output | Fireworks GPT-OSS alternative; supports tools |
+| `huggingface/openai/gpt-oss-20b:fireworks-ai` | None beyond Space | Fireworks: $0.07 input / $0.30 output | Fireworks GPT-OSS alternative; supports tools |
+| `huggingface/deepseek-ai/DeepSeek-V4-Flash:fireworks-ai` | None beyond Space | Fireworks: $0.14 input / $0.28 output | Fireworks low-cost DeepSeek alternative; supports tools |
+| `huggingface/deepseek-ai/DeepSeek-V4-Pro:fireworks-ai` | None beyond Space | Fireworks: $1.74 input / $3.48 output | Fireworks higher-quality DeepSeek alternative; supports tools |
+| `huggingface/MiniMaxAI/MiniMax-M3:fireworks-ai` | None beyond Space | Fireworks: $0.30 input / $1.20 output | Fireworks MiniMax alternative; supports tools |
 | `:cheapest` provider suffix | None beyond Space | Lowest available provider price for that model | Use when cost matters more than latency |
 | `:fastest` provider suffix | None beyond Space | May cost more | Use when latency matters more than cost |
 | Explicit provider suffix, e.g. `:deepinfra` | None beyond Space | Provider-specific | Use for predictable provider behavior |

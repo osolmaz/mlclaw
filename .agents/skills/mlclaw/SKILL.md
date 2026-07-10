@@ -198,6 +198,11 @@ Known useful router-compatible choices:
 - `huggingface/deepseek-ai/DeepSeek-V4-Pro:deepinfra`: higher-quality long-context DeepSeek V4 option.
 - `huggingface/MiniMaxAI/MiniMax-M3:together`: long-context MiniMax option with tool and structured-output support.
 
+Fireworks alternatives using the `:fireworks-ai` suffix are curated for GLM
+5.2, Kimi K2.7 Code, GPT-OSS 120B and 20B, DeepSeek V4 Flash and Pro, and
+MiniMax M3. The Router catalog does not currently expose the Gemma 4 or Qwen
+3.6 presets through Fireworks.
+
 Do not assume every Hub model is a Router chat model. If exact current model
 availability matters, check the Hugging Face Router catalog or run a direct
 chat-completions probe.

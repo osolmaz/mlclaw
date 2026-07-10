@@ -94,6 +94,11 @@ Recommended router-compatible options:
 - `huggingface/deepseek-ai/DeepSeek-V4-Pro:deepinfra`: higher-quality long-context DeepSeek V4 option.
 - `huggingface/MiniMaxAI/MiniMax-M3:together`: long-context MiniMax option with tool and structured-output support.
 
+Fireworks alternatives are also included for GLM 5.2, Kimi K2.7 Code,
+GPT-OSS 120B and 20B, DeepSeek V4 Flash and Pro, and MiniMax M3. Use the
+provider suffix `:fireworks-ai`. The current Router catalog does not expose the
+Gemma 4 or Qwen 3.6 presets through Fireworks.
+
 ## Optional Telegram
 
 Telegram is optional. If you provide a Telegram bot token, ML Claw calls

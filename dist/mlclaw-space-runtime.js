@@ -87,11 +87,13 @@ async function waitForPoll(delayMs, signal) {
     return;
   }
   await new Promise((resolve) => {
-    const timer = setTimeout(resolve, delayMs);
-    signal?.addEventListener("abort", () => {
+    const finish = () => {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", finish);
       resolve();
-    }, { once: true });
+    };
+    const timer = setTimeout(finish, delayMs);
+    signal?.addEventListener("abort", finish, { once: true });
   });
 }
 async function copyBaselineSkills(params) {
@@ -564,6 +566,118 @@ var PRESET_MODEL_CHOICES = [
     supportsStructuredOutput: true,
     firstTokenLatencyMs: 505.6,
     throughput: 59.79726580207129,
+    status: "live",
+    inputModalities: ["text"],
+    outputModalities: ["text"],
+    preset: true
+  }),
+  freezeChoice({
+    modelId: "zai-org/GLM-5.2",
+    provider: "fireworks-ai",
+    label: "GLM 5.2",
+    note: "Long-context GLM alternative on Fireworks",
+    contextLength: 1048576,
+    pricing: { input: 1.4, output: 4.4 },
+    supportsTools: true,
+    supportsStructuredOutput: false,
+    firstTokenLatencyMs: 931,
+    throughput: 44.001300948170254,
+    status: "live",
+    inputModalities: ["text"],
+    outputModalities: ["text"],
+    preset: true
+  }),
+  freezeChoice({
+    modelId: "moonshotai/Kimi-K2.7-Code",
+    provider: "fireworks-ai",
+    label: "Kimi K2.7 Code",
+    note: "Kimi K2.7 coding alternative on Fireworks",
+    contextLength: 262144,
+    pricing: { input: 0.95, output: 4 },
+    supportsTools: true,
+    supportsStructuredOutput: false,
+    firstTokenLatencyMs: 598.8,
+    throughput: 139.36660684183386,
+    status: "live",
+    inputModalities: ["text"],
+    outputModalities: ["text"],
+    preset: true
+  }),
+  freezeChoice({
+    modelId: "openai/gpt-oss-120b",
+    provider: "fireworks-ai",
+    label: "GPT-OSS 120B",
+    note: "Large GPT-OSS alternative on Fireworks",
+    contextLength: 131072,
+    pricing: { input: 0.15, output: 0.6 },
+    supportsTools: true,
+    supportsStructuredOutput: false,
+    firstTokenLatencyMs: 436.8,
+    throughput: 150.7430218155076,
+    status: "live",
+    inputModalities: ["text"],
+    outputModalities: ["text"],
+    preset: true
+  }),
+  freezeChoice({
+    modelId: "openai/gpt-oss-20b",
+    provider: "fireworks-ai",
+    label: "GPT-OSS 20B",
+    note: "Lower-cost GPT-OSS alternative on Fireworks",
+    contextLength: 131072,
+    pricing: { input: 0.07, output: 0.3 },
+    supportsTools: true,
+    supportsStructuredOutput: false,
+    firstTokenLatencyMs: 576.4,
+    throughput: 48.80341799488286,
+    status: "live",
+    inputModalities: ["text"],
+    outputModalities: ["text"],
+    preset: true
+  }),
+  freezeChoice({
+    modelId: "deepseek-ai/DeepSeek-V4-Flash",
+    provider: "fireworks-ai",
+    label: "DeepSeek V4 Flash",
+    note: "Lower-cost DeepSeek V4 alternative on Fireworks",
+    contextLength: 1048576,
+    pricing: { input: 0.14, output: 0.28 },
+    supportsTools: true,
+    supportsStructuredOutput: false,
+    firstTokenLatencyMs: 556.2,
+    throughput: 112.3238326192391,
+    status: "live",
+    inputModalities: ["text"],
+    outputModalities: ["text"],
+    preset: true
+  }),
+  freezeChoice({
+    modelId: "deepseek-ai/DeepSeek-V4-Pro",
+    provider: "fireworks-ai",
+    label: "DeepSeek V4 Pro",
+    note: "Higher-quality DeepSeek V4 alternative on Fireworks",
+    contextLength: 1048576,
+    pricing: { input: 1.74, output: 3.48 },
+    supportsTools: true,
+    supportsStructuredOutput: false,
+    firstTokenLatencyMs: 787.2,
+    throughput: 59.92780906440809,
+    status: "live",
+    inputModalities: ["text"],
+    outputModalities: ["text"],
+    preset: true
+  }),
+  freezeChoice({
+    modelId: "MiniMaxAI/MiniMax-M3",
+    provider: "fireworks-ai",
+    label: "MiniMax M3",
+    note: "Long-context MiniMax alternative on Fireworks",
+    contextLength: 512e3,
+    pricing: { input: 0.3, output: 1.2 },
+    supportsTools: true,
+    supportsStructuredOutput: false,
+    firstTokenLatencyMs: 756,
+    throughput: 131.4435735979844,
     status: "live",
     inputModalities: ["text"],
     outputModalities: ["text"],

@@ -139,6 +139,27 @@ $3.20/M output tokens, 262,144 context, tool support, and structured-output
 support. ML Claw presets should use that current live row until the 35B A3B
 route returns.
 
+## Fireworks Alternatives Verified On 2026-07-10
+
+The 35B A3B route was present again in the live catalog. The catalog and direct
+chat-completion probes also confirmed these Fireworks alternatives. Every
+probe included a tool definition and returned HTTP 200.
+
+| Router model | Input / output per 1M tokens | Context | Tools | Structured output |
+| --- | ---: | ---: | --- | --- |
+| `zai-org/GLM-5.2:fireworks-ai` | $1.40 / $4.40 | 1,048,576 | yes | no |
+| `moonshotai/Kimi-K2.7-Code:fireworks-ai` | $0.95 / $4.00 | 262,144 | yes | no |
+| `openai/gpt-oss-120b:fireworks-ai` | $0.15 / $0.60 | 131,072 | yes | no |
+| `openai/gpt-oss-20b:fireworks-ai` | $0.07 / $0.30 | 131,072 | yes | no |
+| `deepseek-ai/DeepSeek-V4-Flash:fireworks-ai` | $0.14 / $0.28 | 1,048,576 | yes | no |
+| `deepseek-ai/DeepSeek-V4-Pro:fireworks-ai` | $1.74 / $3.48 | 1,048,576 | yes | no |
+| `MiniMaxAI/MiniMax-M3:fireworks-ai` | $0.30 / $1.20 | 512,000 | yes | no |
+
+The Router catalog did not expose Fireworks rows for
+`google/gemma-4-26B-A4B-it`, `Qwen/Qwen3.6-35B-A3B`, or
+`Qwen/Qwen3.6-27B`, so ML Claw keeps those presets on their currently
+available providers.
+
 Provider suffixes did not unlock models that were absent from the router
 catalog:
 

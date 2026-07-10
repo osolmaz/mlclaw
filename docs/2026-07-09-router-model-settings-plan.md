@@ -55,6 +55,12 @@ Presets are always available even if the Router catalog cannot be fetched:
 - `huggingface/google/gemma-4-26B-A4B-it:deepinfra`
 - `huggingface/Qwen/Qwen3.6-35B-A3B:deepinfra`
 - `huggingface/Qwen/Qwen3.6-27B:deepinfra`
+- Fireworks alternatives for GLM 5.2, Kimi K2.7 Code, GPT-OSS 120B and 20B,
+  DeepSeek V4 Flash and Pro, and MiniMax M3, each pinned with
+  `:fireworks-ai`.
+
+The live Router catalog did not list Fireworks rows for the Gemma 4 or Qwen
+3.6 presets on 2026-07-10, so ML Claw does not invent alternatives for them.
 
 Follow-up validation on 2026-07-09 found that
 `Qwen/Qwen3.6-35B-A3B:deepinfra` is present in the live Router catalog again,

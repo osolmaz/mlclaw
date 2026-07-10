@@ -29,15 +29,34 @@ describe("ML Claw Space runtime", () => {
         "huggingface/Qwen/Qwen3.6-35B-A3B:deepinfra",
         "huggingface/Qwen/Qwen3.6-27B:deepinfra",
         "huggingface/zai-org/GLM-5.2:deepinfra",
+        "huggingface/zai-org/GLM-5.2:fireworks-ai",
         "huggingface/moonshotai/Kimi-K2.7-Code:deepinfra",
+        "huggingface/moonshotai/Kimi-K2.7-Code:fireworks-ai",
         "huggingface/openai/gpt-oss-120b:deepinfra",
+        "huggingface/openai/gpt-oss-120b:fireworks-ai",
         "huggingface/openai/gpt-oss-20b:deepinfra",
+        "huggingface/openai/gpt-oss-20b:fireworks-ai",
         "huggingface/deepseek-ai/DeepSeek-V4-Flash:deepinfra",
+        "huggingface/deepseek-ai/DeepSeek-V4-Flash:fireworks-ai",
         "huggingface/deepseek-ai/DeepSeek-V4-Pro:deepinfra",
+        "huggingface/deepseek-ai/DeepSeek-V4-Pro:fireworks-ai",
         "huggingface/MiniMaxAI/MiniMax-M3:together",
+        "huggingface/MiniMaxAI/MiniMax-M3:fireworks-ai",
       ]),
     );
     expect(new Set(PRESET_MODEL_CHOICES.map((choice) => choice.key)).size).toBe(PRESET_MODEL_CHOICES.length);
+    const fireworks = PRESET_MODEL_CHOICES.filter((choice) => choice.provider === "fireworks-ai");
+    expect(fireworks.map((choice) => choice.modelId)).toEqual([
+      "zai-org/GLM-5.2",
+      "moonshotai/Kimi-K2.7-Code",
+      "openai/gpt-oss-120b",
+      "openai/gpt-oss-20b",
+      "deepseek-ai/DeepSeek-V4-Flash",
+      "deepseek-ai/DeepSeek-V4-Pro",
+      "MiniMaxAI/MiniMax-M3",
+    ]);
+    expect(fireworks.every((choice) => choice.supportsTools === true)).toBe(true);
+    expect(fireworks.every((choice) => choice.supportsStructuredOutput === false)).toBe(true);
   });
 
   it("serves the Hugging Face login page before a session exists", async () => {
