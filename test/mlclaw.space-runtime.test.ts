@@ -1304,6 +1304,8 @@ describe("ML Claw Space runtime", () => {
     });
     expect(asset.status).toBe(200);
     expect(asset.headers.get("cache-control")).toContain("immutable");
+    expect(asset.headers.get("access-control-allow-origin")).toBe("null");
+    expect(asset.headers.get("cross-origin-resource-policy")).toBe("cross-origin");
     expect(await asset.text()).toContain("trustedBrokerKit");
 
     const member = await fetch(base, {

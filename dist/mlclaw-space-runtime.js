@@ -9656,14 +9656,16 @@ async function trustedBrokerKitUi(c, config2, delegatedBrokerKit) {
   return new Response(response.body, { status: response.status, headers });
 }
 function trustedBrokerKitHeaders(immutable) {
-  return new Headers({
+  const headers = new Headers({
     "cache-control": immutable ? "public, max-age=31536000, immutable" : "no-store",
     "content-security-policy": "sandbox allow-scripts; default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'self'",
-    "cross-origin-resource-policy": "same-origin",
+    "cross-origin-resource-policy": immutable ? "cross-origin" : "same-origin",
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
     "x-frame-options": "SAMEORIGIN"
   });
+  if (immutable) headers.set("access-control-allow-origin", "null");
+  return headers;
 }
 function logoutResponse(config2, json) {
   const headers = new Headers();
