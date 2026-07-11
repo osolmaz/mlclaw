@@ -121,8 +121,8 @@ const approvalSchema = z
 const approvalPageSchema = z
   .object({
     requests: z.array(approvalSchema).max(100),
-    next_cursor: z.string().min(1).max(4_096).optional(),
-    event_cursor: z.string().min(1).max(4_096).optional(),
+    next_cursor: z.string().min(1).max(1_024).optional(),
+    event_cursor: z.string().min(1).max(1_024).optional(),
   })
   .strict();
 
