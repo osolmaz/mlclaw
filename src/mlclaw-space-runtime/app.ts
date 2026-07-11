@@ -60,7 +60,8 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
   const app = new Hono();
   const operatorBrokers = new OperatorBrokerRegistry(config.operatorBrokers);
   const delegatedBrokerKit = new DelegatedBrokerKit(operatorBrokers, config.sessionSecret);
-  const allowDelegatedSnapshot = fixedWindowRateLimit(12, 60_000);
+  const allowDelegatedSessionSnapshot = fixedWindowRateLimit(12, 60_000);
+  const allowDelegatedActorSnapshot = fixedWindowRateLimit(60, 60_000);
   const openAiCredentials = new OpenAiCredentialStore(config.openaiCredentialStoreFile, config.credentialKey);
 
   app.get("/health", (c) => health(c, config, controls));
@@ -137,10 +138,18 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
 
   app.options("/mlclaw/api/brokerkit/*", (c) => delegatedPreflight(c));
 
+  app.post("/mlclaw/api/brokerkit/session", (c) => {
+    const identity = delegatedIdentity(c, delegatedBrokerKit);
+    if (!identity) return delegatedErrorResponse(c, "not_authorized", 401);
+    return delegatedJson(c, delegatedBrokerKit.issueSession(identity.actor));
+  });
+
   app.get("/mlclaw/api/brokerkit/snapshot", async (c) => {
     const identity = delegatedIdentity(c, delegatedBrokerKit);
     if (!identity) return delegatedErrorResponse(c, "not_authorized", 401);
-    if (!allowDelegatedSnapshot(identity.sessionId)) return delegatedErrorResponse(c, "rate_limited", 429);
+    if (!allowDelegatedSessionSnapshot(identity.sessionId) || !allowDelegatedActorSnapshot(identity.actor)) {
+      return delegatedErrorResponse(c, "rate_limited", 429);
+    }
     try {
       return delegatedJson(c, await delegatedBrokerKit.snapshot());
     } catch (error) {
@@ -494,16 +503,21 @@ async function trustedBrokerKitUi(
   const uiDir = path.join(config.brokerKitPluginPath, "dist", "ui");
   const file = path.join(uiDir, relative);
   if (relative === "index.html") {
-    if (c.req.header("sec-fetch-dest") !== "iframe") return c.text("not found\n", 404);
+    const destination = c.req.header("sec-fetch-dest");
+    if (destination !== "iframe" && destination !== "document") return c.text("not found\n", 404);
     const auth = requireAdmin(c, config);
     if (auth instanceof Response) return auth;
     try {
       const template = await fs.readFile(file, "utf8");
-      const session = delegatedBrokerKit.issueSession(auth.username);
-      const encoded = Buffer.from(JSON.stringify(session), "utf8").toString("base64url");
-      const marker = `<meta name="brokerkit-delegated-session" content="${encoded}">`;
+      const marker =
+        destination === "iframe"
+          ? '<meta name="brokerkit-delegated-top-level">'
+          : `<meta name="brokerkit-delegated-session" content="${Buffer.from(
+              JSON.stringify(delegatedBrokerKit.issueSession(auth.username)),
+              "utf8",
+            ).toString("base64url")}">`;
       if (!template.includes("</head>")) return c.text("not found\n", 404);
-      const headers = trustedBrokerKitHeaders(false);
+      const headers = trustedBrokerKitHeaders(destination === "iframe" ? "launcher" : "top-level");
       headers.set("content-type", "text/html; charset=utf-8");
       return new Response(template.replace("</head>", `${marker}</head>`), { status: 200, headers });
     } catch {
@@ -512,22 +526,22 @@ async function trustedBrokerKitUi(
   }
   const response = await serveFile(file, contentType(file), true);
   if (response.status !== 200) return response;
-  const headers = trustedBrokerKitHeaders(true);
+  const headers = trustedBrokerKitHeaders("asset");
   headers.set("content-type", response.headers.get("content-type") ?? "application/octet-stream");
   return new Response(response.body, { status: response.status, headers });
 }
 
-function trustedBrokerKitHeaders(immutable: boolean): Headers {
+function trustedBrokerKitHeaders(mode: "launcher" | "top-level" | "asset"): Headers {
+  const asset = mode === "asset";
   const headers = new Headers({
-    "cache-control": immutable ? "public, max-age=31536000, immutable" : "no-store",
-    "content-security-policy":
-      "sandbox allow-scripts; default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'self'",
-    "cross-origin-resource-policy": immutable ? "cross-origin" : "same-origin",
+    "cache-control": asset ? "public, max-age=31536000, immutable" : "no-store",
+    "content-security-policy": `sandbox allow-scripts; default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors ${mode === "top-level" ? "'none'" : "'self'"}`,
+    "cross-origin-resource-policy": asset ? "cross-origin" : "same-origin",
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
-    "x-frame-options": "SAMEORIGIN",
+    "x-frame-options": mode === "top-level" ? "DENY" : "SAMEORIGIN",
   });
-  if (immutable) headers.set("access-control-allow-origin", "null");
+  if (asset) headers.set("access-control-allow-origin", "null");
   return headers;
 }
 

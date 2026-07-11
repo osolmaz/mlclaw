@@ -110,11 +110,12 @@ call a broker directly.
 
 The OpenClaw plugin registers the Gateway tab, but ML Claw intercepts the tab's
 fixed UI path and serves the immutable packaged assets from its trusted HTTP
-boundary. ML Claw embeds a one-shot delegated session only in an authenticated iframe
-navigation and enforces an opaque origin with CSP; top-level and fetch requests
-for the document are rejected. The OpenClaw process therefore never receives
-broker credentials, delegated decision tokens, or control over the code that
-receives those tokens.
+boundary. The framed tab contains only a launcher. After an operator clicks it,
+ML Claw navigates the whole tab to an authenticated, unframeable document with
+an opaque CSP-sandboxed origin and a short-lived delegated session. The document
+renews that session using its current bearer token; it never sends ML Claw
+cookies to the delegated API. The OpenClaw process therefore never receives
+broker credentials, delegated decision tokens, or control over the decision UI.
 
 ML Claw refreshes current request state and revision immediately before every
 decision. It sends actor attribution and a deterministic idempotency key to the

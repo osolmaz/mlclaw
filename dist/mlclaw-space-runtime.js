@@ -9152,6 +9152,31 @@ var CONTROL_BRANDING_SCRIPT = `(function () {
       }
     });
   }
+  function brokerKitFrameIn(root, source) {
+    if (!root.querySelectorAll) return;
+    var frames = root.querySelectorAll("iframe");
+    for (var i = 0; i < frames.length; i++) {
+      try {
+        var frameUrl = new URL(frames[i].src, location.href);
+        if (frames[i].contentWindow === source && frameUrl.origin === location.origin &&
+            frameUrl.pathname === "/plugins/brokerkit/ui/" && !frameUrl.search) return frames[i];
+      } catch (_) {}
+    }
+    var elements = root.querySelectorAll("*");
+    for (var j = 0; j < elements.length; j++) {
+      if (elements[j].shadowRoot) {
+        var nested = brokerKitFrameIn(elements[j].shadowRoot, source);
+        if (nested) return nested;
+      }
+    }
+  }
+  window.addEventListener("message", function (event) {
+    var message = event.data;
+    if (event.origin !== "null" || !message || message.type !== "brokerkit.delegated-web.open" ||
+        message.version !== 1 || typeof message.nonce !== "string" || !/^[a-f0-9]{32}$/.test(message.nonce)) return;
+    var frame = brokerKitFrameIn(document, event.source);
+    if (frame) location.assign(frame.src);
+  });
   if (!document.documentElement.hasAttribute(marker)) {
     document.documentElement.setAttribute(marker, "1");
     var attachShadow = Element.prototype.attachShadow;
@@ -9245,7 +9270,8 @@ function createSpaceRuntimeApp(config2, controls) {
   const app = new Hono2();
   const operatorBrokers = new OperatorBrokerRegistry(config2.operatorBrokers);
   const delegatedBrokerKit = new DelegatedBrokerKit(operatorBrokers, config2.sessionSecret);
-  const allowDelegatedSnapshot = fixedWindowRateLimit(12, 6e4);
+  const allowDelegatedSessionSnapshot = fixedWindowRateLimit(12, 6e4);
+  const allowDelegatedActorSnapshot = fixedWindowRateLimit(60, 6e4);
   const openAiCredentials = new OpenAiCredentialStore(config2.openaiCredentialStoreFile, config2.credentialKey);
   app.get("/health", (c) => health(c, config2, controls));
   app.get("/healthz", (c) => health(c, config2, controls));
@@ -9316,10 +9342,17 @@ function createSpaceRuntimeApp(config2, controls) {
     return c.json(await statusPayload(config2, controls));
   });
   app.options("/mlclaw/api/brokerkit/*", (c) => delegatedPreflight(c));
+  app.post("/mlclaw/api/brokerkit/session", (c) => {
+    const identity = delegatedIdentity(c, delegatedBrokerKit);
+    if (!identity) return delegatedErrorResponse(c, "not_authorized", 401);
+    return delegatedJson(c, delegatedBrokerKit.issueSession(identity.actor));
+  });
   app.get("/mlclaw/api/brokerkit/snapshot", async (c) => {
     const identity = delegatedIdentity(c, delegatedBrokerKit);
     if (!identity) return delegatedErrorResponse(c, "not_authorized", 401);
-    if (!allowDelegatedSnapshot(identity.sessionId)) return delegatedErrorResponse(c, "rate_limited", 429);
+    if (!allowDelegatedSessionSnapshot(identity.sessionId) || !allowDelegatedActorSnapshot(identity.actor)) {
+      return delegatedErrorResponse(c, "rate_limited", 429);
+    }
     try {
       return delegatedJson(c, await delegatedBrokerKit.snapshot());
     } catch (error) {
@@ -9633,16 +9666,18 @@ async function trustedBrokerKitUi(c, config2, delegatedBrokerKit) {
   const uiDir = path3.join(config2.brokerKitPluginPath, "dist", "ui");
   const file = path3.join(uiDir, relative);
   if (relative === "index.html") {
-    if (c.req.header("sec-fetch-dest") !== "iframe") return c.text("not found\n", 404);
+    const destination = c.req.header("sec-fetch-dest");
+    if (destination !== "iframe" && destination !== "document") return c.text("not found\n", 404);
     const auth = requireAdmin(c, config2);
     if (auth instanceof Response) return auth;
     try {
       const template = await fs3.readFile(file, "utf8");
-      const session = delegatedBrokerKit.issueSession(auth.username);
-      const encoded = Buffer.from(JSON.stringify(session), "utf8").toString("base64url");
-      const marker = `<meta name="brokerkit-delegated-session" content="${encoded}">`;
+      const marker = destination === "iframe" ? '<meta name="brokerkit-delegated-top-level">' : `<meta name="brokerkit-delegated-session" content="${Buffer.from(
+        JSON.stringify(delegatedBrokerKit.issueSession(auth.username)),
+        "utf8"
+      ).toString("base64url")}">`;
       if (!template.includes("</head>")) return c.text("not found\n", 404);
-      const headers2 = trustedBrokerKitHeaders(false);
+      const headers2 = trustedBrokerKitHeaders(destination === "iframe" ? "launcher" : "top-level");
       headers2.set("content-type", "text/html; charset=utf-8");
       return new Response(template.replace("</head>", `${marker}</head>`), { status: 200, headers: headers2 });
     } catch {
@@ -9651,20 +9686,21 @@ async function trustedBrokerKitUi(c, config2, delegatedBrokerKit) {
   }
   const response = await serveFile(file, contentType(file), true);
   if (response.status !== 200) return response;
-  const headers = trustedBrokerKitHeaders(true);
+  const headers = trustedBrokerKitHeaders("asset");
   headers.set("content-type", response.headers.get("content-type") ?? "application/octet-stream");
   return new Response(response.body, { status: response.status, headers });
 }
-function trustedBrokerKitHeaders(immutable) {
+function trustedBrokerKitHeaders(mode) {
+  const asset = mode === "asset";
   const headers = new Headers({
-    "cache-control": immutable ? "public, max-age=31536000, immutable" : "no-store",
-    "content-security-policy": "sandbox allow-scripts; default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'self'",
-    "cross-origin-resource-policy": immutable ? "cross-origin" : "same-origin",
+    "cache-control": asset ? "public, max-age=31536000, immutable" : "no-store",
+    "content-security-policy": `sandbox allow-scripts; default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors ${mode === "top-level" ? "'none'" : "'self'"}`,
+    "cross-origin-resource-policy": asset ? "cross-origin" : "same-origin",
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
-    "x-frame-options": "SAMEORIGIN"
+    "x-frame-options": mode === "top-level" ? "DENY" : "SAMEORIGIN"
   });
-  if (immutable) headers.set("access-control-allow-origin", "null");
+  if (asset) headers.set("access-control-allow-origin", "null");
   return headers;
 }
 function logoutResponse(config2, json) {

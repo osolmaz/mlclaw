@@ -73,6 +73,31 @@ export const CONTROL_BRANDING_SCRIPT = `(function () {
       }
     });
   }
+  function brokerKitFrameIn(root, source) {
+    if (!root.querySelectorAll) return;
+    var frames = root.querySelectorAll("iframe");
+    for (var i = 0; i < frames.length; i++) {
+      try {
+        var frameUrl = new URL(frames[i].src, location.href);
+        if (frames[i].contentWindow === source && frameUrl.origin === location.origin &&
+            frameUrl.pathname === "/plugins/brokerkit/ui/" && !frameUrl.search) return frames[i];
+      } catch (_) {}
+    }
+    var elements = root.querySelectorAll("*");
+    for (var j = 0; j < elements.length; j++) {
+      if (elements[j].shadowRoot) {
+        var nested = brokerKitFrameIn(elements[j].shadowRoot, source);
+        if (nested) return nested;
+      }
+    }
+  }
+  window.addEventListener("message", function (event) {
+    var message = event.data;
+    if (event.origin !== "null" || !message || message.type !== "brokerkit.delegated-web.open" ||
+        message.version !== 1 || typeof message.nonce !== "string" || !/^[a-f0-9]{32}$/.test(message.nonce)) return;
+    var frame = brokerKitFrameIn(document, event.source);
+    if (frame) location.assign(frame.src);
+  });
   if (!document.documentElement.hasAttribute(marker)) {
     document.documentElement.setAttribute(marker, "1");
     var attachShadow = Element.prototype.attachShadow;

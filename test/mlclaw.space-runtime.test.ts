@@ -252,18 +252,27 @@ describe("ML Claw Space runtime", () => {
     const member = await fetch(ui, {
       headers: { ...iframeHeaders, cookie: sessionCookie(config, "bob") },
     });
-    const topLevel = await fetch(ui, {
+    const fetchedDocument = await fetch(ui, {
       headers: { cookie: sessionCookie(config, "alice") },
     });
-    const session = await fetch(ui, {
+    const launcher = await fetch(ui, {
       headers: { ...iframeHeaders, cookie: sessionCookie(config, "alice") },
+    });
+    const session = await fetch(ui, {
+      headers: { "sec-fetch-dest": "document", cookie: sessionCookie(config, "alice") },
     });
     expect(anonymous.status).toBe(401);
     expect(member.status).toBe(403);
-    expect(topLevel.status).toBe(404);
+    expect(fetchedDocument.status).toBe(404);
+    expect(launcher.status).toBe(200);
+    const launcherHtml = await launcher.text();
+    expect(launcherHtml).toContain('name="brokerkit-delegated-top-level"');
+    expect(launcherHtml).not.toContain("brokerkit-delegated-session");
     expect(session.status).toBe(200);
     expect(session.headers.get("cache-control")).toBe("no-store");
     expect(session.headers.get("content-security-policy")).toContain("sandbox allow-scripts");
+    expect(session.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    expect(session.headers.get("x-frame-options")).toBe("DENY");
     const sessionHtml = await session.text();
     const embedded = sessionHtml.match(/name="brokerkit-delegated-session" content="([A-Za-z0-9_-]+)"/u)?.[1];
     expect(embedded).toBeDefined();
@@ -273,10 +282,6 @@ describe("ML Claw Space runtime", () => {
     };
     expect(sessionBody.decision_token).not.toContain("operator-secret");
     expect(Date.parse(sessionBody.expires_at) - Date.now()).toBeLessThanOrEqual(5 * 60_000);
-    const removedSessionRoute = await fetch(`${base}/session`, { method: "POST" });
-    expect(removedSessionRoute.status).not.toBe(200);
-    expect(await removedSessionRoute.text()).not.toContain("decision_token");
-
     const cookieOnly = await fetch(`${base}/snapshot`, {
       headers: { origin: "null", cookie: sessionCookie(config, "alice") },
     });
@@ -299,8 +304,12 @@ describe("ML Claw Space runtime", () => {
     const rateLimited = await fetch(`${base}/snapshot`, { headers: authorizedHeaders });
     expect(rateLimited.status).toBe(429);
     expect(await rateLimited.json()).toEqual({ error: { code: "rate_limited" } });
+    const renewedSession = await fetch(`${base}/session`, { method: "POST", headers: authorizedHeaders });
+    expect(renewedSession.status).toBe(200);
+    const renewedSessionBody = (await renewedSession.json()) as { decision_token: string };
+    expect(renewedSessionBody.decision_token).not.toBe(sessionBody.decision_token);
     const anotherSession = await fetch(ui, {
-      headers: { ...iframeHeaders, cookie: sessionCookie(config, "alice") },
+      headers: { "sec-fetch-dest": "document", cookie: sessionCookie(config, "alice") },
     });
     const anotherHtml = await anotherSession.text();
     const anotherEmbedded = anotherHtml.match(/name="brokerkit-delegated-session" content="([A-Za-z0-9_-]+)"/u)?.[1];
@@ -311,6 +320,28 @@ describe("ML Claw Space runtime", () => {
       headers: { origin: "null", authorization: `Bearer ${anotherSessionBody.decision_token}` },
     });
     expect(independentTab.status).toBe(200);
+    for (const requestCount of [12, 12, 12, 11]) {
+      const actorSession = await fetch(ui, {
+        headers: { "sec-fetch-dest": "document", cookie: sessionCookie(config, "alice") },
+      });
+      const actorHtml = await actorSession.text();
+      const actorEmbedded = actorHtml.match(/name="brokerkit-delegated-session" content="([A-Za-z0-9_-]+)"/u)?.[1];
+      const actorBody = JSON.parse(Buffer.from(actorEmbedded ?? "", "base64url").toString("utf8")) as {
+        decision_token: string;
+      };
+      const responses = await Promise.all(
+        Array.from({ length: requestCount }, () =>
+          fetch(`${base}/snapshot`, {
+            headers: { origin: "null", authorization: `Bearer ${actorBody.decision_token}` },
+          }),
+        ),
+      );
+      expect(responses.every((response) => response.status === 200)).toBe(true);
+    }
+    const actorLimited = await fetch(`${base}/snapshot`, {
+      headers: { origin: "null", authorization: `Bearer ${renewedSessionBody.decision_token}` },
+    });
+    expect(actorLimited.status).toBe(429);
     brokerRequests.length = 0;
 
     const requestUrl = `${base}/requests/${snapshotBody.requests[0]?.handle}/approve`;
@@ -1257,6 +1288,9 @@ describe("ML Claw Space runtime", () => {
     expect(brandingScript).toContain('var productName = "ML Claw"');
     expect(brandingScript).not.toContain("brokerkit.delegated-web.session.request");
     expect(brandingScript).not.toContain("brokerKitSession");
+    expect(brandingScript).toContain("brokerkit.delegated-web.open");
+    expect(brandingScript).toContain("brokerKitFrameIn(document, event.source)");
+    expect(brandingScript).toContain('frameUrl.pathname === "/plugins/brokerkit/ui/"');
 
     const sw = await fetch(`http://127.0.0.1:${config.port}/sw.js`);
     expect(sw.status).toBe(200);
@@ -1293,11 +1327,24 @@ describe("ML Claw Space runtime", () => {
     });
     expect(page.status).toBe(200);
     expect(page.headers.get("content-type")).toContain("text/html");
-    expect(await page.text()).toContain("Trusted BrokerKit");
+    const launcherHtml = await page.text();
+    expect(launcherHtml).toContain("Trusted BrokerKit");
+    expect(launcherHtml).toContain('name="brokerkit-delegated-top-level"');
+    expect(launcherHtml).not.toContain("brokerkit-delegated-session");
     expect(page.headers.get("cache-control")).toBe("no-store");
     expect(page.headers.get("content-security-policy")).toContain("frame-ancestors 'self'");
     expect(page.headers.get("content-security-policy")).toContain("sandbox allow-scripts");
     expect(page.headers.get("x-frame-options")).toBe("SAMEORIGIN");
+
+    const topLevel = await fetch(base, {
+      headers: { "sec-fetch-dest": "document", cookie: sessionCookie(config, "alice") },
+    });
+    const topLevelHtml = await topLevel.text();
+    expect(topLevel.status).toBe(200);
+    expect(topLevelHtml).toContain('name="brokerkit-delegated-session"');
+    expect(topLevelHtml).not.toContain("brokerkit-delegated-top-level");
+    expect(topLevel.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    expect(topLevel.headers.get("x-frame-options")).toBe("DENY");
 
     const asset = await fetch(`${base}assets/app.js`, {
       headers: { cookie: sessionCookie(config, "alice") },
