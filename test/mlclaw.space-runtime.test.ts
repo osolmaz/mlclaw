@@ -209,33 +209,44 @@ describe("ML Claw Space runtime", () => {
       () => runtime.stop(),
     );
     const base = `http://127.0.0.1:${config.port}/mlclaw/api/brokerkit`;
-    const originHeaders = { origin: "null" };
-    const anonymous = await fetch(`${base}/session`, { headers: originHeaders });
+    const originHeaders = { origin: config.publicUrl };
+    const anonymous = await fetch(`${base}/session`, { method: "POST", headers: originHeaders });
     const member = await fetch(`${base}/session`, {
+      method: "POST",
       headers: { ...originHeaders, cookie: sessionCookie(config, "bob") },
     });
     const wrongOrigin = await fetch(`${base}/session`, {
-      headers: { origin: config.publicUrl, cookie: sessionCookie(config, "alice") },
+      method: "POST",
+      headers: { origin: "https://attacker.example", cookie: sessionCookie(config, "alice") },
+    });
+    const missingCsrf = await fetch(`${base}/session`, {
+      method: "POST",
+      headers: { ...originHeaders, cookie: sessionCookie(config, "alice") },
     });
     const session = await fetch(`${base}/session`, {
-      headers: { ...originHeaders, cookie: sessionCookie(config, "alice") },
+      method: "POST",
+      headers: {
+        ...originHeaders,
+        cookie: sessionCookie(config, "alice"),
+        "x-mlclaw-csrf": createCsrfToken({ username: "alice", sessionSecret: config.sessionSecret }),
+      },
     });
     expect(anonymous.status).toBe(401);
     expect(member.status).toBe(403);
     expect(wrongOrigin.status).toBe(403);
+    expect(missingCsrf.status).toBe(403);
     expect(session.status).toBe(200);
-    expect(session.headers.get("access-control-allow-origin")).toBe("null");
     expect(session.headers.get("cache-control")).toBe("no-store");
     const sessionBody = (await session.json()) as { decision_token: string; expires_at: string };
     expect(sessionBody.decision_token).not.toContain("operator-secret");
     expect(Date.parse(sessionBody.expires_at) - Date.now()).toBeLessThanOrEqual(5 * 60_000);
 
     const cookieOnly = await fetch(`${base}/snapshot`, {
-      headers: { ...originHeaders, cookie: sessionCookie(config, "alice") },
+      headers: { origin: "null", cookie: sessionCookie(config, "alice") },
     });
     expect(cookieOnly.status).toBe(401);
     const authorizedHeaders = {
-      ...originHeaders,
+      origin: "null",
       authorization: `Bearer ${sessionBody.decision_token}`,
     };
     const snapshot = await fetch(`${base}/snapshot`, { headers: authorizedHeaders });
@@ -1158,7 +1169,11 @@ describe("ML Claw Space runtime", () => {
     expect(branding.status).toBe(200);
     expect(branding.headers.get("content-type")).toContain("text/javascript");
     expect(branding.headers.get("cache-control")).toContain("no-store");
-    expect(await branding.text()).toContain('var productName = "ML Claw"');
+    const brandingScript = await branding.text();
+    expect(brandingScript).toContain('var productName = "ML Claw"');
+    expect(brandingScript).toContain("mlclaw.brokerkit.session.request");
+    expect(brandingScript).toContain('new URL(frames[i].src, location.href).pathname === "/plugins/brokerkit/ui/"');
+    expect(brandingScript).toContain('"x-mlclaw-csrf": identity.csrfToken');
 
     const sw = await fetch(`http://127.0.0.1:${config.port}/sw.js`);
     expect(sw.status).toBe(200);

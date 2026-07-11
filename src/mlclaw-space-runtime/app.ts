@@ -134,11 +134,13 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
 
   app.options("/mlclaw/api/brokerkit/*", (c) => delegatedPreflight(c));
 
-  app.get("/mlclaw/api/brokerkit/session", (c) => {
-    if (!delegatedOriginAllowed(c)) return delegatedErrorResponse(c, "not_authorized", 403);
+  app.post("/mlclaw/api/brokerkit/session", (c) => {
+    if (!delegatedBridgeOriginAllowed(c, config)) return delegatedErrorResponse(c, "not_authorized", 403);
     const auth = requireAdmin(c, config);
     if (auth instanceof Response) return auth;
-    return delegatedJson(c, delegatedBrokerKit.issueSession(auth.username));
+    const csrf = requireCsrf(c, config, auth.username);
+    if (csrf) return csrf;
+    return delegatedBridgeJson(c, delegatedBrokerKit.issueSession(auth.username));
   });
 
   app.get("/mlclaw/api/brokerkit/snapshot", async (c) => {
@@ -547,6 +549,11 @@ function delegatedOriginAllowed(c: Context): boolean {
   return c.req.header("origin") === "null";
 }
 
+function delegatedBridgeOriginAllowed(c: Context, config: SpaceRuntimeConfig): boolean {
+  const origin = c.req.header("origin");
+  return origin === undefined || origin === new URL(config.publicUrl).origin;
+}
+
 function delegatedActor(c: Context, delegated: DelegatedBrokerKit): string | undefined {
   if (!delegatedOriginAllowed(c)) return undefined;
   return delegated.authorize(c.req.header("authorization"));
@@ -564,6 +571,12 @@ function delegatedPreflight(c: Context): Response {
 function delegatedJson(c: Context, value: unknown, status: 200 | 201 = 200): Response {
   delegatedHeaders(c);
   return c.json(value, status);
+}
+
+function delegatedBridgeJson(c: Context, value: unknown): Response {
+  c.header("cache-control", "no-store");
+  c.header("x-content-type-options", "nosniff");
+  return c.json(value);
 }
 
 function delegatedErrorResponse(c: Context, code: string, status: 400 | 401 | 403 | 404 | 409 | 502): Response {

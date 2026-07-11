@@ -9046,6 +9046,42 @@ var CONTROL_BRANDING_SCRIPT = `(function () {
       }
     });
   }
+  function brokerKitFrame(source) {
+    var frames = document.querySelectorAll("iframe");
+    for (var i = 0; i < frames.length; i++) {
+      try {
+        if (frames[i].contentWindow === source && new URL(frames[i].src, location.href).pathname === "/plugins/brokerkit/ui/") {
+          return frames[i];
+        }
+      } catch (_) {}
+    }
+  }
+  async function brokerKitSession(event) {
+    var message = event.data;
+    if (event.origin !== "null" || !message || message.type !== "mlclaw.brokerkit.session.request" || message.version !== 1 ||
+        typeof message.nonce !== "string" || !/^[a-f0-9]{32}$/.test(message.nonce) || !brokerKitFrame(event.source)) {
+      return;
+    }
+    var response = { type: "mlclaw.brokerkit.session.response", version: 1, nonce: message.nonce };
+    try {
+      var current = await fetch("/mlclaw/api/session", { credentials: "same-origin", cache: "no-store" });
+      var identity = await current.json();
+      if (!current.ok || !identity.admin || typeof identity.csrfToken !== "string") throw new Error("not authorized");
+      var issued = await fetch("/mlclaw/api/brokerkit/session", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "content-type": "application/json", "x-mlclaw-csrf": identity.csrfToken },
+        body: "{}"
+      });
+      if (!issued.ok) throw new Error("not authorized");
+      response.session = await issued.json();
+    } catch (_) {
+      response.error = "not_authorized";
+    }
+    event.source.postMessage(response, "*");
+  }
+  window.addEventListener("message", function (event) { void brokerKitSession(event); });
     if (!document.documentElement.hasAttribute(marker)) {
     document.documentElement.setAttribute(marker, "1");
     var attachShadow = Element.prototype.attachShadow;
@@ -9207,11 +9243,13 @@ function createSpaceRuntimeApp(config2, controls) {
     return c.json(await statusPayload(config2, controls));
   });
   app.options("/mlclaw/api/brokerkit/*", (c) => delegatedPreflight(c));
-  app.get("/mlclaw/api/brokerkit/session", (c) => {
-    if (!delegatedOriginAllowed(c)) return delegatedErrorResponse(c, "not_authorized", 403);
+  app.post("/mlclaw/api/brokerkit/session", (c) => {
+    if (!delegatedBridgeOriginAllowed(c, config2)) return delegatedErrorResponse(c, "not_authorized", 403);
     const auth = requireAdmin(c, config2);
     if (auth instanceof Response) return auth;
-    return delegatedJson(c, delegatedBrokerKit.issueSession(auth.username));
+    const csrf = requireCsrf(c, config2, auth.username);
+    if (csrf) return csrf;
+    return delegatedBridgeJson(c, delegatedBrokerKit.issueSession(auth.username));
   });
   app.get("/mlclaw/api/brokerkit/snapshot", async (c) => {
     const actor = delegatedActor(c, delegatedBrokerKit);
@@ -9578,6 +9616,10 @@ function optionalPositiveInteger(value, maximum) {
 function delegatedOriginAllowed(c) {
   return c.req.header("origin") === "null";
 }
+function delegatedBridgeOriginAllowed(c, config2) {
+  const origin = c.req.header("origin");
+  return origin === void 0 || origin === new URL(config2.publicUrl).origin;
+}
 function delegatedActor(c, delegated) {
   if (!delegatedOriginAllowed(c)) return void 0;
   return delegated.authorize(c.req.header("authorization"));
@@ -9593,6 +9635,11 @@ function delegatedPreflight(c) {
 function delegatedJson(c, value, status = 200) {
   delegatedHeaders(c);
   return c.json(value, status);
+}
+function delegatedBridgeJson(c, value) {
+  c.header("cache-control", "no-store");
+  c.header("x-content-type-options", "nosniff");
+  return c.json(value);
 }
 function delegatedErrorResponse(c, code, status) {
   delegatedHeaders(c);

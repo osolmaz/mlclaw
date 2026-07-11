@@ -73,6 +73,42 @@ export const CONTROL_BRANDING_SCRIPT = `(function () {
       }
     });
   }
+  function brokerKitFrame(source) {
+    var frames = document.querySelectorAll("iframe");
+    for (var i = 0; i < frames.length; i++) {
+      try {
+        if (frames[i].contentWindow === source && new URL(frames[i].src, location.href).pathname === "/plugins/brokerkit/ui/") {
+          return frames[i];
+        }
+      } catch (_) {}
+    }
+  }
+  async function brokerKitSession(event) {
+    var message = event.data;
+    if (event.origin !== "null" || !message || message.type !== "mlclaw.brokerkit.session.request" || message.version !== 1 ||
+        typeof message.nonce !== "string" || !/^[a-f0-9]{32}$/.test(message.nonce) || !brokerKitFrame(event.source)) {
+      return;
+    }
+    var response = { type: "mlclaw.brokerkit.session.response", version: 1, nonce: message.nonce };
+    try {
+      var current = await fetch("/mlclaw/api/session", { credentials: "same-origin", cache: "no-store" });
+      var identity = await current.json();
+      if (!current.ok || !identity.admin || typeof identity.csrfToken !== "string") throw new Error("not authorized");
+      var issued = await fetch("/mlclaw/api/brokerkit/session", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "content-type": "application/json", "x-mlclaw-csrf": identity.csrfToken },
+        body: "{}"
+      });
+      if (!issued.ok) throw new Error("not authorized");
+      response.session = await issued.json();
+    } catch (_) {
+      response.error = "not_authorized";
+    }
+    event.source.postMessage(response, "*");
+  }
+  window.addEventListener("message", function (event) { void brokerKitSession(event); });
     if (!document.documentElement.hasAttribute(marker)) {
     document.documentElement.setAttribute(marker, "1");
     var attachShadow = Element.prototype.attachShadow;
