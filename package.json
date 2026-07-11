@@ -4,7 +4,7 @@
   "license": "MIT",
   "config": {
     "openclawVersion": "2026.7.1-beta.5",
-    "brokerkitVersion": "61f196d9842f3c65d2edfd1fd04a047a1b4335e9",
+    "brokerkitVersion": "61f196d00b6a964357a0c58c6eb06dfedb1ebe68",
     "brokerkitPluginVersion": "0.1.0",
     "runtimeImageRepository": "ghcr.io/osolmaz/mlclaw"
   },
