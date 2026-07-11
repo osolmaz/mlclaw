@@ -8319,7 +8319,8 @@ async function configureOpenClawGateway(config2) {
   gateway.controlUi = {
     ...typeof gateway.controlUi === "object" && gateway.controlUi ? gateway.controlUi : {},
     dangerouslyDisableDeviceAuth: true,
-    allowedOrigins: [config2.publicUrl]
+    allowedOrigins: [config2.publicUrl],
+    embedSandbox: "scripts"
   };
   configureOpenClawModels(openclawConfig, config2);
   configureManagedMcpServers(openclawConfig, config2);

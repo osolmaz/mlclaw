@@ -1557,6 +1557,7 @@ describe("ML Claw Space runtime", () => {
       controlUi: {
         dangerouslyDisableDeviceAuth: true,
         allowedOrigins: ["https://alice-research.hf.space"],
+        embedSandbox: "scripts",
       },
     });
     expect(rewritten.agents.defaults.model.primary).toBe("huggingface/google/gemma-4-26B-A4B-it:deepinfra");

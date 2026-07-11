@@ -24,6 +24,7 @@ export async function configureOpenClawGateway(config: SpaceRuntimeConfig): Prom
     ...(typeof gateway.controlUi === "object" && gateway.controlUi ? gateway.controlUi : {}),
     dangerouslyDisableDeviceAuth: true,
     allowedOrigins: [config.publicUrl],
+    embedSandbox: "scripts",
   };
   configureOpenClawModels(openclawConfig, config);
   configureManagedMcpServers(openclawConfig, config);
