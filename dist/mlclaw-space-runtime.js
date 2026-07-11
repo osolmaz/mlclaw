@@ -4763,15 +4763,15 @@ var BrokerOperatorClient = class {
   summary() {
     return { id: this.options.id, label: this.options.label };
   }
-  discover() {
+  discover(signal) {
     return this.request(
       "/.well-known/brokerkit-operator",
-      void 0,
+      signal ? { signal } : void 0,
       external_exports.object({ api_version: external_exports.literal("brokerkit.io/operator/v1") }).passthrough(),
       "discovery"
     );
   }
-  list(params = {}) {
+  list(params = {}, signal) {
     const query = new URLSearchParams();
     if (params.status) {
       query.set("status", params.status);
@@ -4785,7 +4785,7 @@ var BrokerOperatorClient = class {
     const suffix = query.size > 0 ? `?${query}` : "";
     return this.request(
       `/api/operator/v1/requests${suffix}`,
-      void 0,
+      signal ? { signal } : void 0,
       approvalPageSchema,
       "request list"
     );
@@ -7369,10 +7369,12 @@ var API_VERSION = "brokerkit.io/delegated-web/v1";
 var TOKEN_LIFETIME_SECONDS = 4 * 60;
 var MAX_PAGES_PER_SOURCE = 32;
 var MAX_HANDLES = 4096;
+var SOURCE_DEADLINE_MS = 15e3;
 var DelegatedBrokerKit = class {
-  constructor(registry, sessionSecret, now = () => /* @__PURE__ */ new Date()) {
+  constructor(registry, sessionSecret, now = () => /* @__PURE__ */ new Date(), sourceDeadlineMs = SOURCE_DEADLINE_MS) {
     this.registry = registry;
     this.now = now;
+    this.sourceDeadlineMs = sourceDeadlineMs;
     this.key = createHmac2("sha256", sessionSecret).update("mlclaw/brokerkit-delegated-web/v1", "utf8").digest();
   }
   key;
@@ -7450,11 +7452,17 @@ var DelegatedBrokerKit = class {
     return project(source.summary(), updated, handle);
   }
   async sourceSnapshot(summary, client, synchronizedAt) {
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(), this.sourceDeadlineMs);
+    timer.unref?.();
     try {
-      await client.discover();
-      const requests = (await Promise.all([this.sourceRequests(client, "pending"), this.sourceRequests(client, "active")])).flat();
+      await client.discover(deadline.signal);
+      const requests = (await Promise.all([
+        this.sourceRequests(client, "pending", deadline.signal),
+        this.sourceRequests(client, "active", deadline.signal)
+      ])).flat();
       return {
-        source: { ...summary, healthy: true, lastSyncAt: synchronizedAt },
+        source: deadline.signal.aborted ? { ...summary, healthy: false, error: "broker_timeout" } : { ...summary, healthy: true, lastSyncAt: synchronizedAt },
         requests
       };
     } catch (error) {
@@ -7462,16 +7470,22 @@ var DelegatedBrokerKit = class {
         source: { ...summary, healthy: false, error: safeSourceError(error) },
         requests: []
       };
+    } finally {
+      clearTimeout(timer);
     }
   }
-  async sourceRequests(client, status) {
+  async sourceRequests(client, status, signal) {
     const requests = [];
     let cursor;
-    for (let pageNumber = 0; pageNumber < MAX_PAGES_PER_SOURCE; pageNumber += 1) {
-      const page2 = await client.list({ status, ...cursor ? { cursor } : {}, limit: 100 });
-      requests.push(...page2.requests);
-      cursor = page2.next_cursor;
-      if (!cursor) return requests;
+    try {
+      for (let pageNumber = 0; pageNumber < MAX_PAGES_PER_SOURCE; pageNumber += 1) {
+        const page2 = await client.list({ status, ...cursor ? { cursor } : {}, limit: 100 }, signal);
+        requests.push(...page2.requests);
+        cursor = page2.next_cursor;
+        if (!cursor) return requests;
+      }
+    } catch (error) {
+      if (!signal.aborted) throw error;
     }
     return requests;
   }
