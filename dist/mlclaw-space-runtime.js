@@ -7380,6 +7380,7 @@ var DelegatedBrokerKit = class {
   key;
   handles = /* @__PURE__ */ new Map();
   handlesByIdentity = /* @__PURE__ */ new Map();
+  snapshotInFlight;
   issueSession(actor) {
     const issuedAt = Math.floor(this.now().getTime() / 1e3);
     const expiresAt = issuedAt + TOKEN_LIFETIME_SECONDS;
@@ -7407,6 +7408,16 @@ var DelegatedBrokerKit = class {
     return payload && tokenIsCurrent(payload, this.now()) ? payload.subject : void 0;
   }
   async snapshot() {
+    if (this.snapshotInFlight) return this.snapshotInFlight;
+    const pending = this.buildSnapshot();
+    this.snapshotInFlight = pending;
+    try {
+      return await pending;
+    } finally {
+      if (this.snapshotInFlight === pending) this.snapshotInFlight = void 0;
+    }
+  }
+  async buildSnapshot() {
     this.pruneHandles();
     const synchronizedAt = this.now().toISOString();
     const results = await Promise.all(
@@ -7436,11 +7447,8 @@ var DelegatedBrokerKit = class {
     if (!source) throw delegatedError("source_unavailable");
     const current = await source.get(record.requestId);
     assertDecisionAllowed(current, record, action, expectedRevision, options);
-    const updated = await source.decide(
-      record.requestId,
-      action,
-      decisionOptions(record, action, expectedRevision, actor, options)
-    );
+    const decision = decisionOptions(record, action, expectedRevision, actor, options);
+    const updated = await decideWithRecovery(source, record.requestId, action, decision);
     if (updated.status === "pending" || updated.status === "active") {
       this.removeHandle(handle, record);
       return project(source.summary(), updated, this.handle(record.sourceId, updated));
@@ -7543,6 +7551,24 @@ var DelegatedBrokerKit = class {
     return createHmac2("sha256", this.key).update(encoded, "utf8").digest("base64url");
   }
 };
+async function decideWithRecovery(source, requestId, action, decision) {
+  try {
+    return await source.decide(requestId, action, decision);
+  } catch (error) {
+    if (error instanceof BrokerOperatorError) throw error;
+    try {
+      await source.get(requestId);
+    } catch {
+      throw delegatedError("source_unavailable");
+    }
+    try {
+      return await source.decide(requestId, action, decision);
+    } catch (retryError) {
+      if (retryError instanceof BrokerOperatorError) throw retryError;
+      throw delegatedError("source_unavailable");
+    }
+  }
+}
 function selectSnapshotRequests(results, limit) {
   const buckets = results.flatMap(
     (result) => ["pending", "active"].map((status) => ({
@@ -9268,6 +9294,7 @@ function createSpaceRuntimeApp(config2, controls) {
   const app = new Hono2();
   const operatorBrokers = new OperatorBrokerRegistry(config2.operatorBrokers);
   const delegatedBrokerKit = new DelegatedBrokerKit(operatorBrokers, config2.sessionSecret);
+  const allowDelegatedSnapshot = fixedWindowRateLimit(12, 6e4);
   const openAiCredentials = new OpenAiCredentialStore(config2.openaiCredentialStoreFile, config2.credentialKey);
   app.get("/health", (c) => health(c, config2, controls));
   app.get("/healthz", (c) => health(c, config2, controls));
@@ -9347,6 +9374,7 @@ function createSpaceRuntimeApp(config2, controls) {
   app.get("/mlclaw/api/brokerkit/snapshot", async (c) => {
     const actor = delegatedActor(c, delegatedBrokerKit);
     if (!actor) return delegatedErrorResponse(c, "not_authorized", 401);
+    if (!allowDelegatedSnapshot(actor)) return delegatedErrorResponse(c, "rate_limited", 429);
     try {
       return delegatedJson(c, await delegatedBrokerKit.snapshot());
     } catch (error) {
@@ -9366,14 +9394,14 @@ function createSpaceRuntimeApp(config2, controls) {
     app.post(`/mlclaw/api/brokerkit/requests/:handle/${action}`, async (c) => {
       const actor = delegatedActor(c, delegatedBrokerKit);
       if (!actor) return delegatedErrorResponse(c, "not_authorized", 401);
-      const body = await readJson(c);
+      const body = await readBoundedJson(c, 16384);
       if (!body || Object.keys(body).some((key) => !["expectedRevision", "reason", "constraints"].includes(key))) {
         return delegatedErrorResponse(c, "invalid_input", 400);
       }
       const constraints = recordValue(body.constraints);
-      const expectedRevision = boundedInteger(body.expectedRevision, 0, Number.MAX_SAFE_INTEGER);
-      const durationSeconds = optionalPositiveInteger(constraints?.durationSeconds, Number.MAX_SAFE_INTEGER);
-      const maxUses = optionalPositiveInteger(constraints?.maxUses, Number.MAX_SAFE_INTEGER);
+      const expectedRevision = positiveJsonInteger(body.expectedRevision);
+      const durationSeconds = optionalPositiveJsonInteger(constraints?.durationSeconds);
+      const maxUses = optionalPositiveJsonInteger(constraints?.maxUses);
       if (!expectedRevision || body.reason !== void 0 && (typeof body.reason !== "string" || body.reason.length > 2e3) || body.constraints !== void 0 && (!constraints || Object.keys(constraints).some((key) => !["durationSeconds", "maxUses"].includes(key)) || durationSeconds === void 0 || maxUses === void 0) || durationSeconds === "invalid" || maxUses === "invalid" || action !== "approve" && (durationSeconds !== void 0 || maxUses !== void 0)) {
         return delegatedErrorResponse(c, "invalid_input", 400);
       }
@@ -9693,20 +9721,6 @@ function requireCsrf(c, config2, username) {
   }
   return c.json({ ok: false, error: "csrf token is invalid or missing" }, 403);
 }
-function boundedInteger(value, fallback, maximum) {
-  const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
-  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > maximum) {
-    return fallback;
-  }
-  return parsed;
-}
-function optionalPositiveInteger(value, maximum) {
-  if (value === void 0 || value === null || value === "") {
-    return void 0;
-  }
-  const parsed = typeof value === "number" ? value : Number(String(value));
-  return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= maximum ? parsed : "invalid";
-}
 function delegatedOriginAllowed(c) {
   return c.req.header("origin") === "null";
 }
@@ -9898,6 +9912,59 @@ async function readJson(c) {
   } catch {
     return void 0;
   }
+}
+async function readBoundedJson(c, maximum) {
+  if (c.req.header("content-type")?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json") return void 0;
+  const declaredLength = Number(c.req.header("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > maximum) return void 0;
+  const body = c.req.raw.body;
+  if (!body) return void 0;
+  const reader = body.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maximum) {
+        await reader.cancel();
+        return void 0;
+      }
+      chunks.push(Buffer.from(value));
+    }
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks));
+    return recordValue(JSON.parse(text));
+  } catch {
+    return void 0;
+  }
+}
+function positiveJsonInteger(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : 0;
+}
+function optionalPositiveJsonInteger(value) {
+  if (value === void 0) return void 0;
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : "invalid";
+}
+function fixedWindowRateLimit(limit, windowMs) {
+  const windows = /* @__PURE__ */ new Map();
+  return (key) => {
+    const now = Date.now();
+    const current = windows.get(key);
+    if (!current || now - current.startedAt >= windowMs) {
+      if (!current && windows.size >= 1024) {
+        for (const [candidate, entry] of windows) {
+          if (now - entry.startedAt >= windowMs) windows.delete(candidate);
+        }
+        if (windows.size >= 1024) return false;
+      }
+      windows.set(key, { startedAt: now, count: 1 });
+      return true;
+    }
+    if (current.count >= limit) return false;
+    current.count += 1;
+    return true;
+  };
 }
 function recordValue(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : void 0;

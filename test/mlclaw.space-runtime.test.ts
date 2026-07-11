@@ -285,7 +285,22 @@ describe("ML Claw Space runtime", () => {
     expect(snapshotBody.requests[0]?.id).toBe("request-1");
     expect(snapshotBody.requests[0]?.handle).toMatch(/^[A-Za-z0-9_-]{24}$/u);
 
+    const refreshes = await Promise.all(
+      Array.from({ length: 11 }, () => fetch(`${base}/snapshot`, { headers: authorizedHeaders })),
+    );
+    expect(refreshes.every((response) => response.status === 200)).toBe(true);
+    const rateLimited = await fetch(`${base}/snapshot`, { headers: authorizedHeaders });
+    expect(rateLimited.status).toBe(429);
+    expect(await rateLimited.json()).toEqual({ error: { code: "rate_limited" } });
+    brokerRequests.length = 0;
+
     const requestUrl = `${base}/requests/${snapshotBody.requests[0]?.handle}/approve`;
+    const oversized = await fetch(requestUrl, {
+      method: "POST",
+      headers: { ...authorizedHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ expectedRevision: 1, reason: "x".repeat(17_000) }),
+    });
+    expect(oversized.status).toBe(400);
     const legacyShape = await fetch(requestUrl, {
       method: "POST",
       headers: { ...authorizedHeaders, "content-type": "application/json" },
@@ -313,9 +328,6 @@ describe("ML Claw Space runtime", () => {
     });
     expect(approve.status).toBe(200);
     expect(brokerRequests.map((request) => request.url)).toEqual([
-      "/.well-known/brokerkit-operator",
-      "/api/operator/v1/requests?status=pending&limit=100",
-      "/api/operator/v1/requests?status=active&limit=100",
       "/api/operator/v1/requests/request-1",
       "/api/operator/v1/requests/request-1/approve",
       "/api/operator/v1/requests/request-1",

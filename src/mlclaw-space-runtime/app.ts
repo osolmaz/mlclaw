@@ -60,6 +60,7 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
   const app = new Hono();
   const operatorBrokers = new OperatorBrokerRegistry(config.operatorBrokers);
   const delegatedBrokerKit = new DelegatedBrokerKit(operatorBrokers, config.sessionSecret);
+  const allowDelegatedSnapshot = fixedWindowRateLimit(12, 60_000);
   const openAiCredentials = new OpenAiCredentialStore(config.openaiCredentialStoreFile, config.credentialKey);
 
   app.get("/health", (c) => health(c, config, controls));
@@ -146,6 +147,7 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
   app.get("/mlclaw/api/brokerkit/snapshot", async (c) => {
     const actor = delegatedActor(c, delegatedBrokerKit);
     if (!actor) return delegatedErrorResponse(c, "not_authorized", 401);
+    if (!allowDelegatedSnapshot(actor)) return delegatedErrorResponse(c, "rate_limited", 429);
     try {
       return delegatedJson(c, await delegatedBrokerKit.snapshot());
     } catch (error) {
@@ -167,14 +169,14 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
     app.post(`/mlclaw/api/brokerkit/requests/:handle/${action}`, async (c) => {
       const actor = delegatedActor(c, delegatedBrokerKit);
       if (!actor) return delegatedErrorResponse(c, "not_authorized", 401);
-      const body = await readJson(c);
+      const body = await readBoundedJson(c, 16_384);
       if (!body || Object.keys(body).some((key) => !["expectedRevision", "reason", "constraints"].includes(key))) {
         return delegatedErrorResponse(c, "invalid_input", 400);
       }
       const constraints = recordValue(body.constraints);
-      const expectedRevision = boundedInteger(body.expectedRevision, 0, Number.MAX_SAFE_INTEGER);
-      const durationSeconds = optionalPositiveInteger(constraints?.durationSeconds, Number.MAX_SAFE_INTEGER);
-      const maxUses = optionalPositiveInteger(constraints?.maxUses, Number.MAX_SAFE_INTEGER);
+      const expectedRevision = positiveJsonInteger(body.expectedRevision);
+      const durationSeconds = optionalPositiveJsonInteger(constraints?.durationSeconds);
+      const maxUses = optionalPositiveJsonInteger(constraints?.maxUses);
       if (
         !expectedRevision ||
         (body.reason !== undefined && (typeof body.reason !== "string" || body.reason.length > 2_000)) ||
@@ -583,7 +585,7 @@ function delegatedBridgeJson(c: Context, value: unknown): Response {
   return c.json(value);
 }
 
-function delegatedErrorResponse(c: Context, code: string, status: 400 | 401 | 403 | 404 | 409 | 502): Response {
+function delegatedErrorResponse(c: Context, code: string, status: 400 | 401 | 403 | 404 | 409 | 429 | 502): Response {
   delegatedHeaders(c);
   return c.json({ error: { code } }, status);
 }
@@ -774,6 +776,63 @@ async function readJson(c: Context): Promise<Record<string, unknown> | undefined
   } catch {
     return undefined;
   }
+}
+
+async function readBoundedJson(c: Context, maximum: number): Promise<Record<string, unknown> | undefined> {
+  if (c.req.header("content-type")?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json") return undefined;
+  const declaredLength = Number(c.req.header("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > maximum) return undefined;
+  const body = c.req.raw.body;
+  if (!body) return undefined;
+  const reader = body.getReader();
+  const chunks: Buffer[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maximum) {
+        await reader.cancel();
+        return undefined;
+      }
+      chunks.push(Buffer.from(value));
+    }
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks));
+    return recordValue(JSON.parse(text));
+  } catch {
+    return undefined;
+  }
+}
+
+function positiveJsonInteger(value: unknown): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : 0;
+}
+
+function optionalPositiveJsonInteger(value: unknown): number | "invalid" | undefined {
+  if (value === undefined) return undefined;
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : "invalid";
+}
+
+function fixedWindowRateLimit(limit: number, windowMs: number): (key: string) => boolean {
+  const windows = new Map<string, { startedAt: number; count: number }>();
+  return (key) => {
+    const now = Date.now();
+    const current = windows.get(key);
+    if (!current || now - current.startedAt >= windowMs) {
+      if (!current && windows.size >= 1_024) {
+        for (const [candidate, entry] of windows) {
+          if (now - entry.startedAt >= windowMs) windows.delete(candidate);
+        }
+        if (windows.size >= 1_024) return false;
+      }
+      windows.set(key, { startedAt: now, count: 1 });
+      return true;
+    }
+    if (current.count >= limit) return false;
+    current.count += 1;
+    return true;
+  };
 }
 
 function recordValue(value: unknown): Record<string, unknown> | undefined {

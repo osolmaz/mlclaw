@@ -54,6 +54,7 @@ export class DelegatedBrokerKit {
   private readonly key: Buffer;
   private readonly handles = new Map<string, HandleRecord>();
   private readonly handlesByIdentity = new Map<string, string>();
+  private snapshotInFlight: Promise<DelegatedSnapshot> | undefined;
 
   constructor(
     private readonly registry: OperatorBrokerRegistry,
@@ -98,6 +99,17 @@ export class DelegatedBrokerKit {
   }
 
   async snapshot(): Promise<DelegatedSnapshot> {
+    if (this.snapshotInFlight) return this.snapshotInFlight;
+    const pending = this.buildSnapshot();
+    this.snapshotInFlight = pending;
+    try {
+      return await pending;
+    } finally {
+      if (this.snapshotInFlight === pending) this.snapshotInFlight = undefined;
+    }
+  }
+
+  private async buildSnapshot(): Promise<DelegatedSnapshot> {
     this.pruneHandles();
     const synchronizedAt = this.now().toISOString();
     const results = await Promise.all(
@@ -135,11 +147,8 @@ export class DelegatedBrokerKit {
     if (!source) throw delegatedError("source_unavailable");
     const current = await source.get(record.requestId);
     assertDecisionAllowed(current, record, action, expectedRevision, options);
-    const updated = await source.decide(
-      record.requestId,
-      action,
-      decisionOptions(record, action, expectedRevision, actor, options),
-    );
+    const decision = decisionOptions(record, action, expectedRevision, actor, options);
+    const updated = await decideWithRecovery(source, record.requestId, action, decision);
     if (updated.status === "pending" || updated.status === "active") {
       this.removeHandle(handle, record);
       return project(source.summary(), updated, this.handle(record.sourceId, updated));
@@ -263,6 +272,30 @@ export class DelegatedBrokerKit {
 
   private sign(encoded: string): string {
     return createHmac("sha256", this.key).update(encoded, "utf8").digest("base64url");
+  }
+}
+
+async function decideWithRecovery(
+  source: BrokerOperatorClient,
+  requestId: string,
+  action: DelegatedAction,
+  decision: BrokerDecision,
+): Promise<BrokerApproval> {
+  try {
+    return await source.decide(requestId, action, decision);
+  } catch (error) {
+    if (error instanceof BrokerOperatorError) throw error;
+    try {
+      await source.get(requestId);
+    } catch {
+      throw delegatedError("source_unavailable");
+    }
+    try {
+      return await source.decide(requestId, action, decision);
+    } catch (retryError) {
+      if (retryError instanceof BrokerOperatorError) throw retryError;
+      throw delegatedError("source_unavailable");
+    }
   }
 }
 

@@ -105,17 +105,58 @@ describe("DelegatedBrokerKit", () => {
     await expect(delegated.detail(issued.handle)).resolves.toMatchObject({ id: "request-1", revision: 1 });
   });
 
+  it("coalesces concurrent snapshot fan-out", async () => {
+    let releasePending!: () => void;
+    let markPendingStarted!: () => void;
+    const pendingGate = new Promise<void>((resolve) => {
+      releasePending = resolve;
+    });
+    const pendingStarted = new Promise<void>((resolve) => {
+      markPendingStarted = resolve;
+    });
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/.well-known/brokerkit-operator") {
+        return Response.json({ api_version: "brokerkit.io/operator/v1" });
+      }
+      if (url.searchParams.get("status") === "pending") {
+        markPendingStarted();
+        await pendingGate;
+        return Response.json({ requests: [request("request-1")] });
+      }
+      return Response.json({ requests: [] });
+    });
+    const delegated = new DelegatedBrokerKit(
+      new OperatorBrokerRegistry(
+        [{ id: "hf-broker", label: "Hugging Face", baseUrl: "https://hf.example", token: "h".repeat(32) }],
+        fetchImpl,
+      ),
+      "s".repeat(48),
+    );
+
+    const first = delegated.snapshot();
+    await pendingStarted;
+    const second = delegated.snapshot();
+    releasePending();
+    const [left, right] = await Promise.all([first, second]);
+    expect(left).toEqual(right);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+
   it("refetches broker truth and sends an actor-bound idempotent decision", async () => {
-    let decisionBody: Record<string, unknown> | undefined;
+    const decisionBodies: Record<string, unknown>[] = [];
     let approved = false;
+    let approveAttempts = 0;
     const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
       const url = new URL(String(input));
       if (url.pathname === "/.well-known/brokerkit-operator") {
         return Response.json({ api_version: "brokerkit.io/operator/v1" });
       }
       if (url.pathname.endsWith("/approve")) {
-        decisionBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        decisionBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        approveAttempts += 1;
         approved = true;
+        if (approveAttempts === 1) throw new Error("response connection closed after commit");
         return Response.json(request("request-1", 2, "active"));
       }
       if (url.pathname.endsWith("/revoke")) return Response.json(request("request-1", 3, "revoked"));
@@ -146,12 +187,14 @@ describe("DelegatedBrokerKit", () => {
     });
     expect(updated.status).toBe("active");
     expect(updated.handle).not.toBe(pending.handle);
-    expect(decisionBody).toMatchObject({
+    expect(decisionBodies).toHaveLength(2);
+    expect(decisionBodies[0]).toEqual(decisionBodies[1]);
+    expect(decisionBodies[1]).toMatchObject({
       expected_revision: 1,
       on_behalf_of: "mlclaw:alice",
       constraints: { duration_seconds: 300, max_uses: 1 },
     });
-    expect(decisionBody?.idempotency_key).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(decisionBodies[1]?.idempotency_key).toMatch(/^[A-Za-z0-9_-]{43}$/u);
     expect((await delegated.snapshot()).requests).toEqual([expect.objectContaining({ status: "active" })]);
     await expect(delegated.decide(updated.handle, "revoke", 2, "alice")).resolves.toMatchObject({
       status: "revoked",
