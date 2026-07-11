@@ -196,6 +196,27 @@ describe("Brokerkit operator backends", () => {
       fetch: async () => new Response(JSON.stringify({ requests: null })),
     });
     await expect(malformed.list()).rejects.toThrow("broker request list response is invalid");
+    const malformedFact = new BrokerOperatorClient({
+      id: "gh-broker",
+      label: "GitHub",
+      baseUrl: "http://broker.example",
+      token: "operator-secret",
+      fetch: async () => {
+        const item = approval("request-1", "pending", 1);
+        return Response.json({
+          requests: [
+            {
+              ...item,
+              presentation: {
+                ...item.presentation,
+                facts: [{ label: "Repository", value: "", unexpected: "not-safe" }],
+              },
+            },
+          ],
+        });
+      },
+    });
+    await expect(malformedFact.list()).rejects.toThrow("broker request list response is invalid");
   });
 
   it("times out stalled non-streaming broker requests", async () => {

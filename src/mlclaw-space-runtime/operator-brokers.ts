@@ -74,10 +74,10 @@ export type BrokerOperatorClientOptions = OperatorBrokerConfig & {
 
 const displayFieldSchema = z
   .object({
-    label: z.string().min(1).max(120),
-    value: z.string().max(4_096),
+    label: z.string().min(1).max(80),
+    value: z.string().min(1).max(500),
   })
-  .passthrough();
+  .strict();
 
 const approvalSchema = z
   .object({

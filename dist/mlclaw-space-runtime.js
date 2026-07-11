@@ -4684,9 +4684,9 @@ var MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 var DEFAULT_REQUEST_TIMEOUT_MS = 1e4;
 var BROKER_ID = /^[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
 var displayFieldSchema = external_exports.object({
-  label: external_exports.string().min(1).max(120),
-  value: external_exports.string().max(4096)
-}).passthrough();
+  label: external_exports.string().min(1).max(80),
+  value: external_exports.string().min(1).max(500)
+}).strict();
 var approvalSchema = external_exports.object({
   id: external_exports.string().min(1).max(128),
   revision: external_exports.number().int().positive(),
