@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { generateSpaceRepo } from "../src/mlclaw/git.js";
-import { BROKERKIT_PLUGIN_VERSION, OPENCLAW_BASE_IMAGE } from "../src/mlclaw/runtime-image.js";
+import { BROKERKIT_PLUGIN_VERSION, BROKERKIT_VERSION, OPENCLAW_BASE_IMAGE } from "../src/mlclaw/runtime-image.js";
 
 async function listFiles(root: string): Promise<string[]> {
   const entries = await fs.readdir(root, { recursive: true, withFileTypes: true });
@@ -108,7 +108,14 @@ describe("generated Space repository", () => {
     expect(dockerfile).toContain('test "$(git -C /src rev-parse HEAD)" = "$HF_BROKER_VERSION"');
     expect(dockerfile.match(/ARG HF_BROKER_VERSION=bb65192b4dca845289427e63e1d5fa72f64914d8/g)).toHaveLength(2);
     expect(dockerfile).toContain(`ARG BROKERKIT_PLUGIN_VERSION=${BROKERKIT_PLUGIN_VERSION}`);
-    expect(dockerfile).toContain('"openclaw-brokerkit@${BROKERKIT_PLUGIN_VERSION}"');
+    expect(dockerfile).toContain(`ARG BROKERKIT_VERSION=${BROKERKIT_VERSION}`);
+    expect(dockerfile).toContain(
+      'git -C /src fetch --depth=1 https://github.com/osolmaz/brokerkit.git "$BROKERKIT_VERSION"',
+    );
+    expect(dockerfile).toContain('test "$(git -C /src rev-parse HEAD)" = "$BROKERKIT_VERSION"');
+    expect(dockerfile).toContain(
+      "COPY --from=brokerkit-plugin-build /out/openclaw-brokerkit-${BROKERKIT_PLUGIN_VERSION}.tgz",
+    );
     expect(dockerfile).toContain("/opt/openclaw-plugins/node_modules/openclaw-brokerkit/openclaw.plugin.json");
     expect(dockerfile).toContain(
       "ENV MLCLAW_BROKERKIT_PLUGIN_PATH=/opt/openclaw-plugins/node_modules/openclaw-brokerkit",

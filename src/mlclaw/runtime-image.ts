@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const DEFAULT_OPENCLAW_VERSION = "2026.7.1-beta.5";
 const DEFAULT_BROKERKIT_PLUGIN_VERSION = "0.1.0";
+const DEFAULT_BROKERKIT_VERSION = "639c119c8e598af16871b0e17d6e4394013b50bd";
 const DEFAULT_RUNTIME_IMAGE_REPOSITORY = "ghcr.io/osolmaz/mlclaw";
 
 const PACKAGE_METADATA = readPackageMetadata();
@@ -15,6 +16,7 @@ export const BROKERKIT_PLUGIN_VERSION = packageConfigString(
   "brokerkitPluginVersion",
   DEFAULT_BROKERKIT_PLUGIN_VERSION,
 );
+export const BROKERKIT_VERSION = packageConfigString("brokerkitVersion", DEFAULT_BROKERKIT_VERSION);
 export const RUNTIME_IMAGE_REPOSITORY = packageConfigString("runtimeImageRepository", DEFAULT_RUNTIME_IMAGE_REPOSITORY);
 export const DEFAULT_RUNTIME_IMAGE_TAG = `${PACKAGE_VERSION}-openclaw-${OPENCLAW_VERSION}`;
 export const DEFAULT_RUNTIME_IMAGE = `${RUNTIME_IMAGE_REPOSITORY}:${DEFAULT_RUNTIME_IMAGE_TAG}`;

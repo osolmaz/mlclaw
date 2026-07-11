@@ -14838,6 +14838,7 @@ import path12 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 var DEFAULT_OPENCLAW_VERSION = "2026.7.1-beta.5";
 var DEFAULT_BROKERKIT_PLUGIN_VERSION = "0.1.0";
+var DEFAULT_BROKERKIT_VERSION = "639c119c8e598af16871b0e17d6e4394013b50bd";
 var DEFAULT_RUNTIME_IMAGE_REPOSITORY = "ghcr.io/osolmaz/mlclaw";
 var PACKAGE_METADATA = readPackageMetadata();
 var PACKAGE_VERSION = packageString("version", "unknown");
@@ -14847,6 +14848,7 @@ var BROKERKIT_PLUGIN_VERSION = packageConfigString(
   "brokerkitPluginVersion",
   DEFAULT_BROKERKIT_PLUGIN_VERSION
 );
+var BROKERKIT_VERSION = packageConfigString("brokerkitVersion", DEFAULT_BROKERKIT_VERSION);
 var RUNTIME_IMAGE_REPOSITORY = packageConfigString("runtimeImageRepository", DEFAULT_RUNTIME_IMAGE_REPOSITORY);
 var DEFAULT_RUNTIME_IMAGE_TAG = `${PACKAGE_VERSION}-openclaw-${OPENCLAW_VERSION}`;
 var DEFAULT_RUNTIME_IMAGE = `${RUNTIME_IMAGE_REPOSITORY}:${DEFAULT_RUNTIME_IMAGE_TAG}`;
@@ -14976,6 +14978,7 @@ function imageDockerfile(runtimeImage) {
 function bundledDockerfile() {
   return `ARG HF_BROKER_VERSION=bb65192b4dca845289427e63e1d5fa72f64914d8
 ARG BROKERKIT_PLUGIN_VERSION=${BROKERKIT_PLUGIN_VERSION}
+ARG BROKERKIT_VERSION=${BROKERKIT_VERSION}
 
 FROM golang:1.26.5-bookworm AS hf-broker-build
 ARG HF_BROKER_VERSION=bb65192b4dca845289427e63e1d5fa72f64914d8
@@ -14985,6 +14988,12 @@ RUN git init /src \\
   && test "$(git -C /src rev-parse HEAD)" = "$HF_BROKER_VERSION" \\
   && cd /src \\
   && GOWORK=off go build -trimpath -o /out/hf-broker ./cmd/hf-broker
+
+FROM node:24-bookworm-slim AS brokerkit-plugin-build
+ARG BROKERKIT_VERSION
+RUN apt-get update   && apt-get install -y --no-install-recommends ca-certificates git   && rm -rf /var/lib/apt/lists/*   && git init /src   && git -C /src fetch --depth=1 https://github.com/osolmaz/brokerkit.git "$BROKERKIT_VERSION"   && git -C /src checkout --detach FETCH_HEAD   && test "$(git -C /src rev-parse HEAD)" = "$BROKERKIT_VERSION"
+WORKDIR /src
+RUN corepack enable   && pnpm install --frozen-lockfile   && pnpm --filter openclaw-brokerkit build   && pnpm --filter openclaw-brokerkit pack --pack-destination /out
 
 FROM ${OPENCLAW_BASE_IMAGE}
 
@@ -15009,7 +15018,8 @@ RUN python3 -m pip install --break-system-packages --no-cache-dir \\
   "uv==0.11.28" \\
   "hf-discover==1.3.7"
 ARG BROKERKIT_PLUGIN_VERSION
-RUN npm install --omit=dev --omit=peer --no-audit --no-fund --prefix /opt/openclaw-plugins   "openclaw-brokerkit@\${BROKERKIT_PLUGIN_VERSION}"   && test -f /opt/openclaw-plugins/node_modules/openclaw-brokerkit/openclaw.plugin.json
+COPY --from=brokerkit-plugin-build /out/openclaw-brokerkit-\${BROKERKIT_PLUGIN_VERSION}.tgz /tmp/openclaw-brokerkit.tgz
+RUN npm install --omit=dev --omit=peer --no-audit --no-fund --prefix /opt/openclaw-plugins   /tmp/openclaw-brokerkit.tgz   && rm /tmp/openclaw-brokerkit.tgz   && test -f /opt/openclaw-plugins/node_modules/openclaw-brokerkit/openclaw.plugin.json
 
 COPY --chown=node:node runtime/hf-state-sync.js /app/hf-state-sync.js
 COPY --chown=node:node runtime/hf-tooling-seed.js /app/hf-tooling-seed.js

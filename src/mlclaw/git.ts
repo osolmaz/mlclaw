@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { HubApi } from "./hub-api.js";
-import { BROKERKIT_PLUGIN_VERSION, OPENCLAW_BASE_IMAGE } from "./runtime-image.js";
+import { BROKERKIT_PLUGIN_VERSION, BROKERKIT_VERSION, OPENCLAW_BASE_IMAGE } from "./runtime-image.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -105,6 +105,7 @@ function imageDockerfile(runtimeImage: string): string {
 function bundledDockerfile(): string {
   return `ARG HF_BROKER_VERSION=bb65192b4dca845289427e63e1d5fa72f64914d8
 ARG BROKERKIT_PLUGIN_VERSION=${BROKERKIT_PLUGIN_VERSION}
+ARG BROKERKIT_VERSION=${BROKERKIT_VERSION}
 
 FROM golang:1.26.5-bookworm AS hf-broker-build
 ARG HF_BROKER_VERSION=bb65192b4dca845289427e63e1d5fa72f64914d8
@@ -114,6 +115,21 @@ RUN git init /src \\
   && test "$(git -C /src rev-parse HEAD)" = "$HF_BROKER_VERSION" \\
   && cd /src \\
   && GOWORK=off go build -trimpath -o /out/hf-broker ./cmd/hf-broker
+
+FROM node:24-bookworm-slim AS brokerkit-plugin-build
+ARG BROKERKIT_VERSION
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates git \
+  && rm -rf /var/lib/apt/lists/* \
+  && git init /src \
+  && git -C /src fetch --depth=1 https://github.com/osolmaz/brokerkit.git "$BROKERKIT_VERSION" \
+  && git -C /src checkout --detach FETCH_HEAD \
+  && test "$(git -C /src rev-parse HEAD)" = "$BROKERKIT_VERSION"
+WORKDIR /src
+RUN corepack enable \
+  && pnpm install --frozen-lockfile \
+  && pnpm --filter openclaw-brokerkit build \
+  && pnpm --filter openclaw-brokerkit pack --pack-destination /out
 
 FROM ${OPENCLAW_BASE_IMAGE}
 
@@ -138,8 +154,10 @@ RUN python3 -m pip install --break-system-packages --no-cache-dir \\
   "uv==0.11.28" \\
   "hf-discover==1.3.7"
 ARG BROKERKIT_PLUGIN_VERSION
+COPY --from=brokerkit-plugin-build /out/openclaw-brokerkit-\${BROKERKIT_PLUGIN_VERSION}.tgz /tmp/openclaw-brokerkit.tgz
 RUN npm install --omit=dev --omit=peer --no-audit --no-fund --prefix /opt/openclaw-plugins \
-  "openclaw-brokerkit@\${BROKERKIT_PLUGIN_VERSION}" \
+  /tmp/openclaw-brokerkit.tgz \
+  && rm /tmp/openclaw-brokerkit.tgz \
   && test -f /opt/openclaw-plugins/node_modules/openclaw-brokerkit/openclaw.plugin.json
 
 COPY --chown=node:node runtime/hf-state-sync.js /app/hf-state-sync.js
