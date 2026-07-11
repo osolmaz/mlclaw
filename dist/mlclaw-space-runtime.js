@@ -7457,10 +7457,12 @@ var DelegatedBrokerKit = class {
     timer.unref?.();
     try {
       await client.discover(deadline.signal);
-      const requests = (await Promise.all([
-        this.sourceRequests(client, "pending", deadline.signal),
-        this.sourceRequests(client, "active", deadline.signal)
-      ])).flat();
+      const requests = reconcileRequests(
+        await Promise.all([
+          this.sourceRequests(client, "pending", deadline.signal),
+          this.sourceRequests(client, "active", deadline.signal)
+        ])
+      );
       return {
         source: deadline.signal.aborted ? { ...summary, healthy: false, error: "broker_timeout" } : { ...summary, healthy: true, lastSyncAt: synchronizedAt },
         requests
@@ -7556,6 +7558,16 @@ function selectSnapshotRequests(results, limit) {
     if (!added) break;
   }
   return selected;
+}
+function reconcileRequests(pages) {
+  const requests = /* @__PURE__ */ new Map();
+  for (const request of pages.flat()) {
+    const current = requests.get(request.id);
+    if (!current || request.revision > current.revision || request.revision === current.revision && request.status === "active" && current.status !== "active") {
+      requests.set(request.id, request);
+    }
+  }
+  return [...requests.values()];
 }
 var DelegatedBrokerKitError = class extends Error {
   constructor(code) {

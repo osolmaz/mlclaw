@@ -161,12 +161,12 @@ export class DelegatedBrokerKit {
     timer.unref?.();
     try {
       await client.discover(deadline.signal);
-      const requests = (
+      const requests = reconcileRequests(
         await Promise.all([
           this.sourceRequests(client, "pending", deadline.signal),
           this.sourceRequests(client, "active", deadline.signal),
-        ])
-      ).flat();
+        ]),
+      );
       return {
         source: deadline.signal.aborted
           ? { ...summary, healthy: false, error: "broker_timeout" }
@@ -282,6 +282,21 @@ function selectSnapshotRequests(
     if (!added) break;
   }
   return selected;
+}
+
+function reconcileRequests(pages: BrokerApproval[][]): BrokerApproval[] {
+  const requests = new Map<string, BrokerApproval>();
+  for (const request of pages.flat()) {
+    const current = requests.get(request.id);
+    if (
+      !current ||
+      request.revision > current.revision ||
+      (request.revision === current.revision && request.status === "active" && current.status !== "active")
+    ) {
+      requests.set(request.id, request);
+    }
+  }
+  return [...requests.values()];
 }
 
 export class DelegatedBrokerKitError extends Error {

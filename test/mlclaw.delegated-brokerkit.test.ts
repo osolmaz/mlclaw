@@ -242,4 +242,30 @@ describe("DelegatedBrokerKit", () => {
       "hf.example-pending-first",
     ]);
   });
+
+  it("keeps only the newest revision returned across status queries", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/.well-known/brokerkit-operator") {
+        return Response.json({ api_version: "brokerkit.io/operator/v1" });
+      }
+      return Response.json({
+        requests: [
+          url.searchParams.get("status") === "active"
+            ? request("transitioning", 2, "active")
+            : request("transitioning", 1, "pending"),
+        ],
+      });
+    });
+    const delegated = new DelegatedBrokerKit(
+      new OperatorBrokerRegistry(
+        [{ id: "hf-broker", label: "Hugging Face", baseUrl: "https://hf.example", token: "h".repeat(32) }],
+        fetchImpl,
+      ),
+      "s".repeat(48),
+    );
+    expect((await delegated.snapshot()).requests).toEqual([
+      expect.objectContaining({ id: "transitioning", revision: 2, status: "active" }),
+    ]);
+  });
 });
