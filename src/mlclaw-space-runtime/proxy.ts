@@ -15,11 +15,7 @@ const ADMIN_CONTROL_UI_SCOPES = [
   "operator.pairing",
 ] as const;
 
-const USER_CONTROL_UI_SCOPES = [
-  "operator.read",
-  "operator.write",
-  "operator.approvals",
-] as const;
+const USER_CONTROL_UI_SCOPES = ["operator.read", "operator.write"] as const;
 
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
@@ -46,38 +42,41 @@ export async function proxyHttp(
   }
   addTrustedProxyHeaders(headers, config, identity);
 
-  const upstream = http.request({
-    host: config.openclawHost,
-    port: config.openclawPort,
-    method: req.method,
-    path: req.url,
-    headers,
-  }, (upstreamResponse) => {
-    const responseHeaders = sanitizeHeaders(upstreamResponse.headers);
-    const inject = shouldInjectShell({
+  const upstream = http.request(
+    {
+      host: config.openclawHost,
+      port: config.openclawPort,
       method: req.method,
-      requestAccept: String(req.headers.accept ?? ""),
-      responseContentType: headerValue(upstreamResponse.headers["content-type"]),
-      responseContentEncoding: headerValue(upstreamResponse.headers["content-encoding"]),
-    });
-    if (!inject) {
-      res.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders);
-      upstreamResponse.pipe(res);
-      return;
-    }
+      path: req.url,
+      headers,
+    },
+    (upstreamResponse) => {
+      const responseHeaders = sanitizeHeaders(upstreamResponse.headers);
+      const inject = shouldInjectShell({
+        method: req.method,
+        requestAccept: String(req.headers.accept ?? ""),
+        responseContentType: headerValue(upstreamResponse.headers["content-type"]),
+        responseContentEncoding: headerValue(upstreamResponse.headers["content-encoding"]),
+      });
+      if (!inject) {
+        res.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders);
+        upstreamResponse.pipe(res);
+        return;
+      }
 
-    const chunks: Buffer[] = [];
-    upstreamResponse.on("data", (chunk) => {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    });
-    upstreamResponse.on("end", () => {
-      const body = rewriteOpenClawHtml(Buffer.concat(chunks).toString("utf8"), config.branding);
-      delete responseHeaders["content-length"];
-      delete responseHeaders["Content-Length"];
-      res.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders);
-      res.end(body);
-    });
-  });
+      const chunks: Buffer[] = [];
+      upstreamResponse.on("data", (chunk) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      upstreamResponse.on("end", () => {
+        const body = rewriteOpenClawHtml(Buffer.concat(chunks).toString("utf8"), config.branding);
+        delete responseHeaders["content-length"];
+        delete responseHeaders["Content-Length"];
+        res.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders);
+        res.end(body);
+      });
+    },
+  );
 
   upstream.on("error", (err) => {
     process.stderr.write(`[mlclaw] upstream HTTP proxy failed: ${err.stack ?? err.message}\n`);
@@ -151,11 +150,7 @@ function sanitizeHeaders(headers: http.IncomingHttpHeaders): http.OutgoingHttpHe
     if (HOP_BY_HOP_HEADERS.has(lower)) {
       continue;
     }
-    if (
-      lower.startsWith("x-forwarded-") ||
-      lower.startsWith("x-openclaw-") ||
-      lower === "authorization"
-    ) {
+    if (lower.startsWith("x-forwarded-") || lower.startsWith("x-openclaw-") || lower === "authorization") {
       continue;
     }
     out[key] = value;
@@ -178,9 +173,7 @@ function resolveControlUiScopes(
   config: Pick<SpaceRuntimeConfig, "adminUsers">,
   identity: ProxyIdentity,
 ): readonly string[] {
-  return config.adminUsers.includes(identity.username)
-    ? ADMIN_CONTROL_UI_SCOPES
-    : USER_CONTROL_UI_SCOPES;
+  return config.adminUsers.includes(identity.username) ? ADMIN_CONTROL_UI_SCOPES : USER_CONTROL_UI_SCOPES;
 }
 
 function headerValue(value: string | string[] | number | undefined): string | undefined {
@@ -194,6 +187,5 @@ function headerValue(value: string | string[] | number | undefined): string | un
 }
 
 function isHtmlNavigation(req: http.IncomingMessage): boolean {
-  return (req.method === "GET" || req.method === "HEAD") &&
-    String(req.headers.accept ?? "").includes("text/html");
+  return (req.method === "GET" || req.method === "HEAD") && String(req.headers.accept ?? "").includes("text/html");
 }

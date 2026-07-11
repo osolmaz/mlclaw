@@ -686,7 +686,7 @@ describe("ML Claw Space runtime", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(capturedHeaders?.["x-openclaw-scopes"]).toBe("operator.read,operator.write,operator.approvals");
+    expect(capturedHeaders?.["x-openclaw-scopes"]).toBe("operator.read,operator.write");
   });
 
   it("returns a generic upstream error when OpenClaw is unavailable", async () => {

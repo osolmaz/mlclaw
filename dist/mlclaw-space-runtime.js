@@ -10249,11 +10249,7 @@ var ADMIN_CONTROL_UI_SCOPES = [
   "operator.approvals",
   "operator.pairing"
 ];
-var USER_CONTROL_UI_SCOPES = [
-  "operator.read",
-  "operator.write",
-  "operator.approvals"
-];
+var USER_CONTROL_UI_SCOPES = ["operator.read", "operator.write"];
 var HOP_BY_HOP_HEADERS = /* @__PURE__ */ new Set([
   "connection",
   "keep-alive",
@@ -10272,37 +10268,40 @@ async function proxyHttp(req, res, config2, identity) {
     delete headers["Accept-Encoding"];
   }
   addTrustedProxyHeaders(headers, config2, identity);
-  const upstream = http2.request({
-    host: config2.openclawHost,
-    port: config2.openclawPort,
-    method: req.method,
-    path: req.url,
-    headers
-  }, (upstreamResponse) => {
-    const responseHeaders2 = sanitizeHeaders(upstreamResponse.headers);
-    const inject = shouldInjectShell({
+  const upstream = http2.request(
+    {
+      host: config2.openclawHost,
+      port: config2.openclawPort,
       method: req.method,
-      requestAccept: String(req.headers.accept ?? ""),
-      responseContentType: headerValue(upstreamResponse.headers["content-type"]),
-      responseContentEncoding: headerValue(upstreamResponse.headers["content-encoding"])
-    });
-    if (!inject) {
-      res.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders2);
-      upstreamResponse.pipe(res);
-      return;
+      path: req.url,
+      headers
+    },
+    (upstreamResponse) => {
+      const responseHeaders2 = sanitizeHeaders(upstreamResponse.headers);
+      const inject = shouldInjectShell({
+        method: req.method,
+        requestAccept: String(req.headers.accept ?? ""),
+        responseContentType: headerValue(upstreamResponse.headers["content-type"]),
+        responseContentEncoding: headerValue(upstreamResponse.headers["content-encoding"])
+      });
+      if (!inject) {
+        res.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders2);
+        upstreamResponse.pipe(res);
+        return;
+      }
+      const chunks = [];
+      upstreamResponse.on("data", (chunk) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      upstreamResponse.on("end", () => {
+        const body = rewriteOpenClawHtml(Buffer.concat(chunks).toString("utf8"), config2.branding);
+        delete responseHeaders2["content-length"];
+        delete responseHeaders2["Content-Length"];
+        res.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders2);
+        res.end(body);
+      });
     }
-    const chunks = [];
-    upstreamResponse.on("data", (chunk) => {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    });
-    upstreamResponse.on("end", () => {
-      const body = rewriteOpenClawHtml(Buffer.concat(chunks).toString("utf8"), config2.branding);
-      delete responseHeaders2["content-length"];
-      delete responseHeaders2["Content-Length"];
-      res.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders2);
-      res.end(body);
-    });
-  });
+  );
   upstream.on("error", (err) => {
     process.stderr.write(`[mlclaw] upstream HTTP proxy failed: ${err.stack ?? err.message}
 `);
