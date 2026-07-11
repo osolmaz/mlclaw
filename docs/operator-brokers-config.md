@@ -108,6 +108,13 @@ audit fields and are never accepted for routing. The browser receives a
 short-lived token bound to the authenticated ML Claw admin; that token cannot
 call a broker directly.
 
+The OpenClaw Gateway frontend and ML Claw share one browser origin. Broker
+operator credentials remain outside the OpenClaw process, and unattended
+OpenClaw code cannot mint delegated sessions, but frontend code running during
+an authenticated administrator session is inside that browser session's trust
+boundary. Deploy the control plane on a separate origin if the threat model
+must include a compromised same-origin Gateway frontend.
+
 ML Claw refreshes current request state and revision immediately before every
 decision. It sends actor attribution and a deterministic idempotency key to the
 selected broker. An unavailable broker is reported as a redacted source error
