@@ -76,6 +76,7 @@ describe("generated Space repository", () => {
       "assets/hf-tooling/skills/hf-cli/SKILL.md",
       "runtime/entrypoint.sh",
       "runtime/hf-state-sync.js",
+      "runtime/hf-broker.scope.json",
       "runtime/hf-tooling-seed.js",
       "runtime/mlclaw-space-runtime.js",
       "runtime/openclaw.default.json",
@@ -104,6 +105,9 @@ describe("generated Space repository", () => {
 
     const dockerfile = await fs.readFile(path.join(outDir, "Dockerfile"), "utf8");
     expect(dockerfile).toContain(`FROM ${OPENCLAW_BASE_IMAGE}`);
+    expect(dockerfile).toContain('git -C /src fetch --depth=1 https://github.com/osolmaz/hf-broker.git "$HF_BROKER_VERSION"');
+    expect(dockerfile).toContain('test "$(git -C /src rev-parse HEAD)" = "$HF_BROKER_VERSION"');
+    expect(dockerfile).toContain("COPY runtime/hf-broker.scope.json /app/hf-broker.scope.json");
     expect(dockerfile).toContain("COPY --chown=node:node runtime/hf-state-sync.js /app/hf-state-sync.js");
     expect(dockerfile).toContain("COPY --chown=node:node runtime/hf-tooling-seed.js /app/hf-tooling-seed.js");
     expect(dockerfile).toContain("\"hf-discover==1.3.7\"");

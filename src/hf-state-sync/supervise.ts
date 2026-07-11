@@ -6,7 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { BucketHub } from "./hub.js";
 import { type SyncConfig, log, logError, remotePath } from "./paths.js";
 import { runSnapshot, type SnapshotOutcome } from "./snapshot.js";
-import { unprivilegedStageArchive } from "./stage-worker.js";
+import { trustedStageArchive } from "./stage-worker.js";
 
 const LEASE_HEARTBEAT_MS = 60_000;
 const HANDOFF_REQUEST_TTL_MS = 10 * 60 * 1000;
@@ -18,11 +18,7 @@ const HANDOFF_REQUEST_TTL_MS = 10 * 60 * 1000;
  * is lost. If the platform hard-kills us first, the interval loop has already
  * bounded the loss the same way.
  */
-export async function supervise(params: {
-  config: SyncConfig;
-  hub: BucketHub;
-  command: string[];
-}): Promise<number> {
+export async function supervise(params: { config: SyncConfig; hub: BucketHub; command: string[] }): Promise<number> {
   const { config, hub, command } = params;
   const [binary, ...args] = command;
   if (!binary) {
@@ -30,13 +26,7 @@ export async function supervise(params: {
   }
   const bootTime = new Date().toISOString();
   const scriptPath = process.argv[1];
-  const stageArchive = process.getuid?.() === 0 && scriptPath && config.snapshotUid !== undefined && config.snapshotGid !== undefined
-    ? unprivilegedStageArchive({
-      uid: config.snapshotUid,
-      gid: config.snapshotGid,
-      scriptPath,
-    })
-    : undefined;
+  const stageArchive = trustedStageArchive(config, scriptPath);
   let lastSnapshotId: string | undefined;
   const handoffState: { request: RuntimeHandoffRequest | null } = { request: null };
 
@@ -113,7 +103,10 @@ export async function supervise(params: {
     }
   };
 
-  const child: ChildProcess = spawn(binary, args, { stdio: "inherit" });
+  const child: ChildProcess = spawn(binary, args, {
+    stdio: "inherit",
+    env: supervisedChildEnvironment(process.env),
+  });
   const childExit = new Promise<number>((resolve) => {
     child.on("exit", (code, signal) => resolve(code ?? (signal ? 128 : 1)));
     child.on("error", (err) => {
@@ -176,7 +169,9 @@ export async function supervise(params: {
   void snapshotLoop;
 
   const heartbeatLoop = (async () => {
-    await writeLease().catch((err) => logError(`initial lease failed: ${err instanceof Error ? err.message : String(err)}`));
+    await writeLease().catch((err) =>
+      logError(`initial lease failed: ${err instanceof Error ? err.message : String(err)}`),
+    );
     while (!stopping) {
       await delay(LEASE_HEARTBEAT_MS);
       if (stopping) {
@@ -238,15 +233,25 @@ export async function supervise(params: {
   if (handoffState.request) {
     const request = handoffState.request;
     if (finalOutcome.kind !== "uploaded") {
-      throw new Error(`handoff ${request.requestId} final snapshot did not upload: ${snapshotFailureDetail(finalOutcome)}`);
+      throw new Error(
+        `handoff ${request.requestId} final snapshot did not upload: ${snapshotFailureDetail(finalOutcome)}`,
+      );
     }
     await writeHandoffAck(request).catch((err) => {
-      throw new Error(`handoff ${request.requestId} snapshot completed but ack failed: ${err instanceof Error ? err.message : String(err)}`);
+      throw new Error(
+        `handoff ${request.requestId} snapshot completed but ack failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     });
     log(`handoff ${request.requestId} acknowledged`);
     return 0;
   }
   return exitCode;
+}
+
+export function supervisedChildEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env = { ...source };
+  delete env.MLCLAW_STATE_HF_TOKEN;
+  return env;
 }
 
 function snapshotFailureDetail(outcome: SnapshotOutcome): string {

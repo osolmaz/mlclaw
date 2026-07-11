@@ -862,7 +862,7 @@ async function stateAdopt(agent: string, opts: StateAdoptOptions, runtime: Requi
       MLCLAW_RUNTIME_ID: spaceRuntimeId(updated.agent),
     });
     await ensureSpaceStateVolume(hub, updated.space, bucket);
-    if (canDeleteBroadTokenSecrets({ model: updated.model, routerTokenPresent: hasRouterTokenSecretRecord(secrets) })) {
+    if (canDeleteBroadTokenSecrets({ model: updated.model, routerTokenPresent: hasBrokerOrRouterTokenSecretRecord(secrets) })) {
       await deleteStaleSpaceTokenSecrets(hub, updated.space);
     }
     await clearSpaceGatewayDisabled(hub, updated.space);
@@ -984,8 +984,7 @@ function deploymentSecrets(params: {
   telegramApiRoot?: string;
 }): Record<string, string> {
   return {
-    HF_TOKEN: params.hfToken,
-    HUGGINGFACE_HUB_TOKEN: params.hfToken,
+    MLCLAW_BROKER_HF_TOKEN: params.hfToken,
     ...(params.routerToken ? { MLCLAW_ROUTER_TOKEN: params.routerToken } : {}),
     OPENCLAW_HF_STATE_BUCKET: params.bucket,
     OPENCLAW_MODEL: params.model,
@@ -1074,16 +1073,17 @@ async function deploySpaceGateway(params: {
   await setDeploymentSecrets(hub, manifest.space, {
     MLCLAW_SESSION_SECRET: requiredSecret(secrets, "MLCLAW_SESSION_SECRET"),
     MLCLAW_CREDENTIAL_KEY: requiredSecret(secrets, "MLCLAW_CREDENTIAL_KEY"),
+    MLCLAW_BROKER_HF_TOKEN: hfToken,
     ...(secrets.MLCLAW_ROUTER_TOKEN ? { MLCLAW_ROUTER_TOKEN: secrets.MLCLAW_ROUTER_TOKEN } : {}),
     ...(secrets.TELEGRAM_BOT_TOKEN ? { TELEGRAM_BOT_TOKEN: secrets.TELEGRAM_BOT_TOKEN } : {}),
     ...(secrets.TELEGRAM_ALLOWED_USERS ? { TELEGRAM_ALLOWED_USERS: secrets.TELEGRAM_ALLOWED_USERS } : {}),
     ...(secrets.TELEGRAM_PROXY ? { TELEGRAM_PROXY: secrets.TELEGRAM_PROXY } : {}),
     ...(secrets.TELEGRAM_API_ROOT ? { TELEGRAM_API_ROOT: secrets.TELEGRAM_API_ROOT } : {}),
   });
-  if (canDeleteBroadTokenSecrets({ model: manifest.model, routerTokenPresent: hasRouterTokenSecretRecord(secrets) })) {
+  if (canDeleteBroadTokenSecrets({ model: manifest.model, routerTokenPresent: hasBrokerOrRouterTokenSecretRecord(secrets) })) {
     await deleteStaleSpaceTokenSecrets(hub, manifest.space);
   } else {
-    runtime.stdout.log("Keeping existing broad Hub token secrets until MLCLAW_ROUTER_TOKEN is configured for Router inference");
+    runtime.stdout.log("Keeping legacy broad Hub token secrets until an HF Broker or Router credential is configured");
   }
   await hub.restartSpace(manifest.space, true);
   return { runtimeImage: spaceRuntimeRef };
@@ -1812,27 +1812,37 @@ async function ensureUpdateRouterToken(params: {
   }
   const spaceSecrets = await params.hub.getSpaceSecrets(params.repoId);
   const hasExplicitOverride = params.opts.routerToken !== undefined || params.opts.routerTokenFile !== undefined;
-  if (hasRouterTokenSecretMap(spaceSecrets) && !hasExplicitOverride) {
+  if (hasBrokerOrRouterTokenSecretMap(spaceSecrets) && !hasExplicitOverride) {
     return;
   }
   const hasManifest = await manifestExists(params.runtime.configRoot, params.agentName);
   const localSecrets = hasManifest
     ? await readSecretEnv(params.runtime.configRoot, params.agentName).catch(() => ({}))
     : {};
-  const routerToken = await resolveRouterToken({
-    opts: params.opts,
-    runtime: params.runtime,
-    existingSecrets: localSecrets,
-    model: params.model,
-  });
-  if (!routerToken) {
-    throw new Error("Hugging Face Router models require a dedicated inference token before update");
+  const routerToken = hasExplicitOverride
+    ? await resolveRouterToken({
+      opts: params.opts,
+      runtime: params.runtime,
+      existingSecrets: localSecrets,
+      model: params.model,
+    })
+    : undefined;
+  const brokerToken = routerToken ? undefined : await params.runtime.readToken(params.runtime.env);
+  const credential = routerToken ?? brokerToken;
+  if (!credential) {
+    throw new Error("Hugging Face broker credential is unavailable");
   }
-  await params.hub.addSpaceSecret(params.repoId, "MLCLAW_ROUTER_TOKEN", routerToken);
+  await params.hub.addSpaceSecret(
+    params.repoId,
+    routerToken ? "MLCLAW_ROUTER_TOKEN" : "MLCLAW_BROKER_HF_TOKEN",
+    credential,
+  );
   if (hasManifest) {
     await writeSecretEnv(params.runtime.configRoot, params.agentName, {
       ...localSecrets,
-      MLCLAW_ROUTER_TOKEN: routerToken,
+      ...(routerToken
+        ? { MLCLAW_ROUTER_TOKEN: routerToken }
+        : { MLCLAW_BROKER_HF_TOKEN: brokerToken as string }),
     });
   }
 }
@@ -1932,18 +1942,27 @@ async function doctor(repoId: string, opts: DoctorOptions, hub: HubApi, runtime:
       }
     }
   }
+  if (!secrets.has("MLCLAW_BROKER_HF_TOKEN")) {
+    if (fix) {
+      await hub.addSpaceSecret(repoId, "MLCLAW_BROKER_HF_TOKEN", await runtime.readToken(runtime.env));
+      secrets.set("MLCLAW_BROKER_HF_TOKEN", { key: "MLCLAW_BROKER_HF_TOKEN" });
+      fixed.push("set secret MLCLAW_BROKER_HF_TOKEN");
+    } else {
+      issues.push("secret MLCLAW_BROKER_HF_TOKEN is missing");
+    }
+  }
   const staleTokenSecrets = ["HF_TOKEN", "HUGGINGFACE_HUB_TOKEN"].filter((key) => secrets.has(key));
   if (staleTokenSecrets.length > 0) {
     const model = variables.get("OPENCLAW_MODEL")?.value ?? DEFAULT_MODEL;
     const canDelete = canDeleteBroadTokenSecrets({
       model,
-      routerTokenPresent: hasRouterTokenSecretMap(secrets),
+      routerTokenPresent: hasBrokerOrRouterTokenSecretMap(secrets),
     });
     if (fix && canDelete) {
       await deleteStaleSpaceTokenSecrets(hub, repoId);
       fixed.push(`deleted stale secret${staleTokenSecrets.length === 1 ? "" : "s"} ${staleTokenSecrets.join(", ")}`);
     } else if (fix) {
-      issues.push(`stale broad Hub token secret${staleTokenSecrets.length === 1 ? "" : "s"} present: ${staleTokenSecrets.join(", ")}; add MLCLAW_ROUTER_TOKEN before removing`);
+      issues.push(`stale broad Hub token secret${staleTokenSecrets.length === 1 ? "" : "s"} present: ${staleTokenSecrets.join(", ")}; add MLCLAW_BROKER_HF_TOKEN before removing`);
     } else {
       issues.push(`stale broad Hub token secret${staleTokenSecrets.length === 1 ? "" : "s"} present: ${staleTokenSecrets.join(", ")}`);
     }
@@ -2154,10 +2173,18 @@ function hasRouterTokenSecretMap(secrets: Map<string, { key: string }>): boolean
   return secrets.has("MLCLAW_ROUTER_TOKEN") || secrets.has("HF_ROUTER_TOKEN");
 }
 
+function hasBrokerOrRouterTokenSecretRecord(secrets: Record<string, string>): boolean {
+  return Boolean(secrets.MLCLAW_BROKER_HF_TOKEN) || hasRouterTokenSecretRecord(secrets);
+}
+
+function hasBrokerOrRouterTokenSecretMap(secrets: Map<string, { key: string }>): boolean {
+  return secrets.has("MLCLAW_BROKER_HF_TOKEN") || hasRouterTokenSecretMap(secrets);
+}
+
 function assertDedicatedRouterToken(model: string, secrets: Record<string, string>): void {
-  if (isHuggingFaceRouterModel(model) && !hasRouterTokenSecretRecord(secrets)) {
+  if (isHuggingFaceRouterModel(model) && !hasBrokerOrRouterTokenSecretRecord(secrets)) {
     throw new Error(
-      "Hugging Face Router models require a dedicated inference token; rerun bootstrap or migration with --router-token-file",
+      "Hugging Face Router models require MLCLAW_BROKER_HF_TOKEN or a dedicated inference token",
     );
   }
 }
@@ -2270,22 +2297,7 @@ async function resolveRouterToken(params: {
   if (!isHuggingFaceRouterModel(params.model)) {
     return undefined;
   }
-  if (!params.runtime.prompt.isInteractive()) {
-    throw new Error("Hugging Face Router models require a dedicated inference token; set MLCLAW_ROUTER_TOKEN or pass --router-token-file.");
-  }
-  const value = await params.runtime.prompt.password({
-    message: "Hugging Face Router token",
-    placeholder: "hf_...",
-  });
-  if (isCancel(value)) {
-    params.runtime.prompt.cancel("Cancelled");
-    throw new Error("cancelled");
-  }
-  const token = typeof value === "string" ? nonEmpty(value) : undefined;
-  if (!token) {
-    throw new Error("A dedicated Hugging Face Router token is required for huggingface/ models.");
-  }
-  return token;
+  return undefined;
 }
 
 async function readOptionalRouterTokenFile(file: string | undefined): Promise<string | undefined> {

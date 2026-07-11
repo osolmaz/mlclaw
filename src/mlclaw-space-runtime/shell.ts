@@ -73,6 +73,55 @@ export const CONTROL_BRANDING_SCRIPT = `(function () {
       }
     });
   }
+  function installApprovals() {
+    var button = document.querySelector("[data-mlclaw-approvals-button]");
+    var frame = document.querySelector("[data-mlclaw-approvals-frame]");
+    var badge = document.querySelector("[data-mlclaw-approvals-badge]");
+    if (!button || !frame || button.getAttribute("data-ready") === "1") return;
+    button.setAttribute("data-ready", "1");
+    button.addEventListener("click", function () {
+      var open = frame.style.display !== "none";
+      frame.style.display = open ? "none" : "block";
+      button.setAttribute("aria-expanded", open ? "false" : "true");
+    });
+    window.addEventListener("message", function (event) {
+      if (event.origin === window.location.origin && event.data && event.data.type === "mlclaw-approvals-close") {
+        frame.style.display = "none";
+        button.setAttribute("aria-expanded", "false");
+      }
+    });
+    function refresh() {
+      listBrokers().then(function (brokers) {
+        return Promise.all(brokers.map(function (broker) {
+          return fetch("/mlclaw/api/approvals?broker=" + encodeURIComponent(broker.id) + "&status=pending&limit=100", { credentials: "same-origin" })
+            .then(function (response) { return response.ok ? response.json() : null; })
+            .catch(function () { return null; });
+        }));
+      }).then(function (pages) {
+          var count = pages.reduce(function (total, page) {
+            return total + (page && Array.isArray(page.items) ? page.items.length : 0);
+          }, 0);
+          if (!badge) return;
+          badge.textContent = count > 99 ? "99" : String(count);
+          badge.style.display = count > 0 ? "grid" : "none";
+        }).catch(function () {});
+    }
+    function listBrokers() {
+      return fetch("/mlclaw/api/approvals/brokers", { credentials: "same-origin" })
+        .then(function (response) { return response.ok ? response.json() : { brokers: [] }; })
+        .then(function (value) { return value && Array.isArray(value.brokers) ? value.brokers : []; });
+    }
+    refresh();
+    listBrokers().then(function (brokers) {
+      brokers.forEach(function (broker) {
+        var events = new EventSource("/mlclaw/api/approvals/events?broker=" + encodeURIComponent(broker.id), { withCredentials: true });
+        events.onmessage = refresh;
+        ["request.created", "request.updated", "request.decided"].forEach(function (kind) {
+          events.addEventListener(kind, refresh);
+        });
+      });
+    });
+  }
   if (!document.documentElement.hasAttribute(marker)) {
     document.documentElement.setAttribute(marker, "1");
     var attachShadow = Element.prototype.attachShadow;
@@ -86,6 +135,7 @@ export const CONTROL_BRANDING_SCRIPT = `(function () {
     requestAnimationFrame(function () {
       observeExistingShadowRoots(document);
       scan(document);
+      installApprovals();
     });
   }
 })();
@@ -117,10 +167,12 @@ export function shouldInjectShell(params: {
   responseContentEncoding?: string | undefined;
 }): boolean {
   const method = params.method ?? "GET";
-  return (method === "GET" || method === "HEAD") &&
+  return (
+    (method === "GET" || method === "HEAD") &&
     (params.requestAccept ?? "").includes("text/html") &&
     (params.responseContentType ?? "").toLowerCase().includes("text/html") &&
-    !params.responseContentEncoding;
+    !params.responseContentEncoding
+  );
 }
 
 export function rewriteOpenClawHtml(html: string, branding: RuntimeBranding): string {
@@ -130,13 +182,20 @@ export function rewriteOpenClawHtml(html: string, branding: RuntimeBranding): st
 export function injectMlClawShell(html: string, branding: RuntimeBranding): string {
   const shell = `
 <div ${SHELL_MARKER} style="position:fixed;left:max(12px,env(safe-area-inset-left));bottom:max(12px,env(safe-area-inset-bottom));z-index:2147483647;">
+  <div style="display:flex;gap:8px;align-items:center;">
   <a href="/mlclaw" aria-label="Open ${escapeHtml(branding.name)} settings" title="${escapeHtml(branding.name)}" style="box-sizing:border-box;display:flex;width:34px;height:34px;aspect-ratio:1/1;align-items:center;justify-content:center;border:1px solid rgba(15,23,42,.16);border-radius:8px;background:rgba(255,255,255,.94);box-shadow:0 8px 18px rgba(15,23,42,.14);color:#111827;text-decoration:none;">
     <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block;width:18px;height:18px;">
       <path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"></path>
       <circle cx="12" cy="12" r="3"></circle>
     </svg>
   </a>
+  <button data-mlclaw-approvals-button type="button" aria-label="Open approval requests" aria-expanded="false" style="position:relative;box-sizing:border-box;display:grid;width:34px;height:34px;place-items:center;border:1px solid rgba(15,23,42,.16);border-radius:8px;background:rgba(255,255,255,.94);box-shadow:0 8px 18px rgba(15,23,42,.14);color:#111827;cursor:pointer;">
+    <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"></path><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"></path></svg>
+    <span data-mlclaw-approvals-badge style="position:absolute;display:none;place-items:center;min-width:17px;height:17px;right:-6px;top:-7px;padding:0 4px;border:2px solid white;border-radius:999px;background:#dc2626;color:white;font:700 9px system-ui;"></span>
+  </button>
+  </div>
 </div>
+<iframe data-mlclaw-approvals-frame src="/mlclaw?embed=approvals" title="Approval requests" style="display:none;position:fixed;z-index:2147483646;right:0;top:0;width:min(460px,100vw);height:100dvh;border:0;background:white;box-shadow:-12px 0 36px rgba(15,23,42,.22);"></iframe>
 `;
   const brandingScript = `<script ${CONTROL_BRANDING_MARKER} src="${CONTROL_BRANDING_SCRIPT_PATH}"></script>\n`;
   if (html.includes(SHELL_MARKER)) {
@@ -168,9 +227,5 @@ function injectBranding(html: string, branding: RuntimeBranding): string {
 }
 
 function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll("\"", "&quot;");
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 }

@@ -1,6 +1,16 @@
 ARG OPENCLAW_VERSION=2026.7.1-beta.2
 ARG OPENCLAW_BASE_IMAGE=ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}
 ARG MLCLAW_RUNTIME_IMAGE=ghcr.io/osolmaz/mlclaw:0.2.3-openclaw-2026.7.1-beta.2
+ARG HF_BROKER_VERSION=bb65192b4dca845289427e63e1d5fa72f64914d8
+
+FROM golang:1.26.5-bookworm AS hf-broker-build
+ARG HF_BROKER_VERSION
+RUN git init /src \
+  && git -C /src fetch --depth=1 https://github.com/osolmaz/hf-broker.git "$HF_BROKER_VERSION" \
+  && git -C /src checkout --detach FETCH_HEAD \
+  && test "$(git -C /src rev-parse HEAD)" = "$HF_BROKER_VERSION" \
+  && cd /src \
+  && GOWORK=off go build -trimpath -o /out/hf-broker ./cmd/hf-broker
 
 # Stage 1: build the state-sync bundle so the runtime image needs no dev deps.
 FROM node:24-bookworm-slim AS sync-build
@@ -17,7 +27,8 @@ LABEL org.opencontainers.image.description="ML Claw runtime for OpenClaw on Hugg
 USER root
 # zstd: snapshot archives. gosu: drop privileges after preparing mounted volumes.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends gosu python3 python3-pip python3-venv zstd \
+  && apt-get install -y --no-install-recommends ca-certificates gosu python3 python3-pip python3-venv zstd \
+  && useradd --system --home-dir /var/lib/hf-broker --create-home --shell /usr/sbin/nologin hf-broker \
   && rm -rf /var/lib/apt/lists/*
 RUN python3 -m pip install --break-system-packages --no-cache-dir \
   "huggingface_hub==1.19.0" \
@@ -35,6 +46,8 @@ RUN python3 -m pip install --break-system-packages --no-cache-dir \
 COPY --from=sync-build /build/dist/hf-state-sync.js /app/hf-state-sync.js
 COPY --from=sync-build /build/dist/hf-tooling-seed.js /app/hf-tooling-seed.js
 COPY --from=sync-build /build/dist/mlclaw-space-runtime.js /app/mlclaw-space-runtime.js
+COPY --from=hf-broker-build /out/hf-broker /usr/local/bin/hf-broker
+COPY hf-broker.scope.json /app/hf-broker.scope.json
 COPY --chown=node:node openclaw.default.json /app/openclaw.default.json
 COPY --chown=node:node entrypoint.sh /app/entrypoint.sh
 COPY --chown=node:node assets/ /app/assets/

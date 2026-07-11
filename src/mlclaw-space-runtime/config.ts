@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { normalizeBucketPrefix } from "../hf-state-sync/paths.js";
 import { resolveBranding, type RuntimeBranding } from "./branding.js";
 import { DEFAULT_MODEL, normalizeModelChoices, parseModelChoicesEnv, type ModelChoice } from "./model-choices.js";
+import { loadOperatorBrokers, type OperatorBrokerConfig } from "./operator-brokers.js";
 
 export type RuntimeMode = "template" | "app";
 
@@ -32,8 +33,12 @@ export type SpaceRuntimeConfig = {
   mode: RuntimeMode;
   hfToken: string | undefined;
   routerToken: string | undefined;
+  brokerAgentUrl: string | undefined;
+  brokerAgentSecret: string | undefined;
+  operatorBrokers: OperatorBrokerConfig[];
   hubUrl: string;
   openaiCredentialFile: string;
+  openaiCredentialStoreFile: string;
   mcpCredentialFile: string;
   hfMcpUrl: string;
   researchMcpUrl: string;
@@ -76,14 +81,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpaceRuntimeCo
   const owner = ownerFromSpaceId(spaceId);
   const configuredAllowedUsers = splitUsers(env.MLCLAW_ALLOWED_USERS ?? env.ALLOWED_USERS);
   const configuredAdmins = splitUsers(env.MLCLAW_ADMINS);
-  const resolvedAdmins = uniqueUsers(configuredAdmins.length > 0
-    ? configuredAdmins
-    : owner ? [owner] : configuredAllowedUsers.slice(0, 1));
-  const allowedUsers = uniqueUsers([
-    ...configuredAllowedUsers,
-    ...resolvedAdmins,
-    ...(owner ? [owner] : []),
-  ]);
+  const resolvedAdmins = uniqueUsers(
+    configuredAdmins.length > 0 ? configuredAdmins : owner ? [owner] : configuredAllowedUsers.slice(0, 1),
+  );
+  const allowedUsers = uniqueUsers([...configuredAllowedUsers, ...resolvedAdmins, ...(owner ? [owner] : [])]);
   const publicUrl = publicUrlFromEnv(env, port);
   const sessionSecret = trim(env.MLCLAW_SESSION_SECRET ?? env.SESSION_SECRET) ?? randomBytes(48).toString("base64url");
   const configuredCredentialKey = trim(env.MLCLAW_CREDENTIAL_KEY);
@@ -93,12 +94,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpaceRuntimeCo
   const credentialKey = configuredCredentialKey ?? randomBytes(32).toString("base64url");
   const openclawCommand = trim(env.MLCLAW_OPENCLAW_COMMAND) ?? "openclaw";
   const openclawArgs = splitArgs(env.MLCLAW_OPENCLAW_ARGS) ?? ["gateway"];
-  const runtimeSettingsFile = trim(env.MLCLAW_RUNTIME_SETTINGS_FILE) ?? "/home/node/.local/share/mlclaw/live/.mlclaw/settings.json";
+  const runtimeSettingsFile =
+    trim(env.MLCLAW_RUNTIME_SETTINGS_FILE) ?? "/home/node/.local/share/mlclaw/live/.mlclaw/settings.json";
   const stateMountDir = trim(env.MLCLAW_STATE_MOUNT_DIR);
   const statePrefix = trim(env.OPENCLAW_HF_STATE_PREFIX);
-  const mcpCredentialFile = trim(env.MLCLAW_MCP_CREDENTIAL_FILE) ?? (stateMountDir
-    ? `${stateMountDir.replace(/\/+$/, "")}/${normalizeBucketPrefix(statePrefix)}/.mlclaw/mcp-oauth.enc`
-    : `${pathDirname(runtimeSettingsFile)}/mcp-oauth.enc`);
+  const mcpCredentialFile =
+    trim(env.MLCLAW_MCP_CREDENTIAL_FILE) ??
+    (stateMountDir
+      ? `${stateMountDir.replace(/\/+$/, "")}/${normalizeBucketPrefix(statePrefix)}/.mlclaw/mcp-oauth.enc`
+      : `${pathDirname(runtimeSettingsFile)}/mcp-oauth.enc`);
+  const openaiCredentialStoreFile =
+    trim(env.MLCLAW_OPENAI_CREDENTIAL_STORE_FILE) ??
+    (stateMountDir
+      ? `${stateMountDir.replace(/\/+$/, "")}/${normalizeBucketPrefix(statePrefix)}/.mlclaw/openai-api-key.enc`
+      : `${pathDirname(pathDirname(runtimeSettingsFile))}/.mlclaw-protected/control/openai-api-key.enc`);
   const runtimeSettings = readRuntimeSettings(runtimeSettingsFile);
   const model = runtimeSettings.model ?? trim(env.OPENCLAW_MODEL) ?? DEFAULT_MODEL;
   const agentName = trim(env.OPENCLAW_AGENT_NAME);
@@ -127,10 +136,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpaceRuntimeCo
     adminUsers: resolvedAdmins,
     allowAnySignedIn: env.MLCLAW_ALLOW_ANY_SIGNED_IN === "1" || env.MLCLAW_ALLOW_ANY_SIGNED_IN === "true",
     mode,
-    hfToken: trim(env.HF_TOKEN ?? env.HUGGINGFACE_HUB_TOKEN),
+    hfToken:
+      readOptionalSecret(trim(env.MLCLAW_TRUSTED_HF_TOKEN_FILE)) ?? trim(env.HF_TOKEN ?? env.HUGGINGFACE_HUB_TOKEN),
     routerToken: trim(env.MLCLAW_ROUTER_TOKEN ?? env.HF_ROUTER_TOKEN),
+    brokerAgentUrl: trim(env.MLCLAW_HF_BROKER_URL),
+    brokerAgentSecret: readOptionalSecret(trim(env.MLCLAW_HF_BROKER_AGENT_SECRET_FILE)),
+    operatorBrokers: loadOperatorBrokers(trim(env.MLCLAW_OPERATOR_BROKERS_FILE)),
     hubUrl: trim(env.HF_ENDPOINT) ?? "https://huggingface.co",
     openaiCredentialFile: trim(env.MLCLAW_OPENAI_CREDENTIAL_FILE) ?? "/tmp/mlclaw-secrets/openai.env",
+    openaiCredentialStoreFile,
     mcpCredentialFile,
     hfMcpUrl: trim(env.MLCLAW_HF_MCP_URL) ?? "https://huggingface.co/mcp?bouquet=hf",
     researchMcpUrl: trim(env.MLCLAW_RESEARCH_MCP_URL) ?? "https://evalstate-research-agent-two.hf.space/mcp",
@@ -154,6 +168,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpaceRuntimeCo
     assetsDir: trim(env.MLCLAW_ASSETS_DIR) ?? "/app/assets",
     branding: resolveBranding(env, agentName),
   };
+}
+
+function readOptionalSecret(file: string | undefined): string | undefined {
+  if (!file) {
+    return undefined;
+  }
+  try {
+    return trim(readFileSync(file, "utf8"));
+  } catch {
+    return undefined;
+  }
 }
 
 export function integrationCredentialSlot(config: Pick<SpaceRuntimeConfig, "adminUsers">): string | undefined {

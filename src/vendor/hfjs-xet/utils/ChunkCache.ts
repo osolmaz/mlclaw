@@ -35,7 +35,7 @@ export class ChunkCache {
 			return;
 		}
 		if (this.map.values().next().value === this.index) {
-			// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+				// eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- The equality check proves the oldest key exists.
 			this.map.delete(this.map.keys().next().value!);
 		}
 		this.map.set(hash, this.index);

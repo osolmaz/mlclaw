@@ -39,7 +39,7 @@ An ML Claw deployment has:
   Agent Skills mirrored into both `.agents/skills` and `skills`;
 - optional local Docker gateway mode for users who want the gateway on their
   own machine;
-- Hugging Face Router model configuration for OpenClaw inference.
+- Hugging Face Router model configuration through an isolated HF Broker.
 
 The bucket is the durable state source. The live gateway is disposable. Do not
 mount a bucket as the live OpenClaw database filesystem. Space gateway mode
@@ -59,9 +59,8 @@ Collect or confirm:
 
 - Hugging Face token access: `HF_TOKEN`, `HF_TOKEN_PATH`, `$HF_HOME/token`, or
   `hf auth login`.
-- Dedicated Hugging Face Router inference token for any gateway mode using
-  `huggingface/` models: `MLCLAW_ROUTER_TOKEN`, `HF_ROUTER_TOKEN`, or
-  `--router-token-file`.
+- The active Hugging Face token is installed as the broker-owned
+  `MLCLAW_BROKER_HF_TOKEN`; legacy dedicated Router tokens remain supported.
 - Agent name, unless a Telegram bot token is supplied and the user wants the
   name derived from the bot username.
 - Gateway mode:
@@ -261,8 +260,9 @@ header; never place the OAuth token in OpenClaw config or environment.
 After migrating to a local gateway, the MCP proxy uses the local deployment's
 Hugging Face token inside the trusted wrapper instead of requiring the Space's
 OAuth client. Migrating back resumes the encrypted OAuth credential retained
-in the private bucket. OpenClaw receives only the separate Router inference
-token; it never receives the broader local Hub token.
+in the private bucket. OpenClaw receives only a generated HF Broker agent
+credential; it never receives the broader local Hub token or the broker
+operator credential.
 
 The OpenAI key is stored as a 0600 runtime file for immediate use. For
 restart-durable OpenAI credentials, use the local `mlclaw` CLI or Space

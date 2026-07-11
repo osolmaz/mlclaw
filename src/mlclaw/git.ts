@@ -81,6 +81,7 @@ export async function generateSpaceRepo(
       ["dist/hf-tooling-seed.js", "runtime/hf-tooling-seed.js"],
       ["dist/mlclaw-space-runtime.js", "runtime/mlclaw-space-runtime.js"],
       ["entrypoint.sh", "runtime/entrypoint.sh"],
+      ["hf-broker.scope.json", "runtime/hf-broker.scope.json"],
       ["openclaw.default.json", "runtime/openclaw.default.json"],
       ["scripts/configure-huggingface-model.mjs", "runtime/scripts/configure-huggingface-model.mjs"],
       ["scripts/configure-telegram.mjs", "runtime/scripts/configure-telegram.mjs"],
@@ -102,14 +103,26 @@ function imageDockerfile(runtimeImage: string): string {
 }
 
 function bundledDockerfile(): string {
-  return `FROM ${OPENCLAW_BASE_IMAGE}
+  return `ARG HF_BROKER_VERSION=bb65192b4dca845289427e63e1d5fa72f64914d8
+
+FROM golang:1.26.5-bookworm AS hf-broker-build
+ARG HF_BROKER_VERSION
+RUN git init /src \\
+  && git -C /src fetch --depth=1 https://github.com/osolmaz/hf-broker.git "$HF_BROKER_VERSION" \\
+  && git -C /src checkout --detach FETCH_HEAD \\
+  && test "$(git -C /src rev-parse HEAD)" = "$HF_BROKER_VERSION" \\
+  && cd /src \\
+  && GOWORK=off go build -trimpath -o /out/hf-broker ./cmd/hf-broker
+
+FROM ${OPENCLAW_BASE_IMAGE}
 
 LABEL org.opencontainers.image.source="https://github.com/osolmaz/mlclaw"
 LABEL org.opencontainers.image.description="ML Claw runtime for OpenClaw on Hugging Face"
 
 USER root
 RUN apt-get update \\
-  && apt-get install -y --no-install-recommends gosu python3 python3-pip python3-venv zstd \\
+  && apt-get install -y --no-install-recommends ca-certificates gosu python3 python3-pip python3-venv zstd \\
+  && useradd --system --home-dir /var/lib/hf-broker --create-home --shell /usr/sbin/nologin hf-broker \\
   && rm -rf /var/lib/apt/lists/*
 RUN python3 -m pip install --break-system-packages --no-cache-dir \\
   "huggingface_hub==1.19.0" \\
@@ -127,6 +140,8 @@ RUN python3 -m pip install --break-system-packages --no-cache-dir \\
 COPY --chown=node:node runtime/hf-state-sync.js /app/hf-state-sync.js
 COPY --chown=node:node runtime/hf-tooling-seed.js /app/hf-tooling-seed.js
 COPY --chown=node:node runtime/mlclaw-space-runtime.js /app/mlclaw-space-runtime.js
+COPY --from=hf-broker-build /out/hf-broker /usr/local/bin/hf-broker
+COPY runtime/hf-broker.scope.json /app/hf-broker.scope.json
 COPY --chown=node:node runtime/openclaw.default.json /app/openclaw.default.json
 COPY --chown=node:node runtime/entrypoint.sh /app/entrypoint.sh
 COPY --chown=node:node runtime/scripts/ /app/scripts/

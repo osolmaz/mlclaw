@@ -4916,7 +4916,8 @@ function resolveSyncConfig(env = process.env) {
     gatewayLocation: env.MLCLAW_GATEWAY_LOCATION === "local" || env.MLCLAW_GATEWAY_LOCATION === "space" ? env.MLCLAW_GATEWAY_LOCATION : "unknown",
     runtimeImage: env.MLCLAW_RUNTIME_IMAGE?.trim() || "unknown",
     ...snapshotUid !== void 0 ? { snapshotUid } : {},
-    ...snapshotGid !== void 0 ? { snapshotGid } : {}
+    ...snapshotGid !== void 0 ? { snapshotGid } : {},
+    ...env.MLCLAW_PROTECTED_STATE_DIR?.trim() ? { protectedStateDir: env.MLCLAW_PROTECTED_STATE_DIR.trim() } : {}
   };
 }
 function nonNegativeIntFromEnv(value) {
@@ -5001,6 +5002,7 @@ var STATE_EXCLUDED_NAMES = /* @__PURE__ */ new Set([".env", "credentials", "tmp"
 var STATE_EXCLUDED_SUFFIXES = [".log"];
 var SIDECAR_SUFFIXES = [".sqlite-wal", ".sqlite-shm"];
 var STATE_DIR_NAME = ".openclaw";
+var PROTECTED_STATE_DIR_NAME = ".mlclaw-protected";
 function isExcluded(name, inStateDir) {
   if (SIDECAR_SUFFIXES.some((suffix) => name.endsWith(suffix))) {
     return true;
@@ -5011,10 +5013,13 @@ function isExcluded(name, inStateDir) {
   return STATE_EXCLUDED_NAMES.has(name) || STATE_EXCLUDED_SUFFIXES.some((suffix) => name.endsWith(suffix));
 }
 async function copyTreeFiltered(params) {
-  const { sourceDir, destDir, databases, rootDir, inStateDir, depth } = params;
+  const { sourceDir, destDir, databases, rootDir, inStateDir, depth, excludeProtectedState } = params;
   await fs3.mkdir(destDir, { recursive: true });
   const entries = await fs3.readdir(sourceDir, { withFileTypes: true });
   for (const entry of entries) {
+    if (excludeProtectedState && depth === 0 && entry.name === PROTECTED_STATE_DIR_NAME) {
+      continue;
+    }
     if (isExcluded(entry.name, inStateDir)) {
       continue;
     }
@@ -5029,7 +5034,8 @@ async function copyTreeFiltered(params) {
         // Only the top-level .openclaw dir is OpenClaw state; a workspace
         // project may legitimately contain its own .openclaw directory.
         inStateDir: inStateDir || depth === 0 && entry.name === STATE_DIR_NAME,
-        depth: depth + 1
+        depth: depth + 1,
+        excludeProtectedState
       });
     } else if (entry.isFile()) {
       if (entry.name.endsWith(".sqlite")) {
@@ -5042,7 +5048,7 @@ async function copyTreeFiltered(params) {
     }
   }
 }
-async function stageLiveDir(liveDir, stagingDir) {
+async function stageLiveDir(liveDir, stagingDir, options = {}) {
   const databases = [];
   await copyTreeFiltered({
     sourceDir: liveDir,
@@ -5050,7 +5056,8 @@ async function stageLiveDir(liveDir, stagingDir) {
     databases,
     rootDir: liveDir,
     inStateDir: false,
-    depth: 0
+    depth: 0,
+    excludeProtectedState: options.excludeProtectedState ?? false
   });
   for (const relative of databases) {
     const staged = path3.join(stagingDir, relative);
@@ -9252,9 +9259,16 @@ async function prepareRestore(config) {
   if (!config.stateMountDir) {
     return;
   }
+  await makeTraversableDirectory(config.stateMountDir);
   const prefixRoot = confinedPath(config.stateMountDir, config.bucketPrefix);
+  let prefixPart = config.stateMountDir;
+  for (const part of config.bucketPrefix.split("/").filter(Boolean)) {
+    prefixPart = path5.join(prefixPart, part);
+    await makeTraversableDirectory(prefixPart);
+  }
   await makeReadableIfFile(path5.join(prefixRoot, "manifest.json"));
   const snapshotsDir = path5.join(prefixRoot, "snapshots");
+  await makeTraversableDirectory(snapshotsDir);
   let entries;
   try {
     entries = await fs5.readdir(snapshotsDir, { withFileTypes: true });
@@ -9267,6 +9281,18 @@ async function prepareRestore(config) {
   for (const entry of entries) {
     if (entry.isFile()) {
       await fs5.chmod(path5.join(snapshotsDir, entry.name), 420);
+    }
+  }
+}
+async function makeTraversableDirectory(directory) {
+  try {
+    const stat = await fs5.lstat(directory);
+    if (stat.isDirectory()) {
+      await fs5.chmod(directory, 457);
+    }
+  } catch (err) {
+    if (!isNotFound2(err)) {
+      throw err;
     }
   }
 }
@@ -9417,17 +9443,72 @@ function unprivilegedStageArchive(params) {
     await archive;
     const message = parseWorkerMessage(await metadata);
     if (exitCode !== 0 || message.kind === "failed") {
-      throw new Error(message.kind === "failed" ? message.detail : `snapshot staging worker exited with code ${exitCode}`);
+      throw new Error(
+        message.kind === "failed" ? message.detail : `snapshot staging worker exited with code ${exitCode}`
+      );
     }
     return message;
   };
+}
+function protectedStageArchive(params) {
+  return async (request) => {
+    const outcome = await params.base(request);
+    if (outcome.kind !== "staged") {
+      return outcome;
+    }
+    const workDir = await fs7.mkdtemp(path7.join(os3.tmpdir(), "hf-state-protected-stage-"));
+    try {
+      const stagingDir = path7.join(workDir, "stage");
+      await extractTarZst(request.archivePath, stagingDir);
+      const destination = path7.join(stagingDir, params.archiveName);
+      await fs7.cp(params.sourceDir, destination, {
+        recursive: true,
+        force: false,
+        preserveTimestamps: true,
+        filter: (source) => includeProtectedSnapshotPath(params.sourceDir, source)
+      });
+      await fs7.chmod(destination, 448);
+      await fs7.rm(request.archivePath, { force: true });
+      await createTarZst(stagingDir, request.archivePath);
+      await fs7.chmod(request.archivePath, 384);
+      return outcome;
+    } finally {
+      await fs7.rm(workDir, { recursive: true, force: true });
+    }
+  };
+}
+function includeProtectedSnapshotPath(sourceDir, source) {
+  const relative = path7.relative(sourceDir, source);
+  return relative !== "hf-broker/mirrors" && !relative.startsWith(`hf-broker/mirrors${path7.sep}`);
+}
+function trustedStageArchive(config, scriptPath) {
+  const canStageAsOpenClaw = process.getuid?.() === 0 && Boolean(scriptPath) && config.snapshotUid !== void 0 && config.snapshotGid !== void 0;
+  if (!canStageAsOpenClaw) {
+    if (config.protectedStateDir) {
+      throw new Error("protected runtime state requires root snapshot staging with an OpenClaw UID and GID");
+    }
+    return void 0;
+  }
+  let stageArchive = unprivilegedStageArchive({
+    uid: config.snapshotUid,
+    gid: config.snapshotGid,
+    scriptPath
+  });
+  if (config.protectedStateDir) {
+    stageArchive = protectedStageArchive({
+      base: stageArchive,
+      sourceDir: config.protectedStateDir,
+      archiveName: PROTECTED_STATE_DIR_NAME
+    });
+  }
+  return stageArchive;
 }
 async function runStageWorker(liveDir) {
   const workDir = await fs7.mkdtemp(path7.join(os3.tmpdir(), "hf-state-stage-worker-"));
   try {
     const stagingDir = path7.join(workDir, "stage");
     const archivePath = path7.join(workDir, "snapshot.tar.zst");
-    const staged = await stageLiveDir(liveDir, stagingDir);
+    const staged = await stageLiveDir(liveDir, stagingDir, { excludeProtectedState: true });
     if (staged.kind === "corrupt-database") {
       writeWorkerMessage(staged);
       return 0;
@@ -9489,11 +9570,7 @@ async function supervise(params) {
   }
   const bootTime = (/* @__PURE__ */ new Date()).toISOString();
   const scriptPath = process.argv[1];
-  const stageArchive = process.getuid?.() === 0 && scriptPath && config.snapshotUid !== void 0 && config.snapshotGid !== void 0 ? unprivilegedStageArchive({
-    uid: config.snapshotUid,
-    gid: config.snapshotGid,
-    scriptPath
-  }) : void 0;
+  const stageArchive = trustedStageArchive(config, scriptPath);
   let lastSnapshotId;
   const handoffState = { request: null };
   const writeLease = async () => {
@@ -9561,7 +9638,10 @@ async function supervise(params) {
       await fs8.rm(tmpDir, { recursive: true, force: true });
     }
   };
-  const child = spawn2(binary, args, { stdio: "inherit" });
+  const child = spawn2(binary, args, {
+    stdio: "inherit",
+    env: supervisedChildEnvironment(process.env)
+  });
   const childExit = new Promise((resolve) => {
     child.on("exit", (code, signal) => resolve(code ?? (signal ? 128 : 1)));
     child.on("error", (err) => {
@@ -9618,7 +9698,9 @@ async function supervise(params) {
   })();
   void snapshotLoop;
   const heartbeatLoop = (async () => {
-    await writeLease().catch((err) => logError(`initial lease failed: ${err instanceof Error ? err.message : String(err)}`));
+    await writeLease().catch(
+      (err) => logError(`initial lease failed: ${err instanceof Error ? err.message : String(err)}`)
+    );
     while (!stopping) {
       await delay(LEASE_HEARTBEAT_MS);
       if (stopping) {
@@ -9676,15 +9758,24 @@ async function supervise(params) {
   if (handoffState.request) {
     const request = handoffState.request;
     if (finalOutcome.kind !== "uploaded") {
-      throw new Error(`handoff ${request.requestId} final snapshot did not upload: ${snapshotFailureDetail(finalOutcome)}`);
+      throw new Error(
+        `handoff ${request.requestId} final snapshot did not upload: ${snapshotFailureDetail(finalOutcome)}`
+      );
     }
     await writeHandoffAck(request).catch((err) => {
-      throw new Error(`handoff ${request.requestId} snapshot completed but ack failed: ${err instanceof Error ? err.message : String(err)}`);
+      throw new Error(
+        `handoff ${request.requestId} snapshot completed but ack failed: ${err instanceof Error ? err.message : String(err)}`
+      );
     });
     log(`handoff ${request.requestId} acknowledged`);
     return 0;
   }
   return exitCode;
+}
+function supervisedChildEnvironment(source) {
+  const env = { ...source };
+  delete env.MLCLAW_STATE_HF_TOKEN;
+  return env;
 }
 function snapshotFailureDetail(outcome) {
   switch (outcome.kind) {
@@ -9710,7 +9801,8 @@ function makeHub(config) {
     log(`using mounted state bucket at ${config.stateMountDir}`);
     return createMountedBucketHub({ mountDir: config.stateMountDir });
   }
-  return createHfBucketHub({ bucket: config.bucket });
+  const token = process.env.MLCLAW_STATE_HF_TOKEN ?? process.env.HF_TOKEN;
+  return createHfBucketHub({ bucket: config.bucket, ...token ? { token } : {} });
 }
 async function main(argv) {
   if (argv[0] === "stage-worker") {
@@ -9755,7 +9847,13 @@ async function main(argv) {
       if (!hub) {
         return 1;
       }
-      const outcome = await runSnapshot({ config, hub, bootTime: (/* @__PURE__ */ new Date()).toISOString() });
+      const stageArchive = trustedStageArchive(config, process.argv[1]);
+      const outcome = await runSnapshot({
+        config,
+        hub,
+        bootTime: (/* @__PURE__ */ new Date()).toISOString(),
+        ...stageArchive ? { stageArchive } : {}
+      });
       if (outcome.kind === "failed") {
         logError(outcome.detail);
         return 1;

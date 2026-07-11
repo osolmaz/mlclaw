@@ -319,9 +319,8 @@ describe("mlclaw CLI", () => {
     const manifest = await readManifest(runtime.configRoot, "research");
     expect(manifest.localRuntimeId).toMatch(/^local-research-[a-f0-9]{16}$/);
     await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
-      HUGGINGFACE_HUB_TOKEN: "hf_test_token",
+      MLCLAW_BROKER_HF_TOKEN: "hf_test_token",
       MLCLAW_RUNTIME_ID: manifest.localRuntimeId,
-      HF_TOKEN: "hf_test_token",
       OPENCLAW_MODEL: DEFAULT_MODEL,
     });
   });
@@ -898,7 +897,7 @@ describe("mlclaw CLI", () => {
     expect(hub.calls.some((call) => call.name === "addSpaceSecret" && call.args[1] === "TELEGRAM_BOT_TOKEN")).toBe(false);
   });
 
-  it("requires a Router token for non-interactive bootstrap with Hugging Face Router models", async () => {
+  it("uses the active broad token behind HF Broker for non-interactive Space bootstrap", async () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt([], false);
     const stderr: string[] = [];
@@ -914,12 +913,15 @@ describe("mlclaw CLI", () => {
       "--yes",
     ], runtime);
 
-    expect(code).toBe(1);
-    expect(stderr.join("\n")).toContain("set MLCLAW_ROUTER_TOKEN or pass --router-token-file");
-    expect(hub.calls.some((call) => call.name === "createDockerSpace")).toBe(false);
+    expect(code).toBe(0);
+    expect(stderr.join("\n")).toBe("");
+    expect(hub.calls).toContainEqual({
+      name: "addSpaceSecret",
+      args: ["alice/research", "MLCLAW_BROKER_HF_TOKEN", "hf_test_token"],
+    });
   });
 
-  it("requires a dedicated Router token for a non-interactive local gateway", async () => {
+  it("uses the active broad token behind HF Broker for a non-interactive local gateway", async () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt([], false);
     const stderr: string[] = [];
@@ -940,9 +942,12 @@ describe("mlclaw CLI", () => {
       "--yes",
     ], runtime);
 
-    expect(code).toBe(1);
-    expect(stderr.join("\n")).toContain("dedicated inference token");
-    expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(false);
+    expect(code).toBe(0);
+    expect(stderr.join("\n")).toBe("");
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(true);
+    await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
+      MLCLAW_BROKER_HF_TOKEN: "hf_test_token",
+    });
   });
 
   it("reuses a persisted Router token for non-interactive Space bootstrap", async () => {
@@ -1329,7 +1334,7 @@ describe("mlclaw CLI", () => {
     });
     expect(hub.calls).toContainEqual({
       name: "addSpaceSecret",
-      args: ["alice/research", "MLCLAW_ROUTER_TOKEN", "hf_router_test"],
+      args: ["alice/research", "MLCLAW_BROKER_HF_TOKEN", "hf_test_token"],
     });
     expect(hub.calls).toContainEqual({
       name: "addSpaceVariable",
@@ -1356,7 +1361,7 @@ describe("mlclaw CLI", () => {
     expect(restartIndex).toBeGreaterThan(adminsIndex);
   });
 
-  it("blocks a legacy Router update before changing or restarting the Space", async () => {
+  it("upgrades a legacy Router Space to the broker credential during update", async () => {
     const hub = createFakeHub();
     await hub.addSpaceVariable("alice/research", "OPENCLAW_HF_TEMPLATE_REV", "old-template");
     await hub.addSpaceVariable("alice/research", "OPENCLAW_MODEL", DEFAULT_MODEL);
@@ -1377,12 +1382,14 @@ describe("mlclaw CLI", () => {
 
     const code = await main(["update", "alice/research"], runtime);
 
-    expect(code).toBe(1);
-    expect(stderr.join("\n")).toContain("dedicated inference token");
-    expect(pushed).toBe(false);
-    expect(hub.calls.some((call) => call.name === "addSpaceVariable")).toBe(false);
-    expect(hub.calls.some((call) => call.name === "restartSpace")).toBe(false);
-    expect(hub.calls.some((call) => call.name === "deleteSpaceSecret")).toBe(false);
+    expect(code).toBe(0);
+    expect(stderr.join("\n")).toBe("");
+    expect(pushed).toBe(true);
+    expect(hub.calls).toContainEqual({
+      name: "addSpaceSecret",
+      args: ["alice/research", "MLCLAW_BROKER_HF_TOKEN", "hf_test_token"],
+    });
+    expect(hub.calls.some((call) => call.name === "restartSpace")).toBe(true);
   });
 
   it("replaces an existing Router token when update receives an explicit override", async () => {
@@ -1636,6 +1643,7 @@ describe("mlclaw CLI", () => {
     await hub.addSpaceVariable("alice/research", "MLCLAW_ADMINS", "alice");
     await hub.addSpaceSecret("alice/research", "MLCLAW_SESSION_SECRET", "session");
     await hub.addSpaceSecret("alice/research", "MLCLAW_CREDENTIAL_KEY", "credential-key");
+    await hub.addSpaceSecret("alice/research", "MLCLAW_BROKER_HF_TOKEN", "hf_broker");
     hub.calls.length = 0;
 
     const { prompt } = createPrompt([]);
@@ -1652,7 +1660,7 @@ describe("mlclaw CLI", () => {
     expect(hub.calls.some((call) => call.name === "setSpaceVolumes")).toBe(false);
   });
 
-  it("does not delete legacy broad Hub tokens until a Router token is configured", async () => {
+  it("installs the broker credential before deleting legacy broad Hub tokens", async () => {
     const hub = createFakeHub();
     await hub.addSpaceVariable("alice/research", "OPENCLAW_HF_STATE_BUCKET", "alice/research-data");
     await hub.addSpaceVariable("alice/research", "OPENCLAW_MODEL", DEFAULT_MODEL);
@@ -1678,8 +1686,9 @@ describe("mlclaw CLI", () => {
     const code = await main(["doctor", "alice/research", "--fix"], runtime);
 
     expect(code).toBe(0);
-    expect(output.join("\n")).toContain("add MLCLAW_ROUTER_TOKEN before removing");
-    expect(hub.calls).not.toContainEqual({ name: "deleteSpaceSecret", args: ["alice/research", "HF_TOKEN"] });
+    expect(output.join("\n")).toContain("set secret MLCLAW_BROKER_HF_TOKEN");
+    expect(output.join("\n")).toContain("deleted stale secret HF_TOKEN");
+    expect(hub.calls).toContainEqual({ name: "deleteSpaceSecret", args: ["alice/research", "HF_TOKEN"] });
   });
 
   it("does not overwrite Space volumes during doctor --fix when runtime volume metadata is omitted", async () => {

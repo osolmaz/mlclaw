@@ -20,10 +20,7 @@ describe("mlclaw bundle", () => {
       `--outfile=${tmp}`,
       "--banner:js=import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
     ]);
-    const [expected, actual] = await Promise.all([
-      fs.readFile(tmp, "utf8"),
-      fs.readFile("dist/mlclaw.mjs", "utf8"),
-    ]);
+    const [expected, actual] = await Promise.all([fs.readFile(tmp, "utf8"), fs.readFile("dist/mlclaw.mjs", "utf8")]);
     expect(actual).toBe(expected);
   });
 
@@ -58,13 +55,7 @@ describe("mlclaw bundle", () => {
 
   it("runs the shell launcher from inside the repository checkout", async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mlclaw-launcher-"));
-    const pack = await execFileAsync("npm", [
-      "pack",
-      "--json",
-      "--ignore-scripts",
-      "--pack-destination",
-      tmp,
-    ]);
+    const pack = await execFileAsync("npm", ["pack", "--json", "--ignore-scripts", "--pack-destination", tmp]);
     const packed = JSON.parse(pack.stdout) as Array<{ filename: string }>;
     const filename = packed[0]?.filename;
     if (!filename) {
@@ -83,5 +74,5 @@ describe("mlclaw bundle", () => {
     });
 
     expect(result.stdout).toContain("Deploy OpenClaw to a Hugging Face Space and private bucket");
-  });
+  }, 120_000);
 });

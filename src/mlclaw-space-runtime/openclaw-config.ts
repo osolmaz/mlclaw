@@ -93,7 +93,14 @@ function configureOpenClawModels(openclawConfig: Record<string, unknown>, config
   const models = object(openclawConfig, "models");
   const providers = object(models, "providers");
   const huggingface = object(providers, "huggingface");
-  huggingface.baseUrl = "https://router.huggingface.co/v1";
+  huggingface.baseUrl = config.brokerAgentUrl
+    ? `${config.brokerAgentUrl.replace(/\/+$/, "")}/v1`
+    : "https://router.huggingface.co/v1";
+  if (config.brokerAgentSecret) {
+    huggingface.apiKey = config.brokerAgentSecret;
+  } else {
+    delete huggingface.apiKey;
+  }
   huggingface.api = "openai-completions";
   huggingface.models = config.modelChoices.map(modelDefinitionFromChoice);
 }

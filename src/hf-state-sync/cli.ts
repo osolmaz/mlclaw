@@ -5,7 +5,7 @@ import { runRestore } from "./restore.js";
 import { prepareRestore } from "./prepare.js";
 import { runSnapshot } from "./snapshot.js";
 import { supervise } from "./supervise.js";
-import { runStageWorker } from "./stage-worker.js";
+import { runStageWorker, trustedStageArchive } from "./stage-worker.js";
 
 const USAGE = `usage:
   hf-state-sync restore
@@ -20,7 +20,8 @@ function makeHub(config: SyncConfig): BucketHub | null {
     log(`using mounted state bucket at ${config.stateMountDir}`);
     return createMountedBucketHub({ mountDir: config.stateMountDir });
   }
-  return createHfBucketHub({ bucket: config.bucket });
+  const token = process.env.MLCLAW_STATE_HF_TOKEN ?? process.env.HF_TOKEN;
+  return createHfBucketHub({ bucket: config.bucket, ...(token ? { token } : {}) });
 }
 
 async function main(argv: string[]): Promise<number> {
@@ -68,7 +69,13 @@ async function main(argv: string[]): Promise<number> {
       if (!hub) {
         return 1;
       }
-      const outcome = await runSnapshot({ config, hub, bootTime: new Date().toISOString() });
+      const stageArchive = trustedStageArchive(config, process.argv[1]);
+      const outcome = await runSnapshot({
+        config,
+        hub,
+        bootTime: new Date().toISOString(),
+        ...(stageArchive ? { stageArchive } : {}),
+      });
       if (outcome.kind === "failed") {
         logError(outcome.detail);
         return 1;

@@ -137,7 +137,7 @@ export class XetBlob extends Blob {
 			fetch: this.fetch,
 			hash: this.hash,
 			refreshUrl: this.refreshUrl,
-			// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+				// eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Clone is called only after reconstruction URL initialization.
 			reconstructionUrl: this.reconstructionUrl!,
 			size: this.size,
 		});
@@ -258,7 +258,7 @@ export class XetBlob extends Blob {
 					if (termRanges.every((range) => range.data)) {
 						log("all data available for term", term.hash, readBytesToSkip);
 						rangeLoop: for (const range of termRanges) {
-							// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+								// eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- The preceding every check proves range data is present.
 							for (let chunk of range.data!) {
 								if (readBytesToSkip) {
 									const skipped = Math.min(readBytesToSkip, chunk.byteLength);

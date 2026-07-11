@@ -32,7 +32,7 @@ const INTERVAL_BETWEEN_REMOTE_DEDUP = 4_000_000; // 4MB
  * 0.5 = show progress when uploading the xorb and when processing the file
  */
 const PROCESSING_PROGRESS_RATIO = 0.1;
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- Kept in sync with the vendored upstream progress constants.
 const UPLOADING_PROGRESS_RATIO = 1 - PROCESSING_PROGRESS_RATIO;
 
 function computeXorbHashHex(chunks: { hash: string; length: number }[]): string {
@@ -703,7 +703,7 @@ async function loadDedupInfoToCache(
 	const chunker = createChunker(TARGET_CHUNK_SIZE);
 	const cache = chunkCache;
 
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars
+		// eslint-disable-next-line @typescript-eslint/no-unused-vars -- Preserved for parity with upstream deduplication accounting.
 	let dedupedBytes = 0;
 	let chunksProcessed = 0;
 	let totalBytes = 0;

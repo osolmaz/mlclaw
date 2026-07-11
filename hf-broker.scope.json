@@ -1,0 +1,38 @@
+{
+  "rules": [
+    {
+      "id": "mlclaw-read-repositories",
+      "effect": "allow",
+      "clients": ["default"],
+      "operations": ["repo.list", "repo.metadata.read", "repo.contents.read", "git.fetch"],
+      "targets": [
+        {"kind": "repo", "type": "*", "owner": "*", "name": "*"}
+      ]
+    },
+    {
+      "id": "mlclaw-append-repositories",
+      "effect": "allow",
+      "clients": ["default"],
+      "operations": ["git.push.append"],
+      "targets": [
+        {"kind": "repo", "type": "*", "owner": "*", "name": "*"}
+      ]
+    },
+    {
+      "id": "mlclaw-request-protected-repository-writes",
+      "effect": "request",
+      "clients": ["default"],
+      "operations": ["git.push.force", "git.ref.delete", "git.tag.update"],
+      "targets": [
+        {"kind": "repo", "type": "*", "owner": "*", "name": "*"}
+      ],
+      "grant_policy": {
+        "default_minutes": 5,
+        "max_minutes": 60,
+        "request_ttl_minutes": 15,
+        "default_max_uses": 1,
+        "max_uses": 3
+      }
+    }
+  ]
+}

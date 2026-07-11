@@ -1,6 +1,13 @@
 :root {
   color-scheme: light;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
   background: #f6f7f9;
   color: #172033;
   font-synthesis: none;
@@ -31,7 +38,7 @@ a {
 
 code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: .92em;
+  font-size: 0.92em;
 }
 
 .app {
@@ -252,7 +259,7 @@ nav {
 }
 
 .primaryButton:disabled {
-  opacity: .55;
+  opacity: 0.55;
   cursor: not-allowed;
 }
 
@@ -356,6 +363,281 @@ nav {
 .selectedSummary code {
   margin-left: auto;
   overflow-wrap: anywhere;
+}
+
+.approvalBell {
+  position: fixed;
+  z-index: 40;
+  right: 22px;
+  bottom: 22px;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #172033;
+  border-radius: 50%;
+  background: #172033;
+  color: #fff;
+  font-size: 24px;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgb(15 23 42 / 24%);
+}
+
+.approvalBadge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  padding: 0 5px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.approvalToast {
+  position: fixed;
+  z-index: 39;
+  right: 22px;
+  bottom: 78px;
+  width: min(340px, calc(100vw - 32px));
+  display: grid;
+  gap: 3px;
+  padding: 13px 15px;
+  border: 1px solid #cbd5e1;
+  border-radius: 9px;
+  background: #fff;
+  color: #172033;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 12px 32px rgb(15 23 42 / 18%);
+}
+
+.approvalToast span,
+.approvalToast small {
+  overflow-wrap: anywhere;
+}
+
+.approvalToast small {
+  color: #64748b;
+}
+
+.approvalBackdrop {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(15 23 42 / 32%);
+}
+
+.approvalDrawer {
+  width: min(460px, 100vw);
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: #f8fafc;
+  box-shadow: -12px 0 36px rgb(15 23 42 / 22%);
+}
+
+.approvalHeader {
+  min-height: 82px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid #dbe2ea;
+  background: #fff;
+}
+
+.approvalHeader h2,
+.approvalHeader p {
+  margin: 0;
+}
+
+.approvalHeader p {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.iconButton {
+  width: 36px;
+  height: 36px;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: #fff;
+  color: #172033;
+  font-size: 24px;
+  cursor: pointer;
+}
+
+.approvalTabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 10px 18px;
+  border-bottom: 1px solid #dbe2ea;
+  background: #fff;
+}
+
+.approvalTabs button {
+  min-height: 36px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.approvalTabs button.active {
+  border-bottom-color: #172033;
+  color: #172033;
+  font-weight: 750;
+}
+
+.approvalList {
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 14px;
+}
+
+.approvalRow {
+  border: 1px solid #dbe2ea;
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.approvalSummary {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 5px 9px;
+  padding: 14px;
+  border: 0;
+  background: transparent;
+  color: #172033;
+  text-align: left;
+  cursor: pointer;
+}
+
+.approvalSummary > span:not(.risk),
+.approvalSummary small {
+  grid-column: 1 / -1;
+  color: #64748b;
+  overflow-wrap: anywhere;
+}
+
+.approvalSummary > strong {
+  grid-column: 1 / -1;
+}
+
+.approvalSummary .approvalBroker {
+  grid-column: 2;
+  align-self: center;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.risk {
+  align-self: start;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #334155;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.risk-high,
+.risk-critical {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.risk-medium {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.risk-low {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.approvalDetails {
+  display: grid;
+  gap: 11px;
+  padding: 0 14px 14px;
+  border-top: 1px solid #eef2f7;
+}
+
+.approvalDetails > p,
+.approvalDetails > div > p {
+  margin: 11px 0 0;
+  color: #475569;
+}
+
+.approvalDetails span,
+.approvalFact span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.approvalFact {
+  display: grid;
+  gap: 4px;
+}
+
+.approvalFact code {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.approvalActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.approvalError,
+.approvalEmpty {
+  margin: 14px 18px;
+  color: #64748b;
+}
+
+.approvalError {
+  color: #b91c1c;
+}
+
+.approvalMore {
+  justify-self: center;
+}
+
+@media (max-width: 640px) {
+  .approvalBell {
+    right: 14px;
+    bottom: 14px;
+  }
+
+  .approvalToast {
+    right: 14px;
+    bottom: 68px;
+  }
 }
 
 .routerModelList {

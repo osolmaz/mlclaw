@@ -1,0 +1,32 @@
+typescript:
+  coverage:
+    threshold: 85
+    paths:
+      - src
+    exclude:
+      - pattern: "src/vendor/**"
+        reason: "Vendored Hugging Face transport code is maintained upstream."
+      - pattern: "assets/hf-tooling/**"
+        reason: "Packaged agent tooling is validated as generated asset content, not runtime TypeScript."
+  complexity:
+    max: 8
+  dry:
+    max_findings: 0
+    paths:
+      - src
+    exclude:
+      - pattern: "src/vendor/**"
+        reason: "Vendored Hugging Face transport code is maintained upstream."
+      - pattern: "assets/hf-tooling/**"
+        reason: "Packaged agent tooling is validated as generated asset content, not runtime TypeScript."
+    copied_blocks:
+      enabled: true
+      min_tokens: 100
+  mutation:
+    targets:
+      - src/mlclaw-space-runtime/operator-brokers.ts
+      - src/mlclaw-space-runtime/app.ts
+  dependency_boundaries:
+    - from: src
+      allow:
+        - src

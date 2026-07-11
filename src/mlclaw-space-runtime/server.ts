@@ -8,7 +8,7 @@ import { integrationCredentialSlot, type SpaceRuntimeConfig } from "./config.js"
 import { McpCredentialStore } from "./mcp-credentials.js";
 import { McpIntegrationServer } from "./mcp-integrations.js";
 import { configureOpenClawGateway, managedMcpServerStatus } from "./openclaw-config.js";
-import { loadOpenAiCredentialFile, openAiConfigured } from "./openai-credentials.js";
+import { loadOpenAiCredentialFile, openAiConfigured, OpenAiCredentialStore } from "./openai-credentials.js";
 import { loginPage, templatePage, unauthorizedPage } from "./pages.js";
 import { proxyHttp, proxyWebSocket, rejectWebSocket } from "./proxy.js";
 import { normalizeNext, readSession } from "./session.js";
@@ -25,8 +25,12 @@ export class SpaceRuntimeServer {
   private readonly exitProcess: (code: number) => void;
   private readonly mcpCredentials: McpCredentialStore;
   private readonly mcpIntegrations: McpIntegrationServer;
+  private readonly openAiCredentials: OpenAiCredentialStore;
 
-  constructor(private readonly config: SpaceRuntimeConfig, options: SpaceRuntimeServerOptions = {}) {
+  constructor(
+    private readonly config: SpaceRuntimeConfig,
+    options: SpaceRuntimeServerOptions = {},
+  ) {
     this.exitProcess = options.exitProcess ?? ((code) => process.exit(code));
     this.mcpCredentials = new McpCredentialStore({
       file: config.mcpCredentialFile,
@@ -35,12 +39,15 @@ export class SpaceRuntimeServer {
       ...(config.oauthClientId ? { clientId: config.oauthClientId } : {}),
       ...(config.oauthClientSecret ? { clientSecret: config.oauthClientSecret } : {}),
     });
+    this.openAiCredentials = new OpenAiCredentialStore(config.openaiCredentialStoreFile, config.credentialKey);
     this.mcpIntegrations = new McpIntegrationServer(config, this.mcpCredentials);
     const credentialSlot = integrationCredentialSlot(config);
     this.app = createSpaceRuntimeApp(config, {
       openclawRunning: () => Boolean(this.openclaw && !this.openclaw.killed),
       openAiConfigured: async () =>
-        openAiConfigured() || Boolean(await loadOpenAiCredentialFile(this.config.openaiCredentialFile)),
+        openAiConfigured() ||
+        Boolean(await loadOpenAiCredentialFile(this.config.openaiCredentialFile)) ||
+        Boolean(await this.openAiCredentials.load()),
       restartOpenClawWithOpenAi: (apiKey) => this.restartOpenClawWithOpenAi(apiKey),
       restartOpenClaw: () => this.restartOpenClaw(),
       setModelSettings: (model, choices) => {
@@ -67,6 +74,9 @@ export class SpaceRuntimeServer {
 
     const server = http.createServer((req, res) => {
       this.handle(req, res).catch((err) => {
+        if (res.destroyed && err instanceof Error && err.name === "AbortError") {
+          return;
+        }
         process.stderr.write(`[mlclaw] request failed: ${formatError(err)}\n`);
         if (!res.headersSent) {
           res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
@@ -143,10 +153,17 @@ export class SpaceRuntimeServer {
       return;
     }
     if (this.shouldRouteToMlClaw(url.pathname)) {
-      const response = await this.app.fetch(nodeRequestToWebRequest(req, this.config.publicUrl));
-      if (!response.headers.has("x-mlclaw-fallback")) {
-        await sendWebResponse(res, response);
-        return;
+      const requestAbort = new AbortController();
+      const abortRequest = () => requestAbort.abort();
+      res.once("close", abortRequest);
+      try {
+        const response = await this.app.fetch(nodeRequestToWebRequest(req, this.config.publicUrl, requestAbort.signal));
+        if (!response.headers.has("x-mlclaw-fallback")) {
+          await sendWebResponse(res, response);
+          return;
+        }
+      } finally {
+        res.off("close", abortRequest);
       }
     }
 
@@ -159,7 +176,12 @@ export class SpaceRuntimeServer {
       this.sendHtml(res, unauthorizedPage(session.username), 403);
       return;
     }
-    if (this.isAdmin(session.username) && this.config.oauthClientId && this.config.oauthClientSecret && isBrowserNavigation(req)) {
+    if (
+      this.isAdmin(session.username) &&
+      this.config.oauthClientId &&
+      this.config.oauthClientSecret &&
+      isBrowserNavigation(req)
+    ) {
       const integrations = await managedMcpServerStatus(this.config);
       const credentialSlot = integrationCredentialSlot(this.config);
       const authorization = credentialSlot
@@ -175,7 +197,8 @@ export class SpaceRuntimeServer {
   }
 
   private shouldRouteToMlClaw(pathname: string): boolean {
-    return pathname === "/health" ||
+    return (
+      pathname === "/health" ||
       pathname === "/healthz" ||
       pathname === "/favicon.svg" ||
       pathname === "/favicon-32.png" ||
@@ -192,7 +215,8 @@ export class SpaceRuntimeServer {
       pathname === "/logout" ||
       pathname.startsWith("/oauth/") ||
       pathname === "/mlclaw" ||
-      pathname.startsWith("/mlclaw/");
+      pathname.startsWith("/mlclaw/")
+    );
   }
 
   private async startOpenClaw(extraEnv: Record<string, string> = {}): Promise<void> {
@@ -202,9 +226,12 @@ export class SpaceRuntimeServer {
     this.openclawStarting = true;
     try {
       await configureOpenClawGateway(this.config);
-      const persistedOpenAiKey = await loadOpenAiCredentialFile(this.config.openaiCredentialFile);
+      const persistedOpenAiKey =
+        (await loadOpenAiCredentialFile(this.config.openaiCredentialFile)) ??
+        process.env.OPENAI_API_KEY?.trim() ??
+        (await this.openAiCredentials.load());
       const env: NodeJS.ProcessEnv = {
-        ...process.env,
+        ...allowedOpenClawEnvironment(process.env),
         HOME: "/home/node",
         USER: "node",
         LOGNAME: "node",
@@ -213,19 +240,14 @@ export class SpaceRuntimeServer {
         ...(persistedOpenAiKey ? { OPENAI_API_KEY: persistedOpenAiKey } : {}),
         ...extraEnv,
       };
-      for (const key of WRAPPER_ONLY_ENV) {
-        delete env[key];
-      }
-      if (this.config.routerToken) {
+      if (!this.config.brokerAgentUrl && this.config.routerToken) {
         env.HF_TOKEN = this.config.routerToken;
         env.HUGGINGFACE_HUB_TOKEN = this.config.routerToken;
       }
       this.openclaw = spawn(this.config.openclawCommand, this.config.openclawArgs, {
         stdio: "inherit",
         env,
-        ...(process.getuid?.() === 0
-          ? { uid: this.config.openclawUid, gid: this.config.openclawGid }
-          : {}),
+        ...(process.getuid?.() === 0 ? { uid: this.config.openclawUid, gid: this.config.openclawGid } : {}),
       });
       this.openclaw.once("exit", (code, signal) => {
         process.stdout.write(`[mlclaw] openclaw exited code=${code ?? "null"} signal=${signal ?? "null"}\n`);
@@ -287,16 +309,35 @@ export class SpaceRuntimeServer {
   }
 }
 
-const WRAPPER_ONLY_ENV = [
-  "MLCLAW_CREDENTIAL_KEY",
-  "MLCLAW_SESSION_SECRET",
-  "SESSION_SECRET",
-  "OAUTH_CLIENT_SECRET",
-  "HF_TOKEN",
-  "HUGGINGFACE_HUB_TOKEN",
+const OPENCLAW_ENV_ALLOWLIST = [
+  "PATH",
+  "NODE_ENV",
+  "TZ",
+  "LANG",
+  "LC_ALL",
+  "OPENCLAW_AGENT_NAME",
+  "OPENCLAW_CONFIG_PATH",
+  "OPENCLAW_DISABLE_BONJOUR",
+  "OPENCLAW_LIVE_DIR",
+  "OPENCLAW_STATE_DIR",
+  "OPENCLAW_WORKSPACE_DIR",
+  "TELEGRAM_API_ROOT",
+  "TELEGRAM_ALLOWED_USERS",
+  "TELEGRAM_BOT_TOKEN",
+  "TELEGRAM_PROXY",
 ] as const;
 
-function nodeRequestToWebRequest(req: http.IncomingMessage, publicUrl: string): Request {
+function allowedOpenClawEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of OPENCLAW_ENV_ALLOWLIST) {
+    if (source[key] !== undefined) {
+      env[key] = source[key];
+    }
+  }
+  return env;
+}
+
+function nodeRequestToWebRequest(req: http.IncomingMessage, publicUrl: string, signal: AbortSignal): Request {
   const headers = new Headers();
   for (const [key, value] of Object.entries(req.headers)) {
     if (Array.isArray(value)) {
@@ -310,6 +351,7 @@ function nodeRequestToWebRequest(req: http.IncomingMessage, publicUrl: string): 
   const init: RequestInit & { duplex?: "half" } = {
     method: req.method ?? "GET",
     headers,
+    signal,
   };
   if (req.method !== "GET" && req.method !== "HEAD") {
     init.body = Readable.toWeb(req) as ReadableStream<Uint8Array>;
@@ -325,7 +367,8 @@ async function sendWebResponse(res: http.ServerResponse, response: Response): Pr
       headers[key] = value;
     }
   });
-  const setCookies = (response.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ??
+  const setCookies =
+    (response.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ??
     (response.headers.get("set-cookie") ? [response.headers.get("set-cookie") as string] : []);
   if (setCookies.length > 0) {
     headers["set-cookie"] = setCookies;
@@ -336,16 +379,36 @@ async function sendWebResponse(res: http.ServerResponse, response: Response): Pr
     return;
   }
   const reader = response.body.getReader();
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
+  try {
+    while (!res.destroyed) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (!res.write(Buffer.from(value))) {
+        await waitForDrainOrClose(res);
+      }
     }
-    if (!res.write(Buffer.from(value))) {
-      await new Promise<void>((resolve) => res.once("drain", resolve));
+  } finally {
+    if (res.destroyed) {
+      void reader.cancel().catch(() => undefined);
     }
   }
-  res.end();
+  if (!res.destroyed && !res.writableEnded) {
+    res.end();
+  }
+}
+
+async function waitForDrainOrClose(res: http.ServerResponse): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const done = () => {
+      res.off("drain", done);
+      res.off("close", done);
+      resolve();
+    };
+    res.once("drain", done);
+    res.once("close", done);
+  });
 }
 
 function isBrowserNavigation(req: http.IncomingMessage): boolean {
@@ -360,7 +423,8 @@ function isApiPath(pathname: string): boolean {
 }
 
 function isTemplateRuntimePath(pathname: string): boolean {
-  return pathname === "/health" ||
+  return (
+    pathname === "/health" ||
     pathname === "/healthz" ||
     pathname === "/favicon.svg" ||
     pathname === "/favicon-32.png" ||
@@ -370,9 +434,10 @@ function isTemplateRuntimePath(pathname: string): boolean {
     pathname === "/assets/hf-logo.svg" ||
     pathname === "/assets/mlclaw.svg" ||
     pathname === "/assets/assistant-avatar.svg" ||
-    pathname === "/assets/brand/logo";
+    pathname === "/assets/brand/logo"
+  );
 }
 
 function formatError(err: unknown): string {
-  return err instanceof Error ? err.stack ?? err.message : String(err);
+  return err instanceof Error ? (err.stack ?? err.message) : String(err);
 }

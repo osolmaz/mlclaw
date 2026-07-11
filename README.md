@@ -43,12 +43,12 @@ You need a Hugging Face account and a token available through `HF_TOKEN`,
 `HF_TOKEN_PATH`, `$HF_HOME/token`, or `hf auth login`. You never paste that
 token into someone else's app; the bootstrapper runs locally.
 
-For any Hugging Face Router model, provide a dedicated inference token through
-`MLCLAW_ROUTER_TOKEN`, `HF_ROUTER_TOKEN`, or `--router-token-file`. The token
-is stored separately from the local Hub token used to create and synchronize
-resources. Only this dedicated inference token is passed to OpenClaw; the
-broader local Hub token stays in the trusted wrapper. In Space mode, the
-inference token is stored as the `MLCLAW_ROUTER_TOKEN` Space secret.
+ML Claw places the active Hugging Face token behind an in-container HF Broker.
+The broker owns the real token; OpenClaw receives only a separate agent
+credential that can call the broker's typed, policy-checked routes. It cannot
+read the token or use the admin-only operator API. Existing dedicated inference
+tokens remain supported through `MLCLAW_ROUTER_TOKEN`, `HF_ROUTER_TOKEN`, or
+`--router-token-file` during migration.
 
 ## Default Flow
 
@@ -67,8 +67,8 @@ This creates:
   Agent access in the Space README;
 - Space variables, a bucket volume mount for state sync, and separate
   write-only secrets for session signing and OAuth credential encryption;
-- a separate `MLCLAW_ROUTER_TOKEN` Space secret when using Hugging Face Router
-  models;
+- an `MLCLAW_BROKER_HF_TOKEN` Space secret consumed only by the isolated HF
+  Broker process;
 - a local deployment manifest under `~/.config/mlclaw`.
 
 Open the Space, sign in with your Hugging Face account, and use the OpenClaw
@@ -186,9 +186,9 @@ It never reads secret values and never modifies bucket contents.
 
 `mlclaw update` also refreshes the generated Space Dockerfile and runtime
 metadata, so older Spaces can move to the current implementation without
-recreating their bucket. When updating a legacy deployment that still uses a
-broad Hub token for Router inference, ML Claw requires and installs a dedicated
-Router token before it changes or restarts the Space.
+recreating their bucket. For legacy deployments, ML Claw installs the active
+local Hugging Face credential as `MLCLAW_BROKER_HF_TOKEN`, removes stale direct
+token secrets, and restarts the Space with the broker boundary enabled.
 
 ## Browser Settings
 
@@ -203,6 +203,15 @@ Use the browser control UI for:
 - `/mlclaw/settings`: choose Router model/provider rows, update `OPENCLAW_MODEL`
   and `MLCLAW_MODEL_CHOICES`, and request a Space restart.
 - `/mlclaw/status`: inspect runtime, bucket, model, OAuth, and integration status.
+
+Administrators also get an approval bell and drawer. Requests for brokered
+operations can be inspected, approved, denied, canceled, or revoked there.
+The inbox merges every Brokerkit-compatible backend configured in
+`MLCLAW_OPERATOR_BROKERS_FILE`; every decision is authenticated,
+CSRF-protected, and sent through fixed broker-scoped API routes. Operator
+tokens remain in backend-only files and are never sent to the browser or
+OpenClaw. See [Operator Broker Configuration](docs/operator-brokers-config.md).
+
 - `/mlclaw/credentials`: connect or disconnect Hugging Face MCP and Research
   Agent access, or submit an OpenAI API key.
 - `/mlclaw/logout`: clear the ML Claw session cookie.
@@ -246,11 +255,13 @@ After signing into the Space, open:
 ```
 
 Submit an OpenAI API key there if you want OpenClaw to use OpenAI-compatible
-models. ML Claw writes a 0600 runtime file for immediate use and restarts the
-internal OpenClaw gateway with `OPENAI_API_KEY` set. The key is never returned
-to the browser. For restart-durable credentials, use the local `mlclaw` CLI to
-set Space secrets; app Spaces do not keep your broad Hugging Face token inside
-the runtime.
+models. ML Claw writes a `0600` runtime file for immediate use and an encrypted
+durable credential protected by `MLCLAW_CREDENTIAL_KEY`, then restarts the
+internal OpenClaw gateway with `OPENAI_API_KEY` set. When trusted Hub authority
+is available, it also stores the key as a write-only Space secret. The key is
+never returned to the browser, exposed to the agent except as its intended
+OpenAI credential, or stored as plaintext in the state bucket. App Spaces do
+not keep broad Hugging Face authority in the web control process.
 
 ## How State Works
 
@@ -262,9 +273,18 @@ state stays on local container disk at
 
 That keeps SQLite off bucket-backed storage while preserving the agent's memory
 across Space rebuilds, local container replacement, and gateway migration. The
-Space does not need `HF_TOKEN` or `HUGGINGFACE_HUB_TOKEN` secrets for state
-sync. Hugging Face Router inference uses the narrower `MLCLAW_ROUTER_TOKEN`
-secret instead.
+Space does not use `HF_TOKEN` or `HUGGINGFACE_HUB_TOKEN` secrets. Its broad
+credential is stored as `MLCLAW_BROKER_HF_TOKEN`, written to a broker-owned
+`0600` file during startup, and removed from child-process environments.
+OpenClaw uses only the generated broker agent credential. Broker grant and
+event state and encrypted control credentials live under the root-owned
+`/var/lib/mlclaw-protected` tree. They are included in the durable snapshot
+through a root-only `.mlclaw-protected` staging step, then restored outside the
+agent-owned live directory before OpenClaw starts. Rebuildable Git mirrors, the
+broad token, and operator credentials are never included in snapshots.
+Local gateways pass the broad credential only to the trusted state-sync
+supervisor for bucket I/O and to the trusted MCP integration proxy through a
+protected token file. Neither path passes it to OpenClaw.
 
 ## Costs
 

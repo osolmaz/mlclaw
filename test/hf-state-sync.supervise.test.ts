@@ -4,7 +4,7 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { SyncConfig } from "../src/hf-state-sync/paths.js";
-import { supervise } from "../src/hf-state-sync/supervise.js";
+import { supervise, supervisedChildEnvironment } from "../src/hf-state-sync/supervise.js";
 import { createFakeHub } from "./fake-hub.js";
 
 let dir: string;
@@ -18,6 +18,12 @@ afterEach(async () => {
 });
 
 describe("supervise", () => {
+  it("keeps the state credential out of the supervised control process", () => {
+    expect(supervisedChildEnvironment({ MLCLAW_STATE_HF_TOKEN: "hf_state", MLCLAW_SESSION_SECRET: "session" })).toEqual(
+      { MLCLAW_SESSION_SECRET: "session" },
+    );
+  });
+
   it("propagates the child exit code and takes a final snapshot", async () => {
     const liveDir = path.join(dir, "live");
     const stateDir = path.join(liveDir, ".openclaw");
@@ -77,14 +83,19 @@ describe("supervise", () => {
     });
 
     await delay(50);
-    hub.objects.set("openclaw-state/runtime/handoff-request.json", Buffer.from(JSON.stringify({
-      schemaVersion: 1,
-      requestId: "request-1",
-      agent: "test-agent",
-      runtimeId: "space-test-agent",
-      requestedAt: new Date().toISOString(),
-      targetRuntimeId: "local-test-agent",
-    }) + "\n"));
+    hub.objects.set(
+      "openclaw-state/runtime/handoff-request.json",
+      Buffer.from(
+        JSON.stringify({
+          schemaVersion: 1,
+          requestId: "request-1",
+          agent: "test-agent",
+          runtimeId: "space-test-agent",
+          requestedAt: new Date().toISOString(),
+          targetRuntimeId: "local-test-agent",
+        }) + "\n",
+      ),
+    );
 
     await expect(running).resolves.toBe(0);
     expect(hub.objects.has("openclaw-state/manifest.json")).toBe(true);
@@ -136,14 +147,19 @@ describe("supervise", () => {
     });
 
     await delay(50);
-    hub.objects.set("openclaw-state/runtime/handoff-request.json", Buffer.from(JSON.stringify({
-      schemaVersion: 1,
-      requestId: "request-1",
-      agent: "test-agent",
-      runtimeId: "space-test-agent",
-      requestedAt: new Date().toISOString(),
-      targetRuntimeId: "local-test-agent",
-    }) + "\n"));
+    hub.objects.set(
+      "openclaw-state/runtime/handoff-request.json",
+      Buffer.from(
+        JSON.stringify({
+          schemaVersion: 1,
+          requestId: "request-1",
+          agent: "test-agent",
+          runtimeId: "space-test-agent",
+          requestedAt: new Date().toISOString(),
+          targetRuntimeId: "local-test-agent",
+        }) + "\n",
+      ),
+    );
 
     await expect(running).rejects.toThrow("final snapshot did not upload");
     expect(hub.objects.has("openclaw-state/runtime/handoff-ack.json")).toBe(false);
@@ -170,14 +186,19 @@ describe("supervise", () => {
       runtimeImage: "example/runtime:test",
     };
     const hub = createFakeHub();
-    hub.objects.set("openclaw-state/runtime/handoff-request.json", Buffer.from(JSON.stringify({
-      schemaVersion: 1,
-      requestId: "stale-request",
-      agent: "test-agent",
-      runtimeId: "space-test-agent",
-      requestedAt: "2000-01-01T00:00:00.000Z",
-      targetRuntimeId: "local-test-agent",
-    }) + "\n"));
+    hub.objects.set(
+      "openclaw-state/runtime/handoff-request.json",
+      Buffer.from(
+        JSON.stringify({
+          schemaVersion: 1,
+          requestId: "stale-request",
+          agent: "test-agent",
+          runtimeId: "space-test-agent",
+          requestedAt: "2000-01-01T00:00:00.000Z",
+          targetRuntimeId: "local-test-agent",
+        }) + "\n",
+      ),
+    );
 
     const exitCode = await supervise({
       config,
@@ -210,14 +231,19 @@ describe("supervise", () => {
       runtimeImage: "example/runtime:test",
     };
     const hub = createFakeHub();
-    hub.objects.set("openclaw-state/runtime/handoff-request.json", Buffer.from(JSON.stringify({
-      schemaVersion: 1,
-      requestId: "request-at-shutdown",
-      agent: "test-agent",
-      runtimeId: "space-test-agent",
-      requestedAt: new Date().toISOString(),
-      targetRuntimeId: "local-test-agent",
-    }) + "\n"));
+    hub.objects.set(
+      "openclaw-state/runtime/handoff-request.json",
+      Buffer.from(
+        JSON.stringify({
+          schemaVersion: 1,
+          requestId: "request-at-shutdown",
+          agent: "test-agent",
+          runtimeId: "space-test-agent",
+          requestedAt: new Date().toISOString(),
+          targetRuntimeId: "local-test-agent",
+        }) + "\n",
+      ),
+    );
 
     const exitCode = await supervise({
       config,
