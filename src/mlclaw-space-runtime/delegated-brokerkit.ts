@@ -104,9 +104,6 @@ export class DelegatedBrokerKit {
       this.registry.entries().map(async ([summary, client]) => this.sourceSnapshot(summary, client, synchronizedAt)),
     );
     const selected = selectSnapshotRequests(results, MAX_HANDLES);
-    this.retainHandles(
-      new Set(selected.map(({ source, request }) => requestIdentity(source.id, request.id, request.revision))),
-    );
     return {
       sources: results.map((result) => result.source),
       requests: selected.map(({ source, request }) => project(source, request, this.handle(source.id, request))),
@@ -238,14 +235,6 @@ export class DelegatedBrokerKit {
   private pruneOldestHandle(): void {
     const oldest = this.handles.entries().next();
     if (!oldest.done) this.removeHandle(oldest.value[0], oldest.value[1]);
-  }
-
-  private retainHandles(identities: Set<string>): void {
-    for (const [handle, record] of this.handles) {
-      if (!identities.has(requestIdentity(record.sourceId, record.requestId, record.revision))) {
-        this.removeHandle(handle, record);
-      }
-    }
   }
 
   private removeHandle(handle: string, record: HandleRecord): void {

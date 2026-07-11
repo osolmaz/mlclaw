@@ -78,6 +78,33 @@ describe("DelegatedBrokerKit", () => {
     expect(JSON.stringify(snapshot)).not.toContain("secret internal detail");
   });
 
+  it("keeps issued handles through another session's transiently empty snapshot", async () => {
+    let visible = true;
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/.well-known/brokerkit-operator") {
+        return Response.json({ api_version: "brokerkit.io/operator/v1" });
+      }
+      if (url.pathname.endsWith("/request-1")) return Response.json(request("request-1"));
+      if (url.searchParams.get("status") === "active") return Response.json({ requests: [] });
+      return Response.json({ requests: visible ? [request("request-1")] : [] });
+    });
+    const delegated = new DelegatedBrokerKit(
+      new OperatorBrokerRegistry(
+        [{ id: "hf-broker", label: "Hugging Face", baseUrl: "https://hf.example", token: "h".repeat(32) }],
+        fetchImpl,
+      ),
+      "s".repeat(48),
+      () => new Date("2026-07-12T00:00:00Z"),
+    );
+
+    const issued = (await delegated.snapshot()).requests[0];
+    if (!issued) throw new Error("missing request");
+    visible = false;
+    expect((await delegated.snapshot()).requests).toEqual([]);
+    await expect(delegated.detail(issued.handle)).resolves.toMatchObject({ id: "request-1", revision: 1 });
+  });
+
   it("refetches broker truth and sends an actor-bound idempotent decision", async () => {
     let decisionBody: Record<string, unknown> | undefined;
     let approved = false;
