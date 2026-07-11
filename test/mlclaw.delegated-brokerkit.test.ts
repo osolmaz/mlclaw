@@ -52,7 +52,10 @@ describe("DelegatedBrokerKit", () => {
     const fetchImpl = vi.fn<typeof fetch>(async (input) => {
       const url = new URL(String(input));
       if (url.hostname === "gh.example") {
-        return Response.json({ error: { code: "unavailable", message: "secret internal detail" } }, { status: 503 });
+        return Response.json(
+          { error: { code: "tenant_alice_database_down", message: "secret internal detail" } },
+          { status: 503 },
+        );
       }
       if (url.pathname === "/.well-known/brokerkit-operator") {
         return Response.json({ api_version: "brokerkit.io/operator/v1" });
@@ -68,7 +71,7 @@ describe("DelegatedBrokerKit", () => {
     const snapshot = await delegated.snapshot();
     expect(snapshot.sources).toEqual([
       expect.objectContaining({ id: "hf-broker", healthy: true }),
-      expect.objectContaining({ id: "gh-broker", healthy: false, error: "unavailable" }),
+      expect.objectContaining({ id: "gh-broker", healthy: false, error: "source_unavailable" }),
     ]);
     expect(snapshot.requests).toHaveLength(1);
     expect(snapshot.requests[0]?.handle).toMatch(/^[A-Za-z0-9_-]{24}$/u);

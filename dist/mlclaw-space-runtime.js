@@ -7648,8 +7648,8 @@ function safeEqual(left, right) {
   return a.length === b.length && timingSafeEqual2(a, b);
 }
 function safeSourceError(error) {
-  if (error instanceof BrokerOperatorError) return error.code ?? "source_unavailable";
-  if (error instanceof DelegatedBrokerKitError) return error.code;
+  const code = error instanceof BrokerOperatorError ? error.code : error instanceof DelegatedBrokerKitError ? error.code : void 0;
+  if (code === "broker_timeout" || code === "unavailable" || code === "source_unavailable") return code;
   return "source_unavailable";
 }
 

@@ -418,7 +418,12 @@ function safeEqual(left: string, right: string): boolean {
 }
 
 function safeSourceError(error: unknown): string {
-  if (error instanceof BrokerOperatorError) return error.code ?? "source_unavailable";
-  if (error instanceof DelegatedBrokerKitError) return error.code;
+  const code =
+    error instanceof BrokerOperatorError
+      ? error.code
+      : error instanceof DelegatedBrokerKitError
+        ? error.code
+        : undefined;
+  if (code === "broker_timeout" || code === "unavailable" || code === "source_unavailable") return code;
   return "source_unavailable";
 }
