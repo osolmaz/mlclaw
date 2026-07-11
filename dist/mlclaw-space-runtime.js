@@ -9105,11 +9105,11 @@ var CONTROL_BRANDING_SCRIPT = `(function () {
   }
   async function brokerKitSession(event) {
     var message = event.data;
-    if (event.origin !== "null" || !message || message.type !== "mlclaw.brokerkit.session.request" || message.version !== 1 ||
+    if (event.origin !== "null" || !message || message.type !== "brokerkit.delegated-web.session.request" || message.version !== 1 ||
         typeof message.nonce !== "string" || !/^[a-f0-9]{32}$/.test(message.nonce) || !brokerKitFrame(event.source)) {
       return;
     }
-    var response = { type: "mlclaw.brokerkit.session.response", version: 1, nonce: message.nonce };
+    var response = { type: "brokerkit.delegated-web.session.response", version: 1, nonce: message.nonce };
     try {
       var current = await fetch("/mlclaw/api/session", { credentials: "same-origin", cache: "no-store" });
       var identity = await current.json();

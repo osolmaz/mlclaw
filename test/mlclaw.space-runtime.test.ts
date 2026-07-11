@@ -1171,7 +1171,7 @@ describe("ML Claw Space runtime", () => {
     expect(branding.headers.get("cache-control")).toContain("no-store");
     const brandingScript = await branding.text();
     expect(brandingScript).toContain('var productName = "ML Claw"');
-    expect(brandingScript).toContain("mlclaw.brokerkit.session.request");
+    expect(brandingScript).toContain("brokerkit.delegated-web.session.request");
     expect(brandingScript).toContain('new URL(frames[i].src, location.href).pathname === "/plugins/brokerkit/ui/"');
     expect(brandingScript).toContain('"x-mlclaw-csrf": identity.csrfToken');
 
