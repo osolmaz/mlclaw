@@ -14972,7 +14972,7 @@ function bundledDockerfile() {
   return `ARG HF_BROKER_VERSION=bb65192b4dca845289427e63e1d5fa72f64914d8
 
 FROM golang:1.26.5-bookworm AS hf-broker-build
-ARG HF_BROKER_VERSION
+ARG HF_BROKER_VERSION=bb65192b4dca845289427e63e1d5fa72f64914d8
 RUN git init /src \\
   && git -C /src fetch --depth=1 https://github.com/osolmaz/hf-broker.git "$HF_BROKER_VERSION" \\
   && git -C /src checkout --detach FETCH_HEAD \\

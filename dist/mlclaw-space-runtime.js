@@ -9421,7 +9421,8 @@ function selectedOperatorBroker(c, registry) {
   return registry.get(id) ?? c.json({ ok: false, error: "operator broker is not configured" }, 404);
 }
 function brokerFailure(c, err, broker) {
-  process.stderr.write(`[mlclaw] ${broker.id} operator request failed: ${formatError(err)}
+  const upstream = err instanceof BrokerOperatorError ? ` status=${err.status}${err.code ? ` code=${err.code}` : ""}` : "";
+  process.stderr.write(`[mlclaw] ${broker.id} operator request failed${upstream}: ${formatError(err)}
 `);
   if (err instanceof BrokerOperatorError && err.status >= 400 && err.status < 500) {
     return c.json({ ok: false, error: err.message, ...err.code ? { code: err.code } : {} }, err.status);

@@ -57,7 +57,7 @@ prepare_hf_broker() {
 }
 
 restore_protected_state() {
-  install -d -m 0700 -o root -g root "$PROTECTED_STATE_DIR"
+  install -d -m 0710 -o root -g hf-broker "$PROTECTED_STATE_DIR"
   if [ -d "$RESTORED_PROTECTED_STATE_DIR" ]; then
     find "$PROTECTED_STATE_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
     cp -a "$RESTORED_PROTECTED_STATE_DIR/." "$PROTECTED_STATE_DIR/"
@@ -67,7 +67,8 @@ restore_protected_state() {
   install -d -m 0700 -o hf-broker -g hf-broker "$HF_BROKER_STATE_DIR"
   chown -R root:root "$PROTECTED_STATE_DIR/control"
   chown -R hf-broker:hf-broker "$HF_BROKER_STATE_DIR"
-  chmod 0700 "$PROTECTED_STATE_DIR" "$PROTECTED_STATE_DIR/control" "$HF_BROKER_STATE_DIR"
+  chmod 0710 "$PROTECTED_STATE_DIR"
+  chmod 0700 "$PROTECTED_STATE_DIR/control" "$HF_BROKER_STATE_DIR"
 }
 
 start_hf_broker() {
@@ -76,6 +77,12 @@ start_hf_broker() {
   fi
 
   install -d -m 0700 -o hf-broker -g hf-broker "$HF_BROKER_STATE_DIR"
+  install -d -m 0700 -o hf-broker -g hf-broker "$HF_BROKER_STATE_DIR/grants"
+  if [ ! -e "$HF_BROKER_STATE_DIR/grants/grants.json" ]; then
+    printf '{"grants":[]}\n' > "$HF_BROKER_STATE_DIR/grants/grants.json"
+    chown hf-broker:hf-broker "$HF_BROKER_STATE_DIR/grants/grants.json"
+    chmod 0600 "$HF_BROKER_STATE_DIR/grants/grants.json"
+  fi
   chown -R hf-broker:hf-broker "$HF_BROKER_STATE_DIR"
   chmod 0700 "$HF_BROKER_STATE_DIR"
 
@@ -161,7 +168,8 @@ fi
 
 mkdir -p "$LIVE_DIR" "$WORKSPACE_DIR" "$STATE_DIR"
 chown_openclaw_live
-install -d -m 0700 -o root -g root "$PROTECTED_STATE_DIR" "$PROTECTED_STATE_DIR/control"
+install -d -m 0710 -o root -g hf-broker "$PROTECTED_STATE_DIR"
+install -d -m 0700 -o root -g root "$PROTECTED_STATE_DIR/control"
 start_hf_broker
 
 if [ -n "${OPENCLAW_AGENT_NAME:-}" ]; then

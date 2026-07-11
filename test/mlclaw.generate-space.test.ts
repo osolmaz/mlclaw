@@ -107,6 +107,7 @@ describe("generated Space repository", () => {
     expect(dockerfile).toContain(`FROM ${OPENCLAW_BASE_IMAGE}`);
     expect(dockerfile).toContain('git -C /src fetch --depth=1 https://github.com/osolmaz/hf-broker.git "$HF_BROKER_VERSION"');
     expect(dockerfile).toContain('test "$(git -C /src rev-parse HEAD)" = "$HF_BROKER_VERSION"');
+    expect(dockerfile.match(/ARG HF_BROKER_VERSION=bb65192b4dca845289427e63e1d5fa72f64914d8/g)).toHaveLength(2);
     expect(dockerfile).toContain("COPY runtime/hf-broker.scope.json /app/hf-broker.scope.json");
     expect(dockerfile).toContain("COPY --chown=node:node runtime/hf-state-sync.js /app/hf-state-sync.js");
     expect(dockerfile).toContain("COPY --chown=node:node runtime/hf-tooling-seed.js /app/hf-tooling-seed.js");
