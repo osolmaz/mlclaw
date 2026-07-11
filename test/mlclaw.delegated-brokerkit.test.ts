@@ -56,6 +56,7 @@ describe("DelegatedBrokerKit", () => {
       if (url.pathname === "/.well-known/brokerkit-operator") {
         return Response.json({ api_version: "brokerkit.io/operator/v1" });
       }
+      if (url.searchParams.get("status") === "active") return Response.json({ requests: [] });
       return Response.json({ requests: [request("shared-id")] });
     });
     const delegated = new DelegatedBrokerKit(
@@ -75,6 +76,7 @@ describe("DelegatedBrokerKit", () => {
 
   it("refetches broker truth and sends an actor-bound idempotent decision", async () => {
     let decisionBody: Record<string, unknown> | undefined;
+    let approved = false;
     const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
       const url = new URL(String(input));
       if (url.pathname === "/.well-known/brokerkit-operator") {
@@ -82,10 +84,17 @@ describe("DelegatedBrokerKit", () => {
       }
       if (url.pathname.endsWith("/approve")) {
         decisionBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        approved = true;
         return Response.json(request("request-1", 2, "active"));
       }
-      if (url.pathname.endsWith("/request-1")) return Response.json(request("request-1"));
-      return Response.json({ requests: [request("request-1")] });
+      if (url.pathname.endsWith("/revoke")) return Response.json(request("request-1", 3, "revoked"));
+      if (url.pathname.endsWith("/request-1")) {
+        return Response.json(approved ? request("request-1", 2, "active") : request("request-1"));
+      }
+      if (url.searchParams.get("status") === "active") {
+        return Response.json({ requests: approved ? [request("request-1", 2, "active")] : [] });
+      }
+      return Response.json({ requests: approved ? [] : [request("request-1")] });
     });
     const delegated = new DelegatedBrokerKit(
       new OperatorBrokerRegistry(
@@ -102,11 +111,16 @@ describe("DelegatedBrokerKit", () => {
       maxUses: 1,
     });
     expect(updated.status).toBe("active");
+    expect(updated.handle).not.toBe(pending.handle);
     expect(decisionBody).toMatchObject({
       expected_revision: 1,
       on_behalf_of: "mlclaw:alice",
       constraints: { duration_seconds: 300, max_uses: 1 },
     });
     expect(decisionBody?.idempotency_key).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect((await delegated.snapshot()).requests).toEqual([expect.objectContaining({ status: "active" })]);
+    await expect(delegated.decide(updated.handle, "revoke", 2, "alice")).resolves.toMatchObject({
+      status: "revoked",
+    });
   });
 });

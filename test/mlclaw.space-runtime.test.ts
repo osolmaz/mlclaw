@@ -182,6 +182,8 @@ describe("ML Claw Space runtime", () => {
         res.end(JSON.stringify(brokerApproval("request-1", "active", 2)));
       } else if (req.url?.includes("/request-1")) {
         res.end(JSON.stringify(brokerApproval("request-1", "pending", 1)));
+      } else if (req.url?.includes("status=active")) {
+        res.end(JSON.stringify({ requests: [] }));
       } else {
         res.end(JSON.stringify({ requests: [brokerApproval("request-1", "pending", 1)] }));
       }
@@ -252,6 +254,7 @@ describe("ML Claw Space runtime", () => {
     expect(brokerRequests.map((request) => request.url)).toEqual([
       "/.well-known/brokerkit-operator",
       "/api/operator/v1/requests?status=pending&limit=100",
+      "/api/operator/v1/requests?status=active&limit=100",
       "/api/operator/v1/requests/request-1",
       "/api/operator/v1/requests/request-1/approve",
     ]);

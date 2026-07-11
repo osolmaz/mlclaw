@@ -186,7 +186,9 @@ export class BrokerOperatorClient {
     );
   }
 
-  list(params: { status?: "pending" | "history"; cursor?: string; limit?: number } = {}): Promise<BrokerApprovalPage> {
+  list(
+    params: { status?: "pending" | "active" | "history" | "all"; cursor?: string; limit?: number } = {},
+  ): Promise<BrokerApprovalPage> {
     const query = new URLSearchParams();
     if (params.status) {
       query.set("status", params.status);

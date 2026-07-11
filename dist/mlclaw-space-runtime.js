@@ -7438,35 +7438,43 @@ var DelegatedBrokerKit = class {
       action,
       decisionOptions(record, action, expectedRevision, actor, options)
     );
-    if (updated.status !== "pending" && updated.status !== "active") this.removeHandle(handle, record);
+    if (updated.status === "pending" || updated.status === "active") {
+      this.removeHandle(handle, record);
+      return project(source.summary(), updated, this.handle(record.sourceId, updated));
+    }
+    this.removeHandle(handle, record);
     return project(source.summary(), updated, handle);
   }
   async sourceSnapshot(summary, client, synchronizedAt) {
     try {
       await client.discover();
-      const requests = [];
-      let cursor;
-      for (let pageNumber = 0; pageNumber < MAX_PAGES_PER_SOURCE; pageNumber += 1) {
-        const page2 = await client.list({ status: "pending", ...cursor ? { cursor } : {}, limit: 100 });
-        for (const request of page2.requests) {
-          const handle = this.handle(summary.id, request);
-          requests.push(project(summary, request, handle));
-        }
-        cursor = page2.next_cursor;
-        if (!cursor) {
-          return {
-            source: { ...summary, healthy: true, lastSyncAt: synchronizedAt },
-            requests
-          };
-        }
-      }
-      throw delegatedError("source_protocol_error");
+      const requests = (await Promise.all([
+        this.sourceRequests(summary, client, "pending"),
+        this.sourceRequests(summary, client, "active")
+      ])).flat();
+      return {
+        source: { ...summary, healthy: true, lastSyncAt: synchronizedAt },
+        requests
+      };
     } catch (error) {
       return {
         source: { ...summary, healthy: false, error: safeSourceError(error) },
         requests: []
       };
     }
+  }
+  async sourceRequests(summary, client, status) {
+    const requests = [];
+    let cursor;
+    for (let pageNumber = 0; pageNumber < MAX_PAGES_PER_SOURCE; pageNumber += 1) {
+      const page2 = await client.list({ status, ...cursor ? { cursor } : {}, limit: 100 });
+      for (const request of page2.requests) {
+        requests.push(project(summary, request, this.handle(summary.id, request)));
+      }
+      cursor = page2.next_cursor;
+      if (!cursor) return requests;
+    }
+    throw delegatedError("source_protocol_error");
   }
   handle(sourceId, request) {
     const identity = `${sourceId}\0${request.id}\0${request.revision}`;
