@@ -82,17 +82,17 @@ const displayFieldSchema = z
 const approvalSchema = z
   .object({
     id: z.string().min(1).max(128),
-    revision: z.number().int().positive(),
+    revision: z.number().int().positive().safe(),
     requester: z.string().min(1).max(80),
     operation: z.string().min(1).max(500),
     status: z.enum(["pending", "active", "denied", "canceled", "expired", "consumed", "revoked"]),
     requested_at: z.string().datetime({ offset: true }),
     pending_expires_at: z.string().datetime({ offset: true }).optional(),
     active_expires_at: z.string().datetime({ offset: true }).optional(),
-    requested_duration_seconds: z.number().int().positive(),
-    requested_max_uses: z.number().int().positive(),
-    granted_max_uses: z.number().int().positive().nullable(),
-    used_count: z.number().int().nonnegative(),
+    requested_duration_seconds: z.number().int().positive().safe(),
+    requested_max_uses: z.number().int().positive().safe(),
+    granted_max_uses: z.number().int().positive().safe().nullable(),
+    used_count: z.number().int().nonnegative().safe(),
     request_reason: z.string().max(2_000).optional(),
     decided_at: z.string().datetime({ offset: true }).optional(),
     decided_by: z.string().max(200).optional(),
@@ -110,8 +110,8 @@ const approvalSchema = z
     allowed_actions: z.array(z.enum(["approve", "deny", "cancel", "revoke"])).max(4),
     approval_bounds: z
       .object({
-        max_duration_seconds: z.number().int().positive(),
-        max_uses: z.number().int().positive(),
+        max_duration_seconds: z.number().int().positive().safe(),
+        max_uses: z.number().int().positive().safe(),
       })
       .strict()
       .optional(),
@@ -451,11 +451,7 @@ function readBoundedFile(file: string, maximum: number, label: string): string {
 }
 
 function approvalId(id: string): string {
-  const normalized = id.trim();
-  if (!normalized || normalized.length > 200 || normalized.includes("/") || normalized.includes("\\")) {
-    throw new Error("invalid approval request id");
-  }
-  return encodeURIComponent(normalized);
+  return encodeURIComponent(id);
 }
 
 async function boundedJson(response: Response): Promise<unknown> {

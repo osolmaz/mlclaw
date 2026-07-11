@@ -99,14 +99,20 @@ describe("Brokerkit operator backends", () => {
     ]);
   });
 
-  it("rejects path-like request identifiers before sending", async () => {
+  it("preserves opaque request identifiers while encoding the path segment", async () => {
+    let requestedUrl = "";
     const client = new BrokerOperatorClient({
       id: "sudo-broker",
       label: "Unix access",
-      baseUrl: "http://127.0.0.1:1",
+      baseUrl: "http://broker.example",
       token: "operator-secret",
+      fetch: async (input) => {
+        requestedUrl = String(input);
+        return Response.json(approval(" request/one ", "pending", 1));
+      },
     });
-    expect(() => client.get("../healthz")).toThrow("invalid approval request id");
+    await expect(client.get(" request/one ")).resolves.toMatchObject({ id: " request/one " });
+    expect(requestedUrl).toBe("http://broker.example/api/operator/v1/requests/%20request%2Fone%20");
   });
 
   it("forwards durable event cursors and maps only bounded safe errors", async () => {
@@ -217,6 +223,14 @@ describe("Brokerkit operator backends", () => {
       },
     });
     await expect(malformedFact.list()).rejects.toThrow("broker request list response is invalid");
+    const unsafeRevision = new BrokerOperatorClient({
+      id: "gh-broker",
+      label: "GitHub",
+      baseUrl: "http://broker.example",
+      token: "operator-secret",
+      fetch: async () => Response.json({ requests: [approval("request-1", "pending", 2 ** 53)] }),
+    });
+    await expect(unsafeRevision.list()).rejects.toThrow("broker request list response is invalid");
   });
 
   it("times out stalled non-streaming broker requests", async () => {

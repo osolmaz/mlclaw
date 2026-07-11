@@ -4689,17 +4689,17 @@ var displayFieldSchema = external_exports.object({
 }).strict();
 var approvalSchema = external_exports.object({
   id: external_exports.string().min(1).max(128),
-  revision: external_exports.number().int().positive(),
+  revision: external_exports.number().int().positive().safe(),
   requester: external_exports.string().min(1).max(80),
   operation: external_exports.string().min(1).max(500),
   status: external_exports.enum(["pending", "active", "denied", "canceled", "expired", "consumed", "revoked"]),
   requested_at: external_exports.string().datetime({ offset: true }),
   pending_expires_at: external_exports.string().datetime({ offset: true }).optional(),
   active_expires_at: external_exports.string().datetime({ offset: true }).optional(),
-  requested_duration_seconds: external_exports.number().int().positive(),
-  requested_max_uses: external_exports.number().int().positive(),
-  granted_max_uses: external_exports.number().int().positive().nullable(),
-  used_count: external_exports.number().int().nonnegative(),
+  requested_duration_seconds: external_exports.number().int().positive().safe(),
+  requested_max_uses: external_exports.number().int().positive().safe(),
+  granted_max_uses: external_exports.number().int().positive().safe().nullable(),
+  used_count: external_exports.number().int().nonnegative().safe(),
   request_reason: external_exports.string().max(2e3).optional(),
   decided_at: external_exports.string().datetime({ offset: true }).optional(),
   decided_by: external_exports.string().max(200).optional(),
@@ -4714,8 +4714,8 @@ var approvalSchema = external_exports.object({
   presentation_unavailable: external_exports.boolean().optional(),
   allowed_actions: external_exports.array(external_exports.enum(["approve", "deny", "cancel", "revoke"])).max(4),
   approval_bounds: external_exports.object({
-    max_duration_seconds: external_exports.number().int().positive(),
-    max_uses: external_exports.number().int().positive()
+    max_duration_seconds: external_exports.number().int().positive().safe(),
+    max_uses: external_exports.number().int().positive().safe()
   }).strict().optional()
 }).strict();
 var approvalPageSchema = external_exports.object({
@@ -5006,11 +5006,7 @@ function readBoundedFile(file, maximum, label) {
   return value;
 }
 function approvalId(id) {
-  const normalized = id.trim();
-  if (!normalized || normalized.length > 200 || normalized.includes("/") || normalized.includes("\\")) {
-    throw new Error("invalid approval request id");
-  }
-  return encodeURIComponent(normalized);
+  return encodeURIComponent(id);
 }
 async function boundedJson(response) {
   if (!response.body) {
