@@ -613,7 +613,9 @@ function selectedOperatorBroker(c: Context, registry: OperatorBrokerRegistry): B
 }
 
 function brokerFailure(c: Context, err: unknown, broker: OperatorBrokerSummary): Response {
-  process.stderr.write(`[mlclaw] ${broker.id} operator request failed: ${formatError(err)}\n`);
+  const upstream =
+    err instanceof BrokerOperatorError ? ` status=${err.status}${err.code ? ` code=${err.code}` : ""}` : "";
+  process.stderr.write(`[mlclaw] ${broker.id} operator request failed${upstream}: ${formatError(err)}\n`);
   if (err instanceof BrokerOperatorError && err.status >= 400 && err.status < 500) {
     return c.json({ ok: false, error: err.message, ...(err.code ? { code: err.code } : {}) }, err.status as 400);
   }
