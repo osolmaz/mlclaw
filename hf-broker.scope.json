@@ -19,6 +19,24 @@
       ]
     },
     {
+      "id": "mlclaw-list-router-models",
+      "effect": "allow",
+      "clients": ["default"],
+      "operations": ["inference.models.list"],
+      "targets": [
+        {"kind": "inference", "owner": "router", "name": "models"}
+      ]
+    },
+    {
+      "id": "mlclaw-use-router-models",
+      "effect": "allow",
+      "clients": ["default"],
+      "operations": ["inference.chat.complete"],
+      "targets": [
+        {"kind": "inference", "owner": "*", "name": "*"}
+      ]
+    },
+    {
       "id": "mlclaw-request-repository-creation",
       "effect": "request",
       "clients": ["default"],

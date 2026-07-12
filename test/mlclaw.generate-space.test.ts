@@ -118,6 +118,11 @@ describe("generated Space repository", () => {
       "ENV MLCLAW_BROKERKIT_PLUGIN_PATH=/opt/openclaw-plugins/node_modules/openclaw-brokerkit",
     );
     expect(dockerfile).toContain("COPY runtime/hf-broker.scope.json /app/hf-broker.scope.json");
+    const brokerScope = JSON.parse(await fs.readFile(path.join(outDir, "runtime/hf-broker.scope.json"), "utf8")) as {
+      rules: Array<{ operations: string[] }>;
+    };
+    expect(brokerScope.rules.some((rule) => rule.operations.includes("inference.models.list"))).toBe(true);
+    expect(brokerScope.rules.some((rule) => rule.operations.includes("inference.chat.complete"))).toBe(true);
     expect(dockerfile).toContain("COPY --chown=node:node runtime/hf-state-sync.js /app/hf-state-sync.js");
     expect(dockerfile).toContain("COPY --chown=node:node runtime/hf-tooling-seed.js /app/hf-tooling-seed.js");
     expect(dockerfile).toContain('"hf-discover==1.3.7"');
