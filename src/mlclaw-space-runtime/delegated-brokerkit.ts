@@ -7,6 +7,7 @@ import {
   type BrokerOperatorClient,
   type OperatorBrokerSummary,
 } from "./operator-brokers.js";
+import { DelegatedRevisions, type DelegatedSnapshotEvent } from "./delegated-revisions.js";
 
 const API_VERSION = "brokerkit.io/delegated-web/v1" as const;
 const TOKEN_LIFETIME_SECONDS = 4 * 60;
@@ -19,20 +20,23 @@ export type DelegatedAccess = "read" | "decide";
 
 export type DelegatedSourceHealth = OperatorBrokerSummary & {
   healthy: boolean;
-  lastSyncAt?: string;
+  last_sync_at?: string;
   error?: string;
 };
 
-export type DelegatedRequest = BrokerApproval & {
-  sourceId: string;
-  sourceLabel: string;
+export type DelegatedRequest = {
+  source_id: string;
+  source_label: string;
   handle: string;
+  request: BrokerApproval;
 };
 
 export type DelegatedSnapshot = {
+  api_version: "brokerkit.io/operator-ui/v1";
+  cursor: string;
   sources: DelegatedSourceHealth[];
   requests: DelegatedRequest[];
-  synchronizedAt: string;
+  synchronized_at: string;
 };
 
 type HandleRecord = {
@@ -63,6 +67,7 @@ export class DelegatedBrokerKit {
   private readonly handles = new Map<string, HandleRecord>();
   private readonly handlesByIdentity = new Map<string, string>();
   private snapshotInFlight: Promise<DelegatedSnapshot> | undefined;
+  private readonly revisions = new DelegatedRevisions<DelegatedSnapshot>();
 
   constructor(
     private readonly registry: OperatorBrokerRegistry,
@@ -137,12 +142,61 @@ export class DelegatedBrokerKit {
     );
     const selected = selectSnapshotRequests(results, MAX_HANDLES);
     const reservedHandles = this.selectedExistingHandles(selected);
+    const sources = results.map((result) => result.source);
+    const requests = selected.map(({ source, request }) =>
+      project(source, request, this.handle(source.id, request, reservedHandles)),
+    );
+    const material = JSON.stringify({
+      sources: sources.map((source) => ({
+        id: source.id,
+        label: source.label,
+        healthy: source.healthy,
+        ...(source.error ? { error: source.error } : {}),
+      })),
+      requests,
+    });
+    return this.revisions.publish(material, (cursor) => ({
+      api_version: "brokerkit.io/operator-ui/v1",
+      cursor,
+      sources,
+      requests,
+      synchronized_at: synchronizedAt,
+    }));
+  }
+
+  async events(cursor: string, waitSeconds: number, signal?: AbortSignal): Promise<DelegatedSnapshotEvent> {
+    await this.snapshot();
+    const waiting = this.revisions.wait(cursor, waitSeconds, signal);
+    const refresh = setInterval(() => void this.snapshot().catch(() => undefined), 1_000);
+    refresh.unref();
+    try {
+      return await waiting;
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        "code" in error &&
+        (error.code === "cursor_expired" || error.code === "source_unavailable")
+      ) {
+        throw delegatedError(error.code);
+      }
+      throw error;
+    } finally {
+      clearInterval(refresh);
+    }
+  }
+
+  async summary(): Promise<{
+    api_version: "brokerkit.io/operator-ui/v1";
+    cursor: string;
+    pending: number;
+    healthy: boolean;
+  }> {
+    const snapshot = await this.snapshot();
     return {
-      sources: results.map((result) => result.source),
-      requests: selected.map(({ source, request }) =>
-        project(source, request, this.handle(source.id, request, reservedHandles)),
-      ),
-      synchronizedAt,
+      api_version: snapshot.api_version,
+      cursor: snapshot.cursor,
+      pending: snapshot.requests.filter((value) => value.request.status === "pending").length,
+      healthy: snapshot.sources.every((source) => source.healthy),
     };
   }
 
@@ -160,7 +214,7 @@ export class DelegatedBrokerKit {
     action: DelegatedAction,
     expectedRevision: number,
     actor: string,
-    options: { reason?: string; durationSeconds?: number; maxUses?: number } = {},
+    options: { durationSeconds?: number; maxUses?: number } = {},
   ): Promise<DelegatedRequest> {
     const record = this.resolveHandle(handle);
     const source = this.registry.get(record.sourceId);
@@ -197,7 +251,7 @@ export class DelegatedBrokerKit {
           ? { ...summary, healthy: false, error: "broker_timeout" }
           : pages.some((page) => page.truncated)
             ? { ...summary, healthy: false, error: "source_truncated" }
-            : { ...summary, healthy: true, lastSyncAt: synchronizedAt },
+            : { ...summary, healthy: true, last_sync_at: synchronizedAt },
         requests,
       };
     } catch (error) {
@@ -372,7 +426,7 @@ function delegatedError(code: string): DelegatedBrokerKitError {
 }
 
 function project(source: OperatorBrokerSummary, request: BrokerApproval, handle: string): DelegatedRequest {
-  return { ...request, sourceId: source.id, sourceLabel: source.label, handle };
+  return { source_id: source.id, source_label: source.label, handle, request };
 }
 
 function requestIdentity(sourceId: string, requestId: string, revision: number): string {
@@ -400,13 +454,12 @@ function decisionOptions(
   action: DelegatedAction,
   expectedRevision: number,
   actor: string,
-  options: { reason?: string; durationSeconds?: number; maxUses?: number },
+  options: { durationSeconds?: number; maxUses?: number },
 ): BrokerDecision {
   return {
     expectedRevision,
     idempotencyKey: decisionKey(record, action, actor),
     onBehalfOf: `mlclaw:${actor}`,
-    ...(options.reason ? { reason: options.reason } : {}),
     ...(options.durationSeconds ? { durationSeconds: options.durationSeconds } : {}),
     ...(options.maxUses ? { maxUses: options.maxUses } : {}),
   };

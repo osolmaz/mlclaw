@@ -4705,7 +4705,6 @@ var approvalSchema = external_exports.object({
   decided_at: external_exports.string().datetime({ offset: true }).optional(),
   decided_by: external_exports.string().max(200).optional(),
   decided_on_behalf_of: external_exports.string().max(200).optional(),
-  decision_reason: external_exports.string().max(2e3).optional(),
   presentation: external_exports.object({
     risk: external_exports.enum(["unknown", "low", "medium", "high", "critical"]),
     title: external_exports.string().min(1).max(200),
@@ -4809,7 +4808,6 @@ var BrokerOperatorClient = class {
           expected_revision: decision.expectedRevision,
           idempotency_key: decision.idempotencyKey,
           on_behalf_of: decision.onBehalfOf,
-          ...decision.reason ? { decision_reason: decision.reason } : {},
           ...decision.durationSeconds || decision.maxUses ? {
             constraints: {
               ...decision.durationSeconds ? { duration_seconds: decision.durationSeconds } : {},
@@ -7363,7 +7361,81 @@ function signatureMatches(a, b) {
 }
 
 // src/mlclaw-space-runtime/delegated-brokerkit.ts
-import { createHash, createHmac as createHmac2, randomBytes as randomBytes3, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { createHash, createHmac as createHmac2, randomBytes as randomBytes4, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+
+// src/mlclaw-space-runtime/delegated-revisions.ts
+import { randomBytes as randomBytes3 } from "node:crypto";
+var DelegatedRevisions = class {
+  epoch = randomBytes3(16).toString("base64url");
+  revision = 0;
+  material = "";
+  current;
+  waiters = /* @__PURE__ */ new Set();
+  publish(material, value) {
+    if (this.current && material === this.material) return this.current;
+    this.material = material;
+    this.revision += 1;
+    this.current = value(this.cursor());
+    for (const waiter of [...this.waiters])
+      this.finish(waiter, { api_version: "brokerkit.io/operator-ui/v1", cursor: this.cursor(), changed: true });
+    return this.current;
+  }
+  wait(cursor, waitSeconds, signal) {
+    const observed = this.parse(cursor);
+    if (observed === void 0) return Promise.reject(revisionError("cursor_expired"));
+    if (observed !== this.revision) {
+      return Promise.resolve({ api_version: "brokerkit.io/operator-ui/v1", cursor: this.cursor(), changed: true });
+    }
+    if (this.waiters.size >= 256) return Promise.reject(revisionError("source_unavailable"));
+    if (signal?.aborted) return Promise.reject(abortError());
+    return new Promise((resolve, reject) => {
+      const waiter = {
+        resolve,
+        reject,
+        timer: setTimeout(() => {
+          this.finish(waiter, { api_version: "brokerkit.io/operator-ui/v1", cursor: this.cursor(), changed: false });
+        }, waitSeconds * 1e3),
+        ...signal ? { signal } : {}
+      };
+      waiter.timer.unref();
+      if (signal) {
+        waiter.abort = () => this.fail(waiter, abortError());
+        signal.addEventListener("abort", waiter.abort, { once: true });
+      }
+      this.waiters.add(waiter);
+    });
+  }
+  cursor() {
+    return `${this.epoch}.${this.revision.toString(36)}`;
+  }
+  parse(value) {
+    const match2 = /^([A-Za-z0-9_-]{22})\.([0-9a-z]{1,13})$/u.exec(value);
+    if (!match2 || match2[1] !== this.epoch) return void 0;
+    const revision = Number.parseInt(match2[2] ?? "", 36);
+    return Number.isSafeInteger(revision) && revision <= this.revision ? revision : void 0;
+  }
+  finish(waiter, value) {
+    this.cleanup(waiter);
+    waiter.resolve(value);
+  }
+  fail(waiter, error) {
+    this.cleanup(waiter);
+    waiter.reject(error);
+  }
+  cleanup(waiter) {
+    if (!this.waiters.delete(waiter)) return;
+    clearTimeout(waiter.timer);
+    if (waiter.signal && waiter.abort) waiter.signal.removeEventListener("abort", waiter.abort);
+  }
+};
+function revisionError(code) {
+  return Object.assign(new Error(code), { code });
+}
+function abortError() {
+  return new DOMException("The operation was aborted", "AbortError");
+}
+
+// src/mlclaw-space-runtime/delegated-brokerkit.ts
 var API_VERSION = "brokerkit.io/delegated-web/v1";
 var TOKEN_LIFETIME_SECONDS = 4 * 60;
 var MAX_PAGES_PER_SOURCE = 32;
@@ -7380,6 +7452,7 @@ var DelegatedBrokerKit = class {
   handles = /* @__PURE__ */ new Map();
   handlesByIdentity = /* @__PURE__ */ new Map();
   snapshotInFlight;
+  revisions = new DelegatedRevisions();
   issueSession(actor, access) {
     const issuedAt = Math.floor(this.now().getTime() / 1e3);
     const expiresAt = issuedAt + TOKEN_LIFETIME_SECONDS;
@@ -7389,7 +7462,7 @@ var DelegatedBrokerKit = class {
       subject: actor,
       issuedAt,
       expiresAt,
-      nonce: randomBytes3(16).toString("base64url"),
+      nonce: randomBytes4(16).toString("base64url"),
       access
     };
     const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
@@ -7429,12 +7502,50 @@ var DelegatedBrokerKit = class {
     );
     const selected = selectSnapshotRequests(results, MAX_HANDLES);
     const reservedHandles = this.selectedExistingHandles(selected);
+    const sources = results.map((result) => result.source);
+    const requests = selected.map(
+      ({ source, request }) => project(source, request, this.handle(source.id, request, reservedHandles))
+    );
+    const material = JSON.stringify({
+      sources: sources.map((source) => ({
+        id: source.id,
+        label: source.label,
+        healthy: source.healthy,
+        ...source.error ? { error: source.error } : {}
+      })),
+      requests
+    });
+    return this.revisions.publish(material, (cursor) => ({
+      api_version: "brokerkit.io/operator-ui/v1",
+      cursor,
+      sources,
+      requests,
+      synchronized_at: synchronizedAt
+    }));
+  }
+  async events(cursor, waitSeconds, signal) {
+    await this.snapshot();
+    const waiting = this.revisions.wait(cursor, waitSeconds, signal);
+    const refresh = setInterval(() => void this.snapshot().catch(() => void 0), 1e3);
+    refresh.unref();
+    try {
+      return await waiting;
+    } catch (error) {
+      if (error instanceof Error && "code" in error && (error.code === "cursor_expired" || error.code === "source_unavailable")) {
+        throw delegatedError(error.code);
+      }
+      throw error;
+    } finally {
+      clearInterval(refresh);
+    }
+  }
+  async summary() {
+    const snapshot = await this.snapshot();
     return {
-      sources: results.map((result) => result.source),
-      requests: selected.map(
-        ({ source, request }) => project(source, request, this.handle(source.id, request, reservedHandles))
-      ),
-      synchronizedAt
+      api_version: snapshot.api_version,
+      cursor: snapshot.cursor,
+      pending: snapshot.requests.filter((value) => value.request.status === "pending").length,
+      healthy: snapshot.sources.every((source) => source.healthy)
     };
   }
   async detail(handle) {
@@ -7472,7 +7583,7 @@ var DelegatedBrokerKit = class {
       ]);
       const requests = reconcileRequests(pages.map((page2) => page2.requests));
       return {
-        source: deadline.signal.aborted ? { ...summary, healthy: false, error: "broker_timeout" } : pages.some((page2) => page2.truncated) ? { ...summary, healthy: false, error: "source_truncated" } : { ...summary, healthy: true, lastSyncAt: synchronizedAt },
+        source: deadline.signal.aborted ? { ...summary, healthy: false, error: "broker_timeout" } : pages.some((page2) => page2.truncated) ? { ...summary, healthy: false, error: "source_truncated" } : { ...summary, healthy: true, last_sync_at: synchronizedAt },
         requests
       };
     } catch (error) {
@@ -7517,7 +7628,7 @@ var DelegatedBrokerKit = class {
     if (this.handles.size >= MAX_HANDLES && !this.pruneOldestHandle(reservedHandles)) {
       throw delegatedError("source_unavailable");
     }
-    const handle = randomBytes3(18).toString("base64url");
+    const handle = randomBytes4(18).toString("base64url");
     const requestExpiry = Date.parse(handleExpiry(request));
     const expiresAtMs = Number.isFinite(requestExpiry) ? Math.min(requestExpiry, this.now().getTime() + 24 * 60 * 6e4) : this.now().getTime() + 5 * 6e4;
     this.handles.set(handle, { sourceId, requestId: request.id, revision: request.revision, expiresAtMs });
@@ -7616,7 +7727,7 @@ function delegatedError(code) {
   return new DelegatedBrokerKitError(code);
 }
 function project(source, request, handle) {
-  return { ...request, sourceId: source.id, sourceLabel: source.label, handle };
+  return { source_id: source.id, source_label: source.label, handle, request };
 }
 function requestIdentity(sourceId, requestId, revision) {
   return `${sourceId}\0${requestId}\0${revision}`;
@@ -7638,7 +7749,6 @@ function decisionOptions(record, action, expectedRevision, actor, options) {
     expectedRevision,
     idempotencyKey: decisionKey(record, action, actor),
     onBehalfOf: `mlclaw:${actor}`,
-    ...options.reason ? { reason: options.reason } : {},
     ...options.durationSeconds ? { durationSeconds: options.durationSeconds } : {},
     ...options.maxUses ? { maxUses: options.maxUses } : {}
   };
@@ -8600,7 +8710,7 @@ function uniqueStrings(value, required) {
 }
 
 // src/mlclaw-space-runtime/openai-credentials.ts
-import { createCipheriv, createDecipheriv, hkdfSync, randomBytes as randomBytes4 } from "node:crypto";
+import { createCipheriv, createDecipheriv, hkdfSync, randomBytes as randomBytes5 } from "node:crypto";
 import fs2 from "node:fs/promises";
 import path2 from "node:path";
 function openAiConfigured(env = process.env) {
@@ -8669,7 +8779,7 @@ var OpenAiCredentialStore = class {
     if (!normalized) {
       throw new Error("valid OpenAI API key is required");
     }
-    const iv = randomBytes4(12);
+    const iv = randomBytes5(12);
     const cipher = createCipheriv("aes-256-gcm", this.key, iv);
     const ciphertext = Buffer.concat([cipher.update(normalized, "utf8"), cipher.final()]);
     const envelope = {
@@ -8680,7 +8790,7 @@ var OpenAiCredentialStore = class {
       ciphertext: ciphertext.toString("base64url")
     };
     const directory = path2.dirname(this.file);
-    const temporary = `${this.file}.${process.pid}.${randomBytes4(6).toString("hex")}.tmp`;
+    const temporary = `${this.file}.${process.pid}.${randomBytes5(6).toString("hex")}.tmp`;
     await fs2.mkdir(directory, { recursive: true, mode: 448 });
     try {
       await fs2.writeFile(temporary, `${JSON.stringify(envelope)}
@@ -8966,7 +9076,7 @@ function positiveNumber2(value) {
 }
 
 // src/mlclaw-space-runtime/cookies.ts
-import { createHmac as createHmac4, randomBytes as randomBytes5, timingSafeEqual as timingSafeEqual4 } from "node:crypto";
+import { createHmac as createHmac4, randomBytes as randomBytes6, timingSafeEqual as timingSafeEqual4 } from "node:crypto";
 function createSignedCookie(options, payload) {
   const body = Buffer.from(JSON.stringify({
     ...payload,
@@ -9015,7 +9125,7 @@ function clearCookie(name, secure) {
   });
 }
 function randomState() {
-  return randomBytes5(24).toString("base64url");
+  return randomBytes6(24).toString("base64url");
 }
 function sign2(value, secret) {
   return createHmac4("sha256", secret).update(value).digest("base64url");
@@ -9189,11 +9299,19 @@ var CONTROL_BRANDING_SCRIPT = `(function () {
     var close = document.querySelector("[data-mlclaw-approvals-close]");
     if (!shell || !button || !popover || !frame || button.getAttribute("data-ready") === "1") return;
     button.setAttribute("data-ready", "1");
+    function invalidateFrame() {
+      if (frame.contentWindow) {
+        frame.contentWindow.postMessage({ type: "brokerkit.operator-ui.invalidate", version: 1 }, "*");
+      }
+    }
     function setOpen(open) {
       popover.hidden = !open;
       button.setAttribute("aria-expanded", open ? "true" : "false");
-      if (open && !frame.getAttribute("src")) frame.setAttribute("src", frame.getAttribute("data-src"));
+      if (!open) return;
+      if (!frame.getAttribute("src")) frame.setAttribute("src", frame.getAttribute("data-src"));
+      else invalidateFrame();
     }
+    frame.addEventListener("load", function () { if (!popover.hidden) invalidateFrame(); });
     button.addEventListener("click", function () { setOpen(popover.hidden); });
     if (close) close.addEventListener("click", function () { setOpen(false); });
     document.addEventListener("click", function (event) {
@@ -9216,19 +9334,80 @@ var CONTROL_BRANDING_SCRIPT = `(function () {
       ) return;
       window.location.assign("/plugins/brokerkit/ui/");
     });
-    function refresh() {
-      fetch("/mlclaw/api/brokerkit/summary", { credentials: "same-origin" })
-        .then(function (response) { return response.ok ? response.json() : null; })
-        .then(function (summary) {
-          if (!badge || !summary || typeof summary.pending !== "number") return;
-          badge.textContent = summary.pending > 99 ? "99+" : String(summary.pending);
-          badge.hidden = summary.pending < 1;
-          button.setAttribute("aria-label", summary.pending > 0 ? "Open approval requests (" + summary.pending + " pending)" : "Open approval requests");
-        }).catch(function () {});
+    var summaryCursor = "";
+    var stopped = false;
+    function acceptSummary(summary) {
+      if (
+        !summary ||
+        typeof summary !== "object" ||
+        Object.keys(summary).sort().join(",") !== "api_version,cursor,healthy,pending" ||
+        summary.api_version !== "brokerkit.io/operator-ui/v1" ||
+        typeof summary.cursor !== "string" ||
+        summary.cursor.length < 1 ||
+        summary.cursor.length > 128 ||
+        typeof summary.pending !== "number" ||
+        !Number.isSafeInteger(summary.pending) ||
+        summary.pending < 0 ||
+        typeof summary.healthy !== "boolean"
+      ) return false;
+      var changed = summaryCursor && summaryCursor !== summary.cursor;
+      summaryCursor = summary.cursor;
+      if (badge) {
+        badge.textContent = summary.pending > 99 ? "99+" : String(summary.pending);
+        badge.hidden = summary.pending < 1;
+      }
+      button.setAttribute("aria-label", summary.pending > 0 ? "Open approval requests (" + summary.pending + " pending)" : "Open approval requests");
+      if (changed) invalidateFrame();
+      return true;
     }
-    refresh();
-    window.setInterval(refresh, 15000);
-    window.addEventListener("focus", refresh);
+    function refresh() {
+      return fetch("/mlclaw/api/brokerkit/summary", { credentials: "same-origin", cache: "no-store" })
+        .then(function (response) { return response.ok ? response.json() : null; })
+        .then(acceptSummary)
+        .catch(function () { return false; });
+    }
+    function watch(delay) {
+      if (stopped) return;
+      if (!summaryCursor) {
+        refresh().then(function () { window.setTimeout(function () { watch(250); }, delay); });
+        return;
+      }
+      fetch("/mlclaw/api/brokerkit/summary/events?cursor=" + encodeURIComponent(summaryCursor) + "&wait_seconds=25", {
+        credentials: "same-origin",
+        cache: "no-store"
+      }).then(function (response) {
+        if (response.status === 410) {
+          summaryCursor = "";
+          return null;
+        }
+        if (!response.ok) throw new Error("summary unavailable");
+        return response.json();
+      }).then(function (event) {
+        if (
+          event &&
+          typeof event === "object" &&
+          Object.keys(event).sort().join(",") === "api_version,changed,cursor" &&
+          event.api_version === "brokerkit.io/operator-ui/v1" &&
+          typeof event.cursor === "string" &&
+          event.cursor.length >= 1 &&
+          event.cursor.length <= 128 &&
+          typeof event.changed === "boolean"
+        ) {
+          summaryCursor = event.cursor;
+          if (event.changed) invalidateFrame();
+          return event.changed ? refresh() : true;
+        }
+        return false;
+      }).then(function (ok) {
+        window.setTimeout(function () { watch(ok ? 250 : Math.min(delay * 2, 30000)); }, ok ? 0 : delay);
+      }).catch(function () {
+        window.setTimeout(function () { watch(Math.min(delay * 2, 30000)); }, delay);
+      });
+    }
+    refresh().then(function () { watch(250); });
+    window.setInterval(refresh, 300000);
+    window.addEventListener("focus", function () { refresh(); });
+    window.addEventListener("beforeunload", function () { stopped = true; });
   }
   if (!document.documentElement.hasAttribute(marker)) {
     document.documentElement.setAttribute(marker, "1");
@@ -9338,6 +9517,8 @@ function createSpaceRuntimeApp(config2, controls) {
   const allowDelegatedSessionSnapshot = fixedWindowRateLimit(12, 6e4);
   const allowDelegatedActorSnapshot = fixedWindowRateLimit(60, 6e4);
   const allowBrokerKitSummary = fixedWindowRateLimit(12, 6e4);
+  const allowDelegatedEvents = fixedWindowRateLimit(60, 6e4);
+  const allowSummaryEvents = fixedWindowRateLimit(60, 6e4);
   const openAiCredentials = new OpenAiCredentialStore(config2.openaiCredentialStoreFile, config2.credentialKey);
   app.get("/health", (c) => health(c, config2, controls));
   app.get("/healthz", (c) => health(c, config2, controls));
@@ -9412,13 +9593,21 @@ function createSpaceRuntimeApp(config2, controls) {
     if (auth instanceof Response) return auth;
     if (!allowBrokerKitSummary(auth.username)) return c.json({ ok: false, error: "rate limited" }, 429);
     try {
-      const snapshot = await delegatedBrokerKit.snapshot();
-      return c.json({
-        pending: snapshot.requests.filter((request) => request.status === "pending").length,
-        healthy: snapshot.sources.every((source) => source.healthy)
-      });
+      return c.json(await delegatedBrokerKit.summary());
     } catch {
       return c.json({ ok: false, error: "operator inbox unavailable" }, 503);
+    }
+  });
+  app.get("/mlclaw/api/brokerkit/summary/events", async (c) => {
+    const auth = requireAdmin(c, config2);
+    if (auth instanceof Response) return auth;
+    if (!allowSummaryEvents(auth.username)) return c.json({ ok: false, error: "rate limited" }, 429);
+    const input = delegatedEventQuery(c.req.url);
+    if (!input) return c.json({ ok: false, error: "invalid request" }, 400);
+    try {
+      return c.json(await delegatedBrokerKit.events(input.cursor, input.waitSeconds, c.req.raw.signal));
+    } catch (error) {
+      return delegatedFailure(c, error);
     }
   });
   app.options("/mlclaw/api/brokerkit/*", (c) => delegatedPreflight(c));
@@ -9439,6 +9628,18 @@ function createSpaceRuntimeApp(config2, controls) {
       return delegatedFailure(c, error);
     }
   });
+  app.get("/mlclaw/api/brokerkit/events", async (c) => {
+    const identity = delegatedIdentity(c, delegatedBrokerKit);
+    if (!identity) return delegatedErrorResponse(c, "not_authorized", 401);
+    if (!allowDelegatedEvents(identity.sessionId)) return delegatedErrorResponse(c, "rate_limited", 429);
+    const input = delegatedEventQuery(c.req.url);
+    if (!input) return delegatedErrorResponse(c, "invalid_input", 400);
+    try {
+      return delegatedJson(c, await delegatedBrokerKit.events(input.cursor, input.waitSeconds, c.req.raw.signal));
+    } catch (error) {
+      return delegatedFailure(c, error);
+    }
+  });
   app.get("/mlclaw/api/brokerkit/requests/:handle", async (c) => {
     const identity = delegatedIdentity(c, delegatedBrokerKit);
     if (!identity) return delegatedErrorResponse(c, "not_authorized", 401);
@@ -9453,21 +9654,20 @@ function createSpaceRuntimeApp(config2, controls) {
       const identity = delegatedIdentity(c, delegatedBrokerKit);
       if (!identity || identity.access !== "decide") return delegatedErrorResponse(c, "not_authorized", 401);
       const body = await readBoundedJson(c, 16384);
-      if (!body || Object.keys(body).some((key) => !["expectedRevision", "reason", "constraints"].includes(key))) {
+      if (!body || Object.keys(body).some((key) => !["expectedRevision", "constraints"].includes(key))) {
         return delegatedErrorResponse(c, "invalid_input", 400);
       }
       const constraints = recordValue(body.constraints);
       const expectedRevision = positiveJsonInteger(body.expectedRevision);
       const durationSeconds = optionalPositiveJsonInteger(constraints?.durationSeconds);
       const maxUses = optionalPositiveJsonInteger(constraints?.maxUses);
-      if (!expectedRevision || body.reason !== void 0 && (typeof body.reason !== "string" || body.reason.length > 2e3) || body.constraints !== void 0 && (!constraints || Object.keys(constraints).some((key) => !["durationSeconds", "maxUses"].includes(key)) || durationSeconds === void 0 || maxUses === void 0) || durationSeconds === "invalid" || maxUses === "invalid" || action !== "approve" && (durationSeconds !== void 0 || maxUses !== void 0)) {
+      if (!expectedRevision || body.constraints !== void 0 && (!constraints || Object.keys(constraints).some((key) => !["durationSeconds", "maxUses"].includes(key)) || durationSeconds === void 0 || maxUses === void 0) || durationSeconds === "invalid" || maxUses === "invalid" || action !== "approve" && (durationSeconds !== void 0 || maxUses !== void 0)) {
         return delegatedErrorResponse(c, "invalid_input", 400);
       }
       try {
         return delegatedJson(
           c,
           await delegatedBrokerKit.decide(c.req.param("handle"), action, expectedRevision, identity.actor, {
-            ...typeof body.reason === "string" ? { reason: body.reason } : {},
             ...typeof durationSeconds === "number" ? { durationSeconds } : {},
             ...typeof maxUses === "number" ? { maxUses } : {}
           })
@@ -9838,6 +10038,16 @@ function requireCsrf(c, config2, username) {
 function delegatedOriginAllowed(c) {
   return c.req.header("origin") === "null";
 }
+function delegatedEventQuery(urlValue) {
+  const url = new URL(urlValue);
+  if ([...url.searchParams.keys()].some((key) => key !== "cursor" && key !== "wait_seconds")) return void 0;
+  const cursor = url.searchParams.get("cursor") ?? "";
+  const wait = url.searchParams.get("wait_seconds") ?? "25";
+  if (cursor.length < 1 || cursor.length > 128 || !/^[A-Za-z0-9_.-]+$/u.test(cursor) || !/^(?:[1-9]|1[0-9]|2[0-5])$/u.test(wait)) {
+    return void 0;
+  }
+  return { cursor, waitSeconds: Number(wait) };
+}
 function delegatedIdentity(c, delegated) {
   if (!delegatedOriginAllowed(c)) return void 0;
   return delegated.authorizeSession(c.req.header("authorization"));
@@ -9860,7 +10070,7 @@ function delegatedErrorResponse(c, code, status) {
 }
 function delegatedFailure(c, error) {
   if (error instanceof DelegatedBrokerKitError) {
-    const status = error.code === "request_not_found" ? 404 : error.code === "revision_stale" || error.code === "action_not_allowed" ? 409 : 502;
+    const status = error.code === "request_not_found" ? 404 : error.code === "cursor_expired" ? 410 : error.code === "revision_stale" || error.code === "action_not_allowed" ? 409 : 502;
     return delegatedErrorResponse(c, error.code, status);
   }
   if (error instanceof BrokerOperatorError) {
@@ -10157,7 +10367,7 @@ function contentType(file) {
 }
 
 // src/mlclaw-space-runtime/mcp-credentials.ts
-import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, hkdfSync as hkdfSync2, randomBytes as randomBytes6 } from "node:crypto";
+import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, hkdfSync as hkdfSync2, randomBytes as randomBytes7 } from "node:crypto";
 import fs4 from "node:fs/promises";
 import path4 from "node:path";
 var DEFAULT_REFRESH_TIMEOUT_MS = 3e4;
@@ -10290,7 +10500,7 @@ var McpCredentialStore = class {
   async persist() {
     const directory = path4.dirname(this.options.file);
     await fs4.mkdir(directory, { recursive: true, mode: 448 });
-    const temporary = `${this.options.file}.${process.pid}.${randomBytes6(6).toString("hex")}.tmp`;
+    const temporary = `${this.options.file}.${process.pid}.${randomBytes7(6).toString("hex")}.tmp`;
     const encrypted = encryptDocument(this.document, this.key);
     try {
       await fs4.writeFile(temporary, `${JSON.stringify(encrypted)}
@@ -10368,7 +10578,7 @@ var InvalidCredentialFileError = class extends Error {
   }
 };
 function encryptDocument(document, key) {
-  const iv = randomBytes6(12);
+  const iv = randomBytes7(12);
   const cipher = createCipheriv2("aes-256-gcm", key, iv);
   const plaintext = Buffer.from(JSON.stringify(document), "utf8");
   const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);

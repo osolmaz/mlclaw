@@ -109,7 +109,9 @@ describe("DelegatedBrokerKit", () => {
     if (!issued) throw new Error("missing request");
     visible = false;
     expect((await delegated.snapshot()).requests).toEqual([]);
-    await expect(delegated.detail(issued.handle)).resolves.toMatchObject({ id: "request-1", revision: 1 });
+    await expect(delegated.detail(issued.handle)).resolves.toMatchObject({
+      request: { id: "request-1", revision: 1 },
+    });
   });
 
   it("coalesces concurrent snapshot fan-out", async () => {
@@ -148,6 +150,36 @@ describe("DelegatedBrokerKit", () => {
     const [left, right] = await Promise.all([first, second]);
     expect(left).toEqual(right);
     expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+
+  it("publishes cursor-only invalidations and expires foreign cursors", async () => {
+    let visible = true;
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/.well-known/brokerkit-operator") {
+        return Response.json({ api_version: "brokerkit.io/operator/v1" });
+      }
+      if (url.searchParams.get("status") === "active") return Response.json({ requests: [] });
+      return Response.json({ requests: visible ? [request("request-1")] : [] });
+    });
+    const delegated = new DelegatedBrokerKit(
+      new OperatorBrokerRegistry(
+        [{ id: "hf-broker", label: "Hugging Face", baseUrl: "https://hf.example", token: "h".repeat(32) }],
+        fetchImpl,
+      ),
+      "s".repeat(48),
+    );
+    const first = await delegated.snapshot();
+    visible = false;
+    const changed = await delegated.events(first.cursor, 2);
+    expect(changed).toEqual({
+      api_version: "brokerkit.io/operator-ui/v1",
+      cursor: expect.not.stringMatching(first.cursor),
+      changed: true,
+    });
+    await expect(delegated.events("foreign.1", 1)).rejects.toMatchObject({ code: "cursor_expired" });
+    const summary = await delegated.summary();
+    expect(summary).toMatchObject({ cursor: changed.cursor, pending: 0, healthy: true });
   });
 
   it("refetches broker truth and sends an actor-bound idempotent decision", async () => {
@@ -192,7 +224,7 @@ describe("DelegatedBrokerKit", () => {
       durationSeconds: 300,
       maxUses: 1,
     });
-    expect(updated.status).toBe("active");
+    expect(updated.request.status).toBe("active");
     expect(updated.handle).not.toBe(pending.handle);
     expect(decisionBodies).toHaveLength(2);
     expect(decisionBodies[0]).toEqual(decisionBodies[1]);
@@ -202,9 +234,11 @@ describe("DelegatedBrokerKit", () => {
       constraints: { duration_seconds: 300, max_uses: 1 },
     });
     expect(decisionBodies[1]?.idempotency_key).toMatch(/^[A-Za-z0-9_-]{43}$/u);
-    expect((await delegated.snapshot()).requests).toEqual([expect.objectContaining({ status: "active" })]);
+    expect((await delegated.snapshot()).requests).toEqual([
+      expect.objectContaining({ request: expect.objectContaining({ status: "active" }) }),
+    ]);
     await expect(delegated.decide(updated.handle, "revoke", 2, "alice")).resolves.toMatchObject({
-      status: "revoked",
+      request: { status: "revoked" },
     });
   });
 
@@ -247,9 +281,11 @@ describe("DelegatedBrokerKit", () => {
     await expect(delegated.detail(snapshot.requests[0]?.handle ?? "")).resolves.toBeTruthy();
     await expect(delegated.detail(snapshot.requests.at(-1)?.handle ?? "")).resolves.toBeTruthy();
     const refreshed = await delegated.snapshot();
-    const retained = refreshed.requests.find((item) => item.id === "request-pending-0-0");
-    expect(retained?.handle).toBe(snapshot.requests.find((item) => item.id === retained?.id)?.handle);
-    await expect(delegated.detail(retained?.handle ?? "")).resolves.toMatchObject({ id: "request-pending-0-0" });
+    const retained = refreshed.requests.find((item) => item.request.id === "request-pending-0-0");
+    expect(retained?.handle).toBe(snapshot.requests.find((item) => item.request.id === retained?.request.id)?.handle);
+    await expect(delegated.detail(retained?.handle ?? "")).resolves.toMatchObject({
+      request: { id: "request-pending-0-0" },
+    });
   });
 
   it("keeps bounded partial pages instead of discarding a busy source", async () => {
@@ -292,9 +328,9 @@ describe("DelegatedBrokerKit", () => {
     expect(snapshot.requests).toHaveLength(4_096);
     for (const sourceId of ["hf-broker", "gh-broker"]) {
       for (const status of ["pending", "active"]) {
-        expect(snapshot.requests.filter((item) => item.sourceId === sourceId && item.status === status)).toHaveLength(
-          1_024,
-        );
+        expect(
+          snapshot.requests.filter((item) => item.source_id === sourceId && item.request.status === status),
+        ).toHaveLength(1_024);
       }
     }
   });
@@ -327,7 +363,7 @@ describe("DelegatedBrokerKit", () => {
       expect.objectContaining({ id: "hf-broker", healthy: false, error: "broker_timeout" }),
       expect.objectContaining({ id: "gh-broker", healthy: true }),
     ]);
-    expect(snapshot.requests.map((item) => item.id).sort()).toEqual([
+    expect(snapshot.requests.map((item) => item.request.id).sort()).toEqual([
       "gh.example-active-first",
       "gh.example-pending-first",
       "hf.example-active-first",
@@ -357,7 +393,9 @@ describe("DelegatedBrokerKit", () => {
       "s".repeat(48),
     );
     expect((await delegated.snapshot()).requests).toEqual([
-      expect.objectContaining({ id: "transitioning", revision: 2, status: "active" }),
+      expect.objectContaining({
+        request: expect.objectContaining({ id: "transitioning", revision: 2, status: "active" }),
+      }),
     ]);
   });
 });

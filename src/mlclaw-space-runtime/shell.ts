@@ -86,11 +86,19 @@ export const CONTROL_BRANDING_SCRIPT = `(function () {
     var close = document.querySelector("[data-mlclaw-approvals-close]");
     if (!shell || !button || !popover || !frame || button.getAttribute("data-ready") === "1") return;
     button.setAttribute("data-ready", "1");
+    function invalidateFrame() {
+      if (frame.contentWindow) {
+        frame.contentWindow.postMessage({ type: "brokerkit.operator-ui.invalidate", version: 1 }, "*");
+      }
+    }
     function setOpen(open) {
       popover.hidden = !open;
       button.setAttribute("aria-expanded", open ? "true" : "false");
-      if (open && !frame.getAttribute("src")) frame.setAttribute("src", frame.getAttribute("data-src"));
+      if (!open) return;
+      if (!frame.getAttribute("src")) frame.setAttribute("src", frame.getAttribute("data-src"));
+      else invalidateFrame();
     }
+    frame.addEventListener("load", function () { if (!popover.hidden) invalidateFrame(); });
     button.addEventListener("click", function () { setOpen(popover.hidden); });
     if (close) close.addEventListener("click", function () { setOpen(false); });
     document.addEventListener("click", function (event) {
@@ -113,19 +121,80 @@ export const CONTROL_BRANDING_SCRIPT = `(function () {
       ) return;
       window.location.assign("/plugins/brokerkit/ui/");
     });
-    function refresh() {
-      fetch("/mlclaw/api/brokerkit/summary", { credentials: "same-origin" })
-        .then(function (response) { return response.ok ? response.json() : null; })
-        .then(function (summary) {
-          if (!badge || !summary || typeof summary.pending !== "number") return;
-          badge.textContent = summary.pending > 99 ? "99+" : String(summary.pending);
-          badge.hidden = summary.pending < 1;
-          button.setAttribute("aria-label", summary.pending > 0 ? "Open approval requests (" + summary.pending + " pending)" : "Open approval requests");
-        }).catch(function () {});
+    var summaryCursor = "";
+    var stopped = false;
+    function acceptSummary(summary) {
+      if (
+        !summary ||
+        typeof summary !== "object" ||
+        Object.keys(summary).sort().join(",") !== "api_version,cursor,healthy,pending" ||
+        summary.api_version !== "brokerkit.io/operator-ui/v1" ||
+        typeof summary.cursor !== "string" ||
+        summary.cursor.length < 1 ||
+        summary.cursor.length > 128 ||
+        typeof summary.pending !== "number" ||
+        !Number.isSafeInteger(summary.pending) ||
+        summary.pending < 0 ||
+        typeof summary.healthy !== "boolean"
+      ) return false;
+      var changed = summaryCursor && summaryCursor !== summary.cursor;
+      summaryCursor = summary.cursor;
+      if (badge) {
+        badge.textContent = summary.pending > 99 ? "99+" : String(summary.pending);
+        badge.hidden = summary.pending < 1;
+      }
+      button.setAttribute("aria-label", summary.pending > 0 ? "Open approval requests (" + summary.pending + " pending)" : "Open approval requests");
+      if (changed) invalidateFrame();
+      return true;
     }
-    refresh();
-    window.setInterval(refresh, 15000);
-    window.addEventListener("focus", refresh);
+    function refresh() {
+      return fetch("/mlclaw/api/brokerkit/summary", { credentials: "same-origin", cache: "no-store" })
+        .then(function (response) { return response.ok ? response.json() : null; })
+        .then(acceptSummary)
+        .catch(function () { return false; });
+    }
+    function watch(delay) {
+      if (stopped) return;
+      if (!summaryCursor) {
+        refresh().then(function () { window.setTimeout(function () { watch(250); }, delay); });
+        return;
+      }
+      fetch("/mlclaw/api/brokerkit/summary/events?cursor=" + encodeURIComponent(summaryCursor) + "&wait_seconds=25", {
+        credentials: "same-origin",
+        cache: "no-store"
+      }).then(function (response) {
+        if (response.status === 410) {
+          summaryCursor = "";
+          return null;
+        }
+        if (!response.ok) throw new Error("summary unavailable");
+        return response.json();
+      }).then(function (event) {
+        if (
+          event &&
+          typeof event === "object" &&
+          Object.keys(event).sort().join(",") === "api_version,changed,cursor" &&
+          event.api_version === "brokerkit.io/operator-ui/v1" &&
+          typeof event.cursor === "string" &&
+          event.cursor.length >= 1 &&
+          event.cursor.length <= 128 &&
+          typeof event.changed === "boolean"
+        ) {
+          summaryCursor = event.cursor;
+          if (event.changed) invalidateFrame();
+          return event.changed ? refresh() : true;
+        }
+        return false;
+      }).then(function (ok) {
+        window.setTimeout(function () { watch(ok ? 250 : Math.min(delay * 2, 30000)); }, ok ? 0 : delay);
+      }).catch(function () {
+        window.setTimeout(function () { watch(Math.min(delay * 2, 30000)); }, delay);
+      });
+    }
+    refresh().then(function () { watch(250); });
+    window.setInterval(refresh, 300000);
+    window.addEventListener("focus", function () { refresh(); });
+    window.addEventListener("beforeunload", function () { stopped = true; });
   }
   if (!document.documentElement.hasAttribute(marker)) {
     document.documentElement.setAttribute(marker, "1");

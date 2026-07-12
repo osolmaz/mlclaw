@@ -63,6 +63,8 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
   const allowDelegatedSessionSnapshot = fixedWindowRateLimit(12, 60_000);
   const allowDelegatedActorSnapshot = fixedWindowRateLimit(60, 60_000);
   const allowBrokerKitSummary = fixedWindowRateLimit(12, 60_000);
+  const allowDelegatedEvents = fixedWindowRateLimit(60, 60_000);
+  const allowSummaryEvents = fixedWindowRateLimit(60, 60_000);
   const openAiCredentials = new OpenAiCredentialStore(config.openaiCredentialStoreFile, config.credentialKey);
 
   app.get("/health", (c) => health(c, config, controls));
@@ -142,13 +144,22 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
     if (auth instanceof Response) return auth;
     if (!allowBrokerKitSummary(auth.username)) return c.json({ ok: false, error: "rate limited" }, 429);
     try {
-      const snapshot = await delegatedBrokerKit.snapshot();
-      return c.json({
-        pending: snapshot.requests.filter((request) => request.status === "pending").length,
-        healthy: snapshot.sources.every((source) => source.healthy),
-      });
+      return c.json(await delegatedBrokerKit.summary());
     } catch {
       return c.json({ ok: false, error: "operator inbox unavailable" }, 503);
+    }
+  });
+
+  app.get("/mlclaw/api/brokerkit/summary/events", async (c) => {
+    const auth = requireAdmin(c, config);
+    if (auth instanceof Response) return auth;
+    if (!allowSummaryEvents(auth.username)) return c.json({ ok: false, error: "rate limited" }, 429);
+    const input = delegatedEventQuery(c.req.url);
+    if (!input) return c.json({ ok: false, error: "invalid request" }, 400);
+    try {
+      return c.json(await delegatedBrokerKit.events(input.cursor, input.waitSeconds, c.req.raw.signal));
+    } catch (error) {
+      return delegatedFailure(c, error);
     }
   });
 
@@ -173,6 +184,19 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
     }
   });
 
+  app.get("/mlclaw/api/brokerkit/events", async (c) => {
+    const identity = delegatedIdentity(c, delegatedBrokerKit);
+    if (!identity) return delegatedErrorResponse(c, "not_authorized", 401);
+    if (!allowDelegatedEvents(identity.sessionId)) return delegatedErrorResponse(c, "rate_limited", 429);
+    const input = delegatedEventQuery(c.req.url);
+    if (!input) return delegatedErrorResponse(c, "invalid_input", 400);
+    try {
+      return delegatedJson(c, await delegatedBrokerKit.events(input.cursor, input.waitSeconds, c.req.raw.signal));
+    } catch (error) {
+      return delegatedFailure(c, error);
+    }
+  });
+
   app.get("/mlclaw/api/brokerkit/requests/:handle", async (c) => {
     const identity = delegatedIdentity(c, delegatedBrokerKit);
     if (!identity) return delegatedErrorResponse(c, "not_authorized", 401);
@@ -188,7 +212,7 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
       const identity = delegatedIdentity(c, delegatedBrokerKit);
       if (!identity || identity.access !== "decide") return delegatedErrorResponse(c, "not_authorized", 401);
       const body = await readBoundedJson(c, 16_384);
-      if (!body || Object.keys(body).some((key) => !["expectedRevision", "reason", "constraints"].includes(key))) {
+      if (!body || Object.keys(body).some((key) => !["expectedRevision", "constraints"].includes(key))) {
         return delegatedErrorResponse(c, "invalid_input", 400);
       }
       const constraints = recordValue(body.constraints);
@@ -197,7 +221,6 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
       const maxUses = optionalPositiveJsonInteger(constraints?.maxUses);
       if (
         !expectedRevision ||
-        (body.reason !== undefined && (typeof body.reason !== "string" || body.reason.length > 2_000)) ||
         (body.constraints !== undefined &&
           (!constraints ||
             Object.keys(constraints).some((key) => !["durationSeconds", "maxUses"].includes(key)) ||
@@ -213,7 +236,6 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
         return delegatedJson(
           c,
           await delegatedBrokerKit.decide(c.req.param("handle"), action, expectedRevision, identity.actor, {
-            ...(typeof body.reason === "string" ? { reason: body.reason } : {}),
             ...(typeof durationSeconds === "number" ? { durationSeconds } : {}),
             ...(typeof maxUses === "number" ? { maxUses } : {}),
           }),
@@ -637,6 +659,22 @@ function delegatedOriginAllowed(c: Context): boolean {
   return c.req.header("origin") === "null";
 }
 
+function delegatedEventQuery(urlValue: string): { cursor: string; waitSeconds: number } | undefined {
+  const url = new URL(urlValue);
+  if ([...url.searchParams.keys()].some((key) => key !== "cursor" && key !== "wait_seconds")) return undefined;
+  const cursor = url.searchParams.get("cursor") ?? "";
+  const wait = url.searchParams.get("wait_seconds") ?? "25";
+  if (
+    cursor.length < 1 ||
+    cursor.length > 128 ||
+    !/^[A-Za-z0-9_.-]+$/u.test(cursor) ||
+    !/^(?:[1-9]|1[0-9]|2[0-5])$/u.test(wait)
+  ) {
+    return undefined;
+  }
+  return { cursor, waitSeconds: Number(wait) };
+}
+
 function delegatedIdentity(c: Context, delegated: DelegatedBrokerKit): DelegatedSessionIdentity | undefined {
   if (!delegatedOriginAllowed(c)) return undefined;
   return delegated.authorizeSession(c.req.header("authorization"));
@@ -656,7 +694,11 @@ function delegatedJson(c: Context, value: unknown, status: 200 | 201 = 200): Res
   return c.json(value, status);
 }
 
-function delegatedErrorResponse(c: Context, code: string, status: 400 | 401 | 403 | 404 | 409 | 429 | 502): Response {
+function delegatedErrorResponse(
+  c: Context,
+  code: string,
+  status: 400 | 401 | 403 | 404 | 409 | 410 | 429 | 502,
+): Response {
   delegatedHeaders(c);
   return c.json({ error: { code } }, status);
 }
@@ -666,9 +708,11 @@ function delegatedFailure(c: Context, error: unknown): Response {
     const status =
       error.code === "request_not_found"
         ? 404
-        : error.code === "revision_stale" || error.code === "action_not_allowed"
-          ? 409
-          : 502;
+        : error.code === "cursor_expired"
+          ? 410
+          : error.code === "revision_stale" || error.code === "action_not_allowed"
+            ? 409
+            : 502;
     return delegatedErrorResponse(c, error.code, status);
   }
   if (error instanceof BrokerOperatorError) {

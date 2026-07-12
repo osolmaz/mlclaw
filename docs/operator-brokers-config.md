@@ -120,10 +120,22 @@ compromised Gateway frontend should leave
 `MLCLAW_BROKERKIT_POPOVER_DECISIONS` unset. Set it to `true` only when the
 deployment explicitly accepts that tradeoff; the default popover is read-only.
 
+The delegated browser API returns a complete
+`brokerkit.io/operator-ui/v1` snapshot with an opaque revision cursor. Request
+payloads remain nested under their source metadata. Authenticated `/events`
+waits return only the next cursor and a `changed` flag; the UI then fetches a
+new complete snapshot. The Gateway badge uses the same cursor through a
+summary-only event route. Opening the popover sends a strict data-free
+invalidation message and never reloads the mounted iframe, so scroll position
+and an open decision dialog survive unrelated updates. A five-minute snapshot
+refresh remains only as a lost-wakeup safety net.
+
 ML Claw refreshes current request state and revision immediately before every
 decision. It sends actor attribution and a deterministic idempotency key to the
 selected broker. An unavailable broker is reported as a redacted source error
-without hiding healthy brokers.
+without hiding healthy brokers. Decisions contain only the expected revision
+and policy-bounded duration/use constraints. Human-entered decision reasons are
+not accepted; the requester justification remains part of the broker request.
 
 Unknown top-level or broker fields are rejected. Relative token paths, duplicate
 IDs, duplicate URLs, inline tokens, and unsupported versions are invalid.
