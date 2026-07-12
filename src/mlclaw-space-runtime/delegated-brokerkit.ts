@@ -15,6 +15,7 @@ const MAX_HANDLES = 4_096;
 const SOURCE_DEADLINE_MS = 15_000;
 
 export type DelegatedAction = "approve" | "deny" | "cancel" | "revoke";
+export type DelegatedAccess = "read" | "decide";
 
 export type DelegatedSourceHealth = OperatorBrokerSummary & {
   healthy: boolean;
@@ -48,11 +49,13 @@ type TokenPayload = {
   issuedAt: number;
   expiresAt: number;
   nonce: string;
+  access: DelegatedAccess;
 };
 
 export type DelegatedSessionIdentity = {
   actor: string;
   sessionId: string;
+  access: DelegatedAccess;
 };
 
 export class DelegatedBrokerKit {
@@ -70,11 +73,15 @@ export class DelegatedBrokerKit {
     this.key = createHmac("sha256", sessionSecret).update("mlclaw/brokerkit-delegated-web/v1", "utf8").digest();
   }
 
-  issueSession(actor: string): {
+  issueSession(
+    actor: string,
+    access: DelegatedAccess,
+  ): {
     api_version: typeof API_VERSION;
-    actor: string;
-    decision_token: string;
+    token: string;
     expires_at: string;
+    access: DelegatedAccess;
+    renewal_transport: "direct";
   } {
     const issuedAt = Math.floor(this.now().getTime() / 1_000);
     const expiresAt = issuedAt + TOKEN_LIFETIME_SECONDS;
@@ -85,14 +92,16 @@ export class DelegatedBrokerKit {
       issuedAt,
       expiresAt,
       nonce: randomBytes(16).toString("base64url"),
+      access,
     };
     const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
     const signature = this.sign(encoded);
     return {
       api_version: API_VERSION,
-      actor,
-      decision_token: `${encoded}.${signature}`,
+      token: `${encoded}.${signature}`,
       expires_at: new Date(expiresAt * 1_000).toISOString(),
+      access,
+      renewal_transport: "direct",
     };
   }
 
@@ -105,7 +114,7 @@ export class DelegatedBrokerKit {
     if (!encoded) return undefined;
     const payload = parseTokenPayload(encoded);
     return payload && tokenIsCurrent(payload, this.now())
-      ? { actor: payload.subject, sessionId: payload.nonce }
+      ? { actor: payload.subject, sessionId: payload.nonce, access: payload.access }
       : undefined;
   }
 
@@ -470,13 +479,14 @@ function validTokenPayload(value: unknown): value is TokenPayload {
 }
 
 function hasExactTokenFields(record: Record<string, unknown>): boolean {
-  return Object.keys(record).sort().join(",") === "audience,expiresAt,issuedAt,nonce,subject,version";
+  return Object.keys(record).sort().join(",") === "access,audience,expiresAt,issuedAt,nonce,subject,version";
 }
 
 function validTokenIdentity(record: Record<string, unknown>): boolean {
   return (
     record.version === 1 &&
     record.audience === "brokerkit-delegated-web" &&
+    (record.access === "read" || record.access === "decide") &&
     typeof record.subject === "string" &&
     record.subject.length >= 1 &&
     record.subject.length <= 200

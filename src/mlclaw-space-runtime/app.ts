@@ -157,7 +157,7 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
   app.post("/mlclaw/api/brokerkit/session", (c) => {
     const identity = delegatedIdentity(c, delegatedBrokerKit);
     if (!identity) return delegatedErrorResponse(c, "not_authorized", 401);
-    return delegatedJson(c, delegatedBrokerKit.issueSession(identity.actor));
+    return delegatedJson(c, delegatedBrokerKit.issueSession(identity.actor, identity.access));
   });
 
   app.get("/mlclaw/api/brokerkit/snapshot", async (c) => {
@@ -186,7 +186,7 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
   for (const action of ["approve", "deny", "cancel", "revoke"] as const) {
     app.post(`/mlclaw/api/brokerkit/requests/:handle/${action}`, async (c) => {
       const identity = delegatedIdentity(c, delegatedBrokerKit);
-      if (!identity) return delegatedErrorResponse(c, "not_authorized", 401);
+      if (!identity || identity.access !== "decide") return delegatedErrorResponse(c, "not_authorized", 401);
       const body = await readBoundedJson(c, 16_384);
       if (!body || Object.keys(body).some((key) => !["expectedRevision", "reason", "constraints"].includes(key))) {
         return delegatedErrorResponse(c, "invalid_input", 400);
@@ -532,7 +532,7 @@ async function trustedBrokerKitUi(
       const marker = !delegatedSession
         ? '<meta name="brokerkit-delegated-top-level">'
         : `<meta name="brokerkit-delegated-session" content="${Buffer.from(
-            JSON.stringify(delegatedBrokerKit.issueSession(auth.username)),
+            JSON.stringify(delegatedBrokerKit.issueSession(auth.username, embeddedPopover ? "read" : "decide")),
             "utf8",
           ).toString("base64url")}">`;
       if (!template.includes("</head>")) return c.text("not found\n", 404);
