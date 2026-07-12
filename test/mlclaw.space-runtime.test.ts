@@ -16,20 +16,31 @@ import { SpaceRuntimeServer } from "../src/mlclaw-space-runtime/server.js";
 
 const cleanups: Array<() => Promise<void> | void> = [];
 
-function brokerApproval(id: string, status: string, revision: number) {
+function brokerApproval(
+  id: string,
+  status: string,
+  revision: number,
+  approvalBounds = { max_duration_seconds: 300, max_uses: 1 },
+) {
   return {
     id,
     revision,
-    client: "bob",
+    requester: "bob",
     operation: "repo.update",
     status,
     requested_at: "2026-07-11T00:00:00Z",
-    pending_expires_at: "2026-07-11T00:05:00Z",
-    requested_duration_seconds: 300,
-    max_uses: 1,
+    pending_expires_at: "2099-07-12T00:05:00Z",
+    requested_duration_seconds: approvalBounds.max_duration_seconds,
+    requested_max_uses: approvalBounds.max_uses,
+    granted_max_uses: status === "active" ? approvalBounds.max_uses : null,
     used_count: 0,
-    reserved_count: 0,
-    presentation: { risk: "medium", title: "Update repository", target: "osolmaz/example" },
+    presentation: {
+      risk: "medium",
+      title: "Update repository",
+      facts: [{ label: "Repository", value: "osolmaz/example" }],
+    },
+    allowed_actions: status === "pending" ? ["approve", "deny", "cancel"] : ["revoke"],
+    approval_bounds: approvalBounds,
   };
 }
 
@@ -157,25 +168,60 @@ describe("ML Claw Space runtime", () => {
     });
   });
 
-  it("proxies only authenticated admin approval operations with CSRF protection", async () => {
+  it("delegates the packaged BrokerKit tab to authenticated admin authority", async () => {
+    const pluginRoot = await fs.mkdtemp(path.join(os.tmpdir(), "mlclaw-brokerkit-delegated-ui-"));
+    cleanups.push(() => fs.rm(pluginRoot, { recursive: true, force: true }));
+    await fs.mkdir(path.join(pluginRoot, "dist", "ui"), { recursive: true });
+    await fs.writeFile(
+      path.join(pluginRoot, "dist", "ui", "index.html"),
+      "<!doctype html><html><head><title>BrokerKit</title></head><body></body></html>",
+    );
     const brokerPort = await freePort();
     const brokerRequests: Array<{ method: string; url: string; authorization?: string; body: string }> = [];
+    let postAttempts = 0;
     const broker = http.createServer(async (req, res) => {
       let body = "";
-      for await (const chunk of req) {
-        body += String(chunk);
-      }
+      for await (const chunk of req) body += String(chunk);
       brokerRequests.push({
         method: req.method ?? "",
         url: req.url ?? "",
         ...(req.headers.authorization ? { authorization: req.headers.authorization } : {}),
         body,
       });
-      res.writeHead(200, { "content-type": "application/json" });
-      if (req.method === "POST") {
-        res.end(JSON.stringify(brokerApproval("grant-1", "active", 2)));
+      res.setHeader("content-type", "application/json");
+      if (req.url === "/.well-known/brokerkit-operator") {
+        res.writeHead(200);
+        res.end(JSON.stringify({ api_version: "brokerkit.io/operator/v1" }));
+      } else if (req.method === "POST") {
+        postAttempts += 1;
+        if (postAttempts === 1) {
+          res.writeHead(409);
+          res.end(
+            JSON.stringify({
+              error: { code: "revision_conflict", message: "changed", correlation_id: "conflict-1" },
+            }),
+          );
+          return;
+        }
+        res.writeHead(200);
+        res.end(
+          JSON.stringify(brokerApproval("request-1", "active", 2, { max_duration_seconds: 172_800, max_uses: 200 })),
+        );
+      } else if (req.url?.includes("/request-1")) {
+        res.writeHead(200);
+        res.end(
+          JSON.stringify(brokerApproval("request-1", "pending", 1, { max_duration_seconds: 172_800, max_uses: 200 })),
+        );
+      } else if (req.url?.includes("status=active")) {
+        res.writeHead(200);
+        res.end(JSON.stringify({ requests: [] }));
       } else {
-        res.end(JSON.stringify({ items: [brokerApproval("grant-1", "pending", 1)], has_more: false }));
+        res.writeHead(200);
+        res.end(
+          JSON.stringify({
+            requests: [brokerApproval("request-1", "pending", 1, { max_duration_seconds: 172_800, max_uses: 200 })],
+          }),
+        );
       }
     });
     await listen(broker, brokerPort);
@@ -183,12 +229,13 @@ describe("ML Claw Space runtime", () => {
     const config = await testConfig({
       allowedUsers: ["alice", "bob"],
       adminUsers: ["alice"],
+      brokerKitPluginPath: pluginRoot,
       operatorBrokers: [
         {
           id: "hf-broker",
           label: "Hugging Face",
           baseUrl: `http://127.0.0.1:${brokerPort}`,
-          token: "operator-secret",
+          token: "operator-secret-that-never-enters-openclaw",
         },
       ],
     });
@@ -198,220 +245,153 @@ describe("ML Claw Space runtime", () => {
       () => closeServer(server),
       () => runtime.stop(),
     );
-
-    const anonymous = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/approvals`);
-    const member = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/approvals`, {
-      headers: { cookie: sessionCookie(config, "bob") },
+    const base = `http://127.0.0.1:${config.port}/mlclaw/api/brokerkit`;
+    const ui = `http://127.0.0.1:${config.port}/plugins/brokerkit/ui/`;
+    const iframeHeaders = { "sec-fetch-dest": "iframe" };
+    const anonymous = await fetch(ui, { headers: iframeHeaders });
+    const member = await fetch(ui, {
+      headers: { ...iframeHeaders, cookie: sessionCookie(config, "bob") },
     });
-    const adminCookie = sessionCookie(config, "alice");
-    const directory = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/approvals/brokers`, {
-      headers: { cookie: adminCookie },
+    const fetchedDocument = await fetch(ui, {
+      headers: { cookie: sessionCookie(config, "alice") },
     });
-    const list = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/approvals?broker=hf-broker&status=pending`, {
-      headers: { cookie: adminCookie },
+    const launcher = await fetch(ui, {
+      headers: { ...iframeHeaders, cookie: sessionCookie(config, "alice") },
     });
-    const missingCsrf = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/approvals/hf-broker/grant-1/approve`, {
-      method: "POST",
-      headers: { cookie: adminCookie, "content-type": "application/json" },
-      body: JSON.stringify({ expectedRevision: 1 }),
+    const session = await fetch(ui, {
+      headers: { "sec-fetch-dest": "document", cookie: sessionCookie(config, "alice") },
     });
-    const invalidBounds = await fetch(
-      `http://127.0.0.1:${config.port}/mlclaw/api/approvals/hf-broker/grant-1/approve`,
-      {
-        method: "POST",
-        headers: {
-          cookie: adminCookie,
-          "content-type": "application/json",
-          "x-mlclaw-csrf": createCsrfToken({ username: "alice", sessionSecret: config.sessionSecret }),
-        },
-        body: JSON.stringify({ expectedRevision: 1, durationSeconds: 86_401, maxUses: 101 }),
-      },
-    );
-    const approve = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/approvals/hf-broker/grant-1/approve`, {
-      method: "POST",
-      headers: {
-        cookie: adminCookie,
-        "content-type": "application/json",
-        "x-mlclaw-csrf": createCsrfToken({ username: "alice", sessionSecret: config.sessionSecret }),
-      },
-      body: JSON.stringify({ expectedRevision: 1, expectedStatus: "pending", durationSeconds: 300, maxUses: 1 }),
-    });
-
     expect(anonymous.status).toBe(401);
     expect(member.status).toBe(403);
-    expect(directory.status).toBe(200);
-    expect(await directory.json()).toEqual({ brokers: [{ id: "hf-broker", label: "Hugging Face" }] });
-    expect(list.status).toBe(200);
-    expect(missingCsrf.status).toBe(403);
-    expect(invalidBounds.status).toBe(400);
-    await expect(invalidBounds.json()).resolves.toMatchObject({ ok: false, error: "approval bounds are invalid" });
-    expect(approve.status).toBe(200);
-    expect(brokerRequests).toEqual([
-      {
-        method: "GET",
-        url: "/api/grants?status=pending&limit=50",
-        authorization: "Bearer operator-secret",
-        body: "",
-      },
-      {
-        method: "POST",
-        url: "/api/grants/grant-1/approve",
-        authorization: "Bearer operator-secret",
-        body: JSON.stringify({
-          expected_revision: 1,
-          expected_status: "pending",
-          duration_seconds: 300,
-          max_uses: 1,
-        }),
-      },
-    ]);
-  });
+    expect(fetchedDocument.status).toBe(404);
+    expect(launcher.status).toBe(200);
+    const launcherHtml = await launcher.text();
+    expect(launcherHtml).toContain('name="brokerkit-delegated-top-level"');
+    expect(launcherHtml).not.toContain("brokerkit-delegated-session");
+    expect(session.status).toBe(200);
+    expect(session.headers.get("cache-control")).toBe("no-store");
+    expect(session.headers.get("content-security-policy")).toContain("sandbox allow-scripts");
+    expect(session.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    expect(session.headers.get("x-frame-options")).toBe("DENY");
+    const sessionHtml = await session.text();
+    const embedded = sessionHtml.match(/name="brokerkit-delegated-session" content="([A-Za-z0-9_-]+)"/u)?.[1];
+    expect(embedded).toBeDefined();
+    const sessionBody = JSON.parse(Buffer.from(embedded ?? "", "base64url").toString("utf8")) as {
+      decision_token: string;
+      expires_at: string;
+    };
+    expect(sessionBody.decision_token).not.toContain("operator-secret");
+    expect(Date.parse(sessionBody.expires_at) - Date.now()).toBeLessThanOrEqual(5 * 60_000);
+    const cookieOnly = await fetch(`${base}/snapshot`, {
+      headers: { origin: "null", cookie: sessionCookie(config, "alice") },
+    });
+    expect(cookieOnly.status).toBe(401);
+    const authorizedHeaders = {
+      origin: "null",
+      authorization: `Bearer ${sessionBody.decision_token}`,
+    };
+    const snapshot = await fetch(`${base}/snapshot`, { headers: authorizedHeaders });
+    expect(snapshot.status).toBe(200);
+    const snapshotBody = (await snapshot.json()) as { requests: Array<{ handle: string; id: string }> };
+    expect(snapshotBody.requests).toHaveLength(1);
+    expect(snapshotBody.requests[0]?.id).toBe("request-1");
+    expect(snapshotBody.requests[0]?.handle).toMatch(/^[A-Za-z0-9_-]{24}$/u);
 
-  it("keeps broker identities separate and preserves each event cursor", async () => {
-    const hfPort = await freePort();
-    const ghPort = await freePort();
-    type BrokerRequest = { method: string; url: string; cursor?: string };
-    const requests: { hf: BrokerRequest[]; gh: BrokerRequest[] } = { hf: [], gh: [] };
-    const fakeBroker = (name: "hf" | "gh") =>
-      http.createServer((req, res) => {
-        requests[name].push({
-          method: req.method ?? "",
-          url: req.url ?? "",
-          ...(req.headers["last-event-id"] ? { cursor: String(req.headers["last-event-id"]) } : {}),
-        });
-        if (req.url === "/api/grants/events") {
-          res.writeHead(200, { "content-type": "text/event-stream" });
-          res.end(`id: ${name}-cursor-2\ndata: {"cursor":"${name}-cursor-2","grant_id":"shared-id"}\n\n`);
-          return;
-        }
-        res.writeHead(200, { "content-type": "application/json" });
-        if (req.method === "POST") {
-          res.end(JSON.stringify(brokerApproval("shared-id", "denied", 2)));
-          return;
-        }
-        res.end(
-          JSON.stringify({
-            items: [brokerApproval("shared-id", "pending", 1)],
-            has_more: false,
+    const refreshes = await Promise.all(
+      Array.from({ length: 11 }, () => fetch(`${base}/snapshot`, { headers: authorizedHeaders })),
+    );
+    expect(refreshes.every((response) => response.status === 200)).toBe(true);
+    const rateLimited = await fetch(`${base}/snapshot`, { headers: authorizedHeaders });
+    expect(rateLimited.status).toBe(429);
+    expect(await rateLimited.json()).toEqual({ error: { code: "rate_limited" } });
+    const renewedSession = await fetch(`${base}/session`, { method: "POST", headers: authorizedHeaders });
+    expect(renewedSession.status).toBe(200);
+    const renewedSessionBody = (await renewedSession.json()) as { decision_token: string };
+    expect(renewedSessionBody.decision_token).not.toBe(sessionBody.decision_token);
+    const anotherSession = await fetch(ui, {
+      headers: { "sec-fetch-dest": "document", cookie: sessionCookie(config, "alice") },
+    });
+    const anotherHtml = await anotherSession.text();
+    const anotherEmbedded = anotherHtml.match(/name="brokerkit-delegated-session" content="([A-Za-z0-9_-]+)"/u)?.[1];
+    const anotherSessionBody = JSON.parse(Buffer.from(anotherEmbedded ?? "", "base64url").toString("utf8")) as {
+      decision_token: string;
+    };
+    const independentTab = await fetch(`${base}/snapshot`, {
+      headers: { origin: "null", authorization: `Bearer ${anotherSessionBody.decision_token}` },
+    });
+    expect(independentTab.status).toBe(200);
+    for (const requestCount of [12, 12, 12, 11]) {
+      const actorSession = await fetch(ui, {
+        headers: { "sec-fetch-dest": "document", cookie: sessionCookie(config, "alice") },
+      });
+      const actorHtml = await actorSession.text();
+      const actorEmbedded = actorHtml.match(/name="brokerkit-delegated-session" content="([A-Za-z0-9_-]+)"/u)?.[1];
+      const actorBody = JSON.parse(Buffer.from(actorEmbedded ?? "", "base64url").toString("utf8")) as {
+        decision_token: string;
+      };
+      const responses = await Promise.all(
+        Array.from({ length: requestCount }, () =>
+          fetch(`${base}/snapshot`, {
+            headers: { origin: "null", authorization: `Bearer ${actorBody.decision_token}` },
           }),
-        );
-      });
-    const hf = fakeBroker("hf");
-    const gh = fakeBroker("gh");
-    await listen(hf, hfPort);
-    await listen(gh, ghPort);
-    cleanups.push(
-      () => closeServer(hf),
-      () => closeServer(gh),
-    );
-    const config = await testConfig({
-      operatorBrokers: [
-        { id: "hf-broker", label: "Hugging Face", baseUrl: `http://127.0.0.1:${hfPort}`, token: "h".repeat(32) },
-        { id: "gh-broker", label: "GitHub", baseUrl: `http://127.0.0.1:${ghPort}`, token: "g".repeat(32) },
-      ],
-    });
-    const runtime = new SpaceRuntimeServer(config);
-    const server = await runtime.start();
-    cleanups.push(
-      () => closeServer(server),
-      () => runtime.stop(),
-    );
-    const cookie = sessionCookie(config, "alice");
-
-    const hfList = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/approvals?broker=hf-broker&status=pending`, {
-      headers: { cookie },
-    });
-    const ghList = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/approvals?broker=gh-broker&status=pending`, {
-      headers: { cookie },
-    });
-    expect(await hfList.json()).toMatchObject({ broker: { id: "hf-broker" }, items: [{ id: "shared-id" }] });
-    expect(await ghList.json()).toMatchObject({ broker: { id: "gh-broker" }, items: [{ id: "shared-id" }] });
-
-    const denied = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/approvals/gh-broker/shared-id/deny`, {
-      method: "POST",
-      headers: {
-        cookie,
-        "content-type": "application/json",
-        "x-mlclaw-csrf": createCsrfToken({ username: "alice", sessionSecret: config.sessionSecret }),
-      },
-      body: JSON.stringify({ expectedRevision: 1, expectedStatus: "pending", reason: "not now" }),
-    });
-    expect(await denied.json()).toMatchObject({
-      broker: { id: "gh-broker" },
-      item: { id: "shared-id", status: "denied" },
-    });
-    expect(requests.hf.some((request) => request.method === "POST")).toBe(false);
-    expect(requests.gh.some((request) => request.url === "/api/grants/shared-id/deny")).toBe(true);
-
-    const events = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/approvals/events?broker=hf-broker`, {
-      headers: { cookie, "last-event-id": "hf-cursor-1" },
-    });
-    expect(events.status).toBe(200);
-    expect(await events.text()).toContain("hf-cursor-2");
-    expect(requests.hf.some((request) => request.cursor === "hf-cursor-1")).toBe(true);
-
-    await closeServer(hf);
-    const unavailable = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/approvals?broker=hf-broker`, {
-      headers: { cookie },
-    });
-    const stillHealthy = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/approvals?broker=gh-broker`, {
-      headers: { cookie },
-    });
-    expect(unavailable.status).toBe(502);
-    expect(stillHealthy.status).toBe(200);
-  });
-
-  it("cancels a broker event stream when the browser disconnects", async () => {
-    const brokerPort = await freePort();
-    let markUpstreamClosed: (() => void) | undefined;
-    const upstreamClosed = new Promise<void>((resolve) => {
-      markUpstreamClosed = resolve;
-    });
-    const broker = http.createServer((req, res) => {
-      res.once("close", () => markUpstreamClosed?.());
-      res.writeHead(200, { "content-type": "text/event-stream" });
-      res.write(": connected\n\n");
-    });
-    await listen(broker, brokerPort);
-    cleanups.push(() => closeServer(broker));
-
-    const config = await testConfig({
-      operatorBrokers: [
-        { id: "hf-broker", label: "Hugging Face", baseUrl: `http://127.0.0.1:${brokerPort}`, token: "h".repeat(32) },
-      ],
-    });
-    const runtime = new SpaceRuntimeServer(config);
-    const server = await runtime.start();
-    cleanups.push(
-      () => closeServer(server),
-      () => runtime.stop(),
-    );
-
-    await new Promise<void>((resolve, reject) => {
-      const request = http.get(
-        {
-          hostname: "127.0.0.1",
-          port: config.port,
-          path: "/mlclaw/api/approvals/events?broker=hf-broker",
-          headers: { cookie: sessionCookie(config, "alice") },
-        },
-        (response) => {
-          response.once("data", () => {
-            request.destroy();
-            resolve();
-          });
-        },
+        ),
       );
-      request.once("error", (err) => {
-        if (!request.destroyed) {
-          reject(err);
-        }
-      });
+      expect(responses.every((response) => response.status === 200)).toBe(true);
+    }
+    const actorLimited = await fetch(`${base}/snapshot`, {
+      headers: { origin: "null", authorization: `Bearer ${renewedSessionBody.decision_token}` },
     });
-    await Promise.race([
-      upstreamClosed,
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("upstream SSE stayed open")), 1_000)),
+    expect(actorLimited.status).toBe(429);
+    brokerRequests.length = 0;
+
+    const requestUrl = `${base}/requests/${snapshotBody.requests[0]?.handle}/approve`;
+    const oversized = await fetch(requestUrl, {
+      method: "POST",
+      headers: { ...authorizedHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ expectedRevision: 1, reason: "x".repeat(17_000) }),
+    });
+    expect(oversized.status).toBe(400);
+    const legacyShape = await fetch(requestUrl, {
+      method: "POST",
+      headers: { ...authorizedHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ expectedRevision: 1, durationSeconds: 300, maxUses: 1 }),
+    });
+    expect(legacyShape.status).toBe(400);
+
+    const decisionBody = JSON.stringify({
+      expectedRevision: 1,
+      reason: "approved in the Gateway",
+      constraints: { durationSeconds: 172_800, maxUses: 200 },
+    });
+    const conflict = await fetch(requestUrl, {
+      method: "POST",
+      headers: { ...authorizedHeaders, "content-type": "application/json" },
+      body: decisionBody,
+    });
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toEqual({ error: { code: "revision_stale" } });
+
+    const approve = await fetch(requestUrl, {
+      method: "POST",
+      headers: { ...authorizedHeaders, "content-type": "application/json" },
+      body: decisionBody,
+    });
+    expect(approve.status).toBe(200);
+    expect(brokerRequests.map((request) => request.url)).toEqual([
+      "/api/operator/v1/requests/request-1",
+      "/api/operator/v1/requests/request-1/approve",
+      "/api/operator/v1/requests/request-1",
+      "/api/operator/v1/requests/request-1/approve",
     ]);
+    expect(
+      brokerRequests.every((request) => request.authorization === "Bearer operator-secret-that-never-enters-openclaw"),
+    ).toBe(true);
+    expect(JSON.parse(brokerRequests.at(-1)?.body ?? "{}")).toMatchObject({
+      expected_revision: 1,
+      on_behalf_of: "mlclaw:alice",
+      decision_reason: "approved in the Gateway",
+      constraints: { duration_seconds: 172_800, max_uses: 200 },
+    });
   });
 
   it("fails health checks closed until broker inference routes are ready", async () => {
@@ -821,7 +801,7 @@ describe("ML Claw Space runtime", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(capturedHeaders?.["x-openclaw-scopes"]).toBe("operator.read,operator.write,operator.approvals");
+    expect(capturedHeaders?.["x-openclaw-scopes"]).toBe("operator.read,operator.write");
   });
 
   it("returns a generic upstream error when OpenClaw is unavailable", async () => {
@@ -1274,8 +1254,9 @@ describe("ML Claw Space runtime", () => {
     expect(body).toContain('name="application-name" content="Research"');
     expect(body).toContain("data-mlclaw-shell");
     expect(body).toContain("data-mlclaw-control-branding");
-    expect(body).toContain("data-mlclaw-approvals-button");
-    expect(body).toContain("data-mlclaw-approvals-frame");
+    expect(body).not.toContain("data-mlclaw-approvals-button");
+    expect(body).not.toContain("data-mlclaw-approvals-frame");
+    expect(body).not.toContain("mlclaw-approvals-popover");
     expect(body).toContain('src="/assets/mlclaw-control-branding.js"');
     expect(body).toContain('href="/mlclaw"');
     expect(body).toContain("width:34px;height:34px");
@@ -1303,13 +1284,81 @@ describe("ML Claw Space runtime", () => {
     expect(branding.status).toBe(200);
     expect(branding.headers.get("content-type")).toContain("text/javascript");
     expect(branding.headers.get("cache-control")).toContain("no-store");
-    expect(await branding.text()).toContain('var productName = "ML Claw"');
+    const brandingScript = await branding.text();
+    expect(brandingScript).toContain('var productName = "ML Claw"');
+    expect(brandingScript).not.toContain("brokerkit.delegated-web.session.request");
+    expect(brandingScript).not.toContain("brokerKitSession");
+    expect(brandingScript).toContain("brokerkit.delegated-web.open");
+    expect(brandingScript).toContain("brokerKitFrameIn(document, event.source)");
+    expect(brandingScript).toContain('frameUrl.pathname === "/plugins/brokerkit/ui/"');
 
     const sw = await fetch(`http://127.0.0.1:${config.port}/sw.js`);
     expect(sw.status).toBe(200);
     expect(sw.headers.get("content-type")).toContain("text/javascript");
     expect(sw.headers.get("cache-control")).toContain("no-store");
     expect(await sw.text()).toContain("registration.unregister");
+  });
+
+  it("serves the packaged BrokerKit UI from the trusted ML Claw boundary", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "mlclaw-brokerkit-ui-"));
+    cleanups.push(() => fs.rm(root, { recursive: true, force: true }));
+    const uiDir = path.join(root, "dist", "ui", "assets");
+    await fs.mkdir(uiDir, { recursive: true });
+    await fs.writeFile(
+      path.join(root, "dist", "ui", "index.html"),
+      "<!doctype html><html><head><title>Trusted BrokerKit</title></head><body></body></html>",
+    );
+    await fs.writeFile(path.join(uiDir, "app.js"), "globalThis.trustedBrokerKit = true;");
+    const config = await testConfig({
+      allowedUsers: ["alice", "bob"],
+      adminUsers: ["alice"],
+      brokerKitPluginPath: root,
+    });
+    const runtime = new SpaceRuntimeServer(config);
+    const server = await runtime.start();
+    cleanups.push(
+      () => closeServer(server),
+      () => runtime.stop(),
+    );
+
+    const base = `http://127.0.0.1:${config.port}/plugins/brokerkit/ui/`;
+    const page = await fetch(base, {
+      headers: { "sec-fetch-dest": "iframe", cookie: sessionCookie(config, "alice") },
+    });
+    expect(page.status).toBe(200);
+    expect(page.headers.get("content-type")).toContain("text/html");
+    const launcherHtml = await page.text();
+    expect(launcherHtml).toContain("Trusted BrokerKit");
+    expect(launcherHtml).toContain('name="brokerkit-delegated-top-level"');
+    expect(launcherHtml).not.toContain("brokerkit-delegated-session");
+    expect(page.headers.get("cache-control")).toBe("no-store");
+    expect(page.headers.get("content-security-policy")).toContain("frame-ancestors 'self'");
+    expect(page.headers.get("content-security-policy")).toContain("sandbox allow-scripts");
+    expect(page.headers.get("x-frame-options")).toBe("SAMEORIGIN");
+
+    const topLevel = await fetch(base, {
+      headers: { "sec-fetch-dest": "document", cookie: sessionCookie(config, "alice") },
+    });
+    const topLevelHtml = await topLevel.text();
+    expect(topLevel.status).toBe(200);
+    expect(topLevelHtml).toContain('name="brokerkit-delegated-session"');
+    expect(topLevelHtml).not.toContain("brokerkit-delegated-top-level");
+    expect(topLevel.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    expect(topLevel.headers.get("x-frame-options")).toBe("DENY");
+
+    const asset = await fetch(`${base}assets/app.js`, {
+      headers: { cookie: sessionCookie(config, "alice") },
+    });
+    expect(asset.status).toBe(200);
+    expect(asset.headers.get("cache-control")).toContain("immutable");
+    expect(asset.headers.get("access-control-allow-origin")).toBe("null");
+    expect(asset.headers.get("cross-origin-resource-policy")).toBe("cross-origin");
+    expect(await asset.text()).toContain("trustedBrokerKit");
+
+    const member = await fetch(base, {
+      headers: { "sec-fetch-dest": "iframe", cookie: sessionCookie(config, "bob") },
+    });
+    expect(member.status).toBe(403);
   });
 
   it("does not inject the ML Claw shell into proxied JSON", async () => {
@@ -1656,6 +1705,11 @@ describe("ML Claw Space runtime", () => {
             },
           },
         },
+        plugins: {
+          allow: ["custom"],
+          load: { paths: ["/opt/custom-plugin"] },
+          entries: { custom: { enabled: true } },
+        },
       }),
     );
     const config = await testConfig({
@@ -1682,6 +1736,7 @@ describe("ML Claw Space runtime", () => {
       controlUi: {
         dangerouslyDisableDeviceAuth: true,
         allowedOrigins: ["https://alice-research.hf.space"],
+        embedSandbox: "scripts",
       },
     });
     expect(rewritten.agents.defaults.model.primary).toBe("huggingface/google/gemma-4-26B-A4B-it:deepinfra");
@@ -1727,6 +1782,36 @@ describe("ML Claw Space runtime", () => {
       url: `http://127.0.0.1:${config.mcpPort}/mcp/research`,
       transport: "streamable-http",
     });
+    expect(rewritten.plugins).toEqual({
+      allow: ["custom", "brokerkit"],
+      load: { paths: ["/opt/custom-plugin", config.brokerKitPluginPath] },
+      entries: {
+        custom: { enabled: true },
+        brokerkit: {
+          enabled: true,
+          config: {
+            mode: "delegated-web",
+            delegatedWeb: { basePath: "/mlclaw/api/brokerkit" },
+          },
+        },
+      },
+    });
+    expect(JSON.stringify(rewritten.plugins)).not.toContain("operator-secret");
+  });
+
+  it("does not create a restrictive plugin allowlist", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "mlclaw-openclaw-plugins-"));
+    cleanups.push(() => fs.rm(root, { recursive: true, force: true }));
+    const configPath = path.join(root, "openclaw.json");
+    await fs.writeFile(configPath, JSON.stringify({ plugins: { entries: { telegram: { enabled: true } } } }));
+    const config = await testConfig({ openclawConfigPath: configPath });
+
+    await configureOpenClawGateway(config);
+
+    const rewritten = JSON.parse(await fs.readFile(configPath, "utf8"));
+    expect(rewritten.plugins.allow).toBeUndefined();
+    expect(rewritten.plugins.entries.telegram).toEqual({ enabled: true });
+    expect(rewritten.plugins.entries.brokerkit.enabled).toBe(true);
   });
 
   it("configures OpenClaw inference with only the broker agent credential", async () => {
@@ -1932,6 +2017,7 @@ async function testConfig(overrides: Partial<SpaceRuntimeConfig> = {}): Promise<
     openclawConfigPath: configPath,
     openclawCommand: process.execPath,
     openclawArgs: ["-e", "setInterval(() => undefined, 100000)"],
+    brokerKitPluginPath: "/opt/openclaw-plugins/node_modules/openclaw-brokerkit",
     agentName: "research",
     model: "huggingface/google/gemma-4-26B-A4B-it:deepinfra",
     modelChoices: PRESET_MODEL_CHOICES,

@@ -48,6 +48,7 @@ export type SpaceRuntimeConfig = {
   openclawConfigPath: string;
   openclawCommand: string;
   openclawArgs: string[];
+  brokerKitPluginPath: string;
   agentName: string | undefined;
   model: string;
   modelChoices: ModelChoice[];
@@ -154,6 +155,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpaceRuntimeCo
     openclawConfigPath: trim(env.OPENCLAW_CONFIG_PATH) ?? "/home/node/.local/share/mlclaw/live/.openclaw/openclaw.json",
     openclawCommand,
     openclawArgs,
+    brokerKitPluginPath:
+      trim(env.MLCLAW_BROKERKIT_PLUGIN_PATH) ?? "/opt/openclaw-plugins/node_modules/openclaw-brokerkit",
     agentName,
     model,
     modelChoices: runtimeSettings.modelChoices ?? parseModelChoicesEnv(env.MLCLAW_MODEL_CHOICES, model),

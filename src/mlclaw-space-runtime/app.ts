@@ -4,14 +4,10 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { brandingManifest, publicBranding } from "./branding.js";
 import { integrationCredentialSlot, type SpaceRuntimeConfig } from "./config.js";
-import {
-  BrokerOperatorError,
-  OperatorBrokerRegistry,
-  type BrokerOperatorClient,
-  type OperatorBrokerSummary,
-} from "./operator-brokers.js";
+import { BrokerOperatorError, OperatorBrokerRegistry } from "./operator-brokers.js";
 import type { McpCredentialStatus } from "./mcp-credentials.js";
 import { createCsrfToken, verifyCsrfToken } from "./csrf.js";
+import { DelegatedBrokerKit, DelegatedBrokerKitError, type DelegatedSessionIdentity } from "./delegated-brokerkit.js";
 import {
   normalizeModel,
   restartCurrentSpace,
@@ -63,6 +59,9 @@ export type RuntimeControls = {
 export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: RuntimeControls): Hono {
   const app = new Hono();
   const operatorBrokers = new OperatorBrokerRegistry(config.operatorBrokers);
+  const delegatedBrokerKit = new DelegatedBrokerKit(operatorBrokers, config.sessionSecret);
+  const allowDelegatedSessionSnapshot = fixedWindowRateLimit(12, 60_000);
+  const allowDelegatedActorSnapshot = fixedWindowRateLimit(60, 60_000);
   const openAiCredentials = new OpenAiCredentialStore(config.openaiCredentialStoreFile, config.credentialKey);
 
   app.get("/health", (c) => health(c, config, controls));
@@ -77,6 +76,8 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
     serveFile(path.join(config.assetsDir, "assistant-avatar.svg"), "image/svg+xml; charset=utf-8"),
   );
   app.get("/assets/mlclaw-control-branding.js", () => staticScript(CONTROL_BRANDING_SCRIPT));
+  app.get("/plugins/brokerkit/ui", (c) => c.redirect("/plugins/brokerkit/ui/", 308));
+  app.get("/plugins/brokerkit/ui/*", (c) => trustedBrokerKitUi(c, config, delegatedBrokerKit));
   app.get("/assets/brand/logo", async () => serveBrandAsset(config, config.branding.logoAsset));
   app.get("/favicon.svg", async () => serveBrandAsset(config, config.branding.faviconSvgAsset));
   app.get("/favicon-32.png", async () => serveBrandAsset(config, config.branding.favicon32Asset));
@@ -135,126 +136,74 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
     return c.json(await statusPayload(config, controls));
   });
 
-  app.get("/mlclaw/api/approvals/brokers", (c) => {
-    const auth = requireAdmin(c, config);
-    if (auth instanceof Response) {
-      return auth;
-    }
-    return c.json({ brokers: operatorBrokers.list() });
+  app.options("/mlclaw/api/brokerkit/*", (c) => delegatedPreflight(c));
+
+  app.post("/mlclaw/api/brokerkit/session", (c) => {
+    const identity = delegatedIdentity(c, delegatedBrokerKit);
+    if (!identity) return delegatedErrorResponse(c, "not_authorized", 401);
+    return delegatedJson(c, delegatedBrokerKit.issueSession(identity.actor));
   });
 
-  app.get("/mlclaw/api/approvals", async (c) => {
-    const auth = requireAdmin(c, config);
-    if (auth instanceof Response) {
-      return auth;
-    }
-    const broker = selectedOperatorBroker(c, operatorBrokers);
-    if (broker instanceof Response) {
-      return broker;
-    }
-    const rawStatus = c.req.query("status");
-    if (rawStatus && rawStatus !== "pending" && rawStatus !== "history") {
-      return c.json({ ok: false, error: "status must be pending or history" }, 400);
-    }
-    const status: "pending" | "history" | undefined =
-      rawStatus === "pending" || rawStatus === "history" ? rawStatus : undefined;
-    const cursor = c.req.query("cursor");
-    try {
-      const page = await broker.list({
-        ...(status ? { status } : {}),
-        ...(cursor ? { cursor } : {}),
-        limit: boundedInteger(c.req.query("limit"), 50, 100),
-      });
-      return c.json({ broker: broker.summary(), ...page });
-    } catch (err) {
-      return brokerFailure(c, err, broker.summary());
-    }
-  });
-
-  app.get("/mlclaw/api/approvals/events", async (c) => {
-    const auth = requireAdmin(c, config);
-    if (auth instanceof Response) {
-      return auth;
-    }
-    const broker = selectedOperatorBroker(c, operatorBrokers);
-    if (broker instanceof Response) {
-      return broker;
+  app.get("/mlclaw/api/brokerkit/snapshot", async (c) => {
+    const identity = delegatedIdentity(c, delegatedBrokerKit);
+    if (!identity) return delegatedErrorResponse(c, "not_authorized", 401);
+    if (!allowDelegatedSessionSnapshot(identity.sessionId) || !allowDelegatedActorSnapshot(identity.actor)) {
+      return delegatedErrorResponse(c, "rate_limited", 429);
     }
     try {
-      const upstream = await broker.events(c.req.header("last-event-id"), c.req.raw.signal);
-      return new Response(upstream.body, {
-        status: 200,
-        headers: {
-          "cache-control": "no-store",
-          "content-type": "text/event-stream",
-          "x-accel-buffering": "no",
-        },
-      });
-    } catch (err) {
-      return brokerFailure(c, err, broker.summary());
+      return delegatedJson(c, await delegatedBrokerKit.snapshot());
+    } catch (error) {
+      return delegatedFailure(c, error);
     }
   });
 
-  app.get("/mlclaw/api/approvals/:broker/:id", async (c) => {
-    const auth = requireAdmin(c, config);
-    if (auth instanceof Response) {
-      return auth;
-    }
-    const broker = operatorBrokers.get(c.req.param("broker"));
-    if (!broker) {
-      return c.json({ ok: false, error: "operator broker is not configured" }, 404);
-    }
+  app.get("/mlclaw/api/brokerkit/requests/:handle", async (c) => {
+    const identity = delegatedIdentity(c, delegatedBrokerKit);
+    if (!identity) return delegatedErrorResponse(c, "not_authorized", 401);
     try {
-      return c.json({ broker: broker.summary(), item: await broker.get(c.req.param("id")) });
-    } catch (err) {
-      return brokerFailure(c, err, broker.summary());
+      return delegatedJson(c, await delegatedBrokerKit.detail(c.req.param("handle")));
+    } catch (error) {
+      return delegatedFailure(c, error);
     }
   });
 
-  for (const [browserAction, brokerAction] of [
-    ["approve", "approve"],
-    ["deny", "deny"],
-    ["cancel", "cancel"],
-    ["revoke", "revoke"],
-  ] as const) {
-    app.post(`/mlclaw/api/approvals/:broker/:id/${browserAction}`, async (c) => {
-      const auth = requireAdmin(c, config);
-      if (auth instanceof Response) {
-        return auth;
+  for (const action of ["approve", "deny", "cancel", "revoke"] as const) {
+    app.post(`/mlclaw/api/brokerkit/requests/:handle/${action}`, async (c) => {
+      const identity = delegatedIdentity(c, delegatedBrokerKit);
+      if (!identity) return delegatedErrorResponse(c, "not_authorized", 401);
+      const body = await readBoundedJson(c, 16_384);
+      if (!body || Object.keys(body).some((key) => !["expectedRevision", "reason", "constraints"].includes(key))) {
+        return delegatedErrorResponse(c, "invalid_input", 400);
       }
-      const csrf = requireCsrf(c, config, auth.username);
-      if (csrf) {
-        return csrf;
-      }
-      const broker = operatorBrokers.get(c.req.param("broker"));
-      if (!broker) {
-        return c.json({ ok: false, error: "operator broker is not configured" }, 404);
-      }
-      const body = await readJson(c);
-      const expectedRevision = boundedInteger(body?.expectedRevision, 0, Number.MAX_SAFE_INTEGER);
-      if (!expectedRevision) {
-        return c.json({ ok: false, error: "expectedRevision is required" }, 400);
-      }
-      const durationSeconds = optionalPositiveInteger(body?.durationSeconds, 86_400);
-      const maxUses = optionalPositiveInteger(body?.maxUses, 100);
-      if (browserAction === "approve" && (durationSeconds === "invalid" || maxUses === "invalid")) {
-        return c.json({ ok: false, error: "approval bounds are invalid" }, 400);
+      const constraints = recordValue(body.constraints);
+      const expectedRevision = positiveJsonInteger(body.expectedRevision);
+      const durationSeconds = optionalPositiveJsonInteger(constraints?.durationSeconds);
+      const maxUses = optionalPositiveJsonInteger(constraints?.maxUses);
+      if (
+        !expectedRevision ||
+        (body.reason !== undefined && (typeof body.reason !== "string" || body.reason.length > 2_000)) ||
+        (body.constraints !== undefined &&
+          (!constraints ||
+            Object.keys(constraints).some((key) => !["durationSeconds", "maxUses"].includes(key)) ||
+            durationSeconds === undefined ||
+            maxUses === undefined)) ||
+        durationSeconds === "invalid" ||
+        maxUses === "invalid" ||
+        (action !== "approve" && (durationSeconds !== undefined || maxUses !== undefined))
+      ) {
+        return delegatedErrorResponse(c, "invalid_input", 400);
       }
       try {
-        const item = await broker.decide(c.req.param("id"), brokerAction, {
-          expectedRevision,
-          ...(typeof body?.expectedStatus === "string" ? { expectedStatus: body.expectedStatus } : {}),
-          ...(typeof body?.reason === "string" ? { reason: body.reason.slice(0, 2_000) } : {}),
-          ...(browserAction === "approve"
-            ? {
-                ...(typeof durationSeconds === "number" ? { durationSeconds } : {}),
-                ...(typeof maxUses === "number" ? { maxUses } : {}),
-              }
-            : {}),
-        });
-        return c.json({ broker: broker.summary(), item });
-      } catch (err) {
-        return brokerFailure(c, err, broker.summary());
+        return delegatedJson(
+          c,
+          await delegatedBrokerKit.decide(c.req.param("handle"), action, expectedRevision, identity.actor, {
+            ...(typeof body.reason === "string" ? { reason: body.reason } : {}),
+            ...(typeof durationSeconds === "number" ? { durationSeconds } : {}),
+            ...(typeof maxUses === "number" ? { maxUses } : {}),
+          }),
+        );
+      } catch (error) {
+        return delegatedFailure(c, error);
       }
     });
   }
@@ -542,6 +491,60 @@ async function controlUi(c: Context, config: SpaceRuntimeConfig): Promise<Respon
   return serveFile(path.join(config.assetsDir, "mlclaw-control-ui", "index.html"), "text/html; charset=utf-8");
 }
 
+async function trustedBrokerKitUi(
+  c: Context,
+  config: SpaceRuntimeConfig,
+  delegatedBrokerKit: DelegatedBrokerKit,
+): Promise<Response> {
+  const prefix = "/plugins/brokerkit/ui/";
+  const requested = c.req.path.slice(prefix.length);
+  const relative = requested ? safeRelativePath(requested) : "index.html";
+  if (!relative) return c.text("not found\n", 404);
+  const uiDir = path.join(config.brokerKitPluginPath, "dist", "ui");
+  const file = path.join(uiDir, relative);
+  if (relative === "index.html") {
+    const destination = c.req.header("sec-fetch-dest");
+    if (destination !== "iframe" && destination !== "document") return c.text("not found\n", 404);
+    const auth = requireAdmin(c, config);
+    if (auth instanceof Response) return auth;
+    try {
+      const template = await fs.readFile(file, "utf8");
+      const marker =
+        destination === "iframe"
+          ? '<meta name="brokerkit-delegated-top-level">'
+          : `<meta name="brokerkit-delegated-session" content="${Buffer.from(
+              JSON.stringify(delegatedBrokerKit.issueSession(auth.username)),
+              "utf8",
+            ).toString("base64url")}">`;
+      if (!template.includes("</head>")) return c.text("not found\n", 404);
+      const headers = trustedBrokerKitHeaders(destination === "iframe" ? "launcher" : "top-level");
+      headers.set("content-type", "text/html; charset=utf-8");
+      return new Response(template.replace("</head>", `${marker}</head>`), { status: 200, headers });
+    } catch {
+      return c.text("not found\n", 404);
+    }
+  }
+  const response = await serveFile(file, contentType(file), true);
+  if (response.status !== 200) return response;
+  const headers = trustedBrokerKitHeaders("asset");
+  headers.set("content-type", response.headers.get("content-type") ?? "application/octet-stream");
+  return new Response(response.body, { status: response.status, headers });
+}
+
+function trustedBrokerKitHeaders(mode: "launcher" | "top-level" | "asset"): Headers {
+  const asset = mode === "asset";
+  const headers = new Headers({
+    "cache-control": asset ? "public, max-age=31536000, immutable" : "no-store",
+    "content-security-policy": `sandbox allow-scripts; default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors ${mode === "top-level" ? "'none'" : "'self'"}`,
+    "cross-origin-resource-policy": asset ? "cross-origin" : "same-origin",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": mode === "top-level" ? "DENY" : "SAMEORIGIN",
+  });
+  if (asset) headers.set("access-control-allow-origin", "null");
+  return headers;
+}
+
 function logoutResponse(config: SpaceRuntimeConfig, json: boolean): Response {
   const headers = new Headers();
   headers.append("set-cookie", clearSessionCookie(config.cookieSecure));
@@ -604,22 +607,74 @@ function optionalPositiveInteger(value: unknown, maximum: number): number | "inv
   return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= maximum ? parsed : "invalid";
 }
 
-function selectedOperatorBroker(c: Context, registry: OperatorBrokerRegistry): BrokerOperatorClient | Response {
-  const id = c.req.query("broker");
-  if (!id) {
-    return c.json({ ok: false, error: "broker is required" }, 400);
-  }
-  return registry.get(id) ?? c.json({ ok: false, error: "operator broker is not configured" }, 404);
+function delegatedOriginAllowed(c: Context): boolean {
+  return c.req.header("origin") === "null";
 }
 
-function brokerFailure(c: Context, err: unknown, broker: OperatorBrokerSummary): Response {
-  const upstream =
-    err instanceof BrokerOperatorError ? ` status=${err.status}${err.code ? ` code=${err.code}` : ""}` : "";
-  process.stderr.write(`[mlclaw] ${broker.id} operator request failed${upstream}: ${formatError(err)}\n`);
-  if (err instanceof BrokerOperatorError && err.status >= 400 && err.status < 500) {
-    return c.json({ ok: false, error: err.message, ...(err.code ? { code: err.code } : {}) }, err.status as 400);
+function delegatedIdentity(c: Context, delegated: DelegatedBrokerKit): DelegatedSessionIdentity | undefined {
+  if (!delegatedOriginAllowed(c)) return undefined;
+  return delegated.authorizeSession(c.req.header("authorization"));
+}
+
+function delegatedPreflight(c: Context): Response {
+  if (!delegatedOriginAllowed(c)) return delegatedErrorResponse(c, "not_authorized", 403);
+  delegatedHeaders(c);
+  c.header("access-control-allow-headers", "authorization, content-type");
+  c.header("access-control-allow-methods", "GET, POST, OPTIONS");
+  c.header("access-control-max-age", "300");
+  return c.body(null, 204);
+}
+
+function delegatedJson(c: Context, value: unknown, status: 200 | 201 = 200): Response {
+  delegatedHeaders(c);
+  return c.json(value, status);
+}
+
+function delegatedErrorResponse(c: Context, code: string, status: 400 | 401 | 403 | 404 | 409 | 429 | 502): Response {
+  delegatedHeaders(c);
+  return c.json({ error: { code } }, status);
+}
+
+function delegatedFailure(c: Context, error: unknown): Response {
+  if (error instanceof DelegatedBrokerKitError) {
+    const status =
+      error.code === "request_not_found"
+        ? 404
+        : error.code === "revision_stale" || error.code === "action_not_allowed"
+          ? 409
+          : 502;
+    return delegatedErrorResponse(c, error.code, status);
   }
-  return c.json({ ok: false, error: `${broker.label} operator API is unavailable` }, 502);
+  if (error instanceof BrokerOperatorError) {
+    const code = delegatedBrokerCode(error.code);
+    const status = error.status === 404 ? 404 : error.status === 409 ? 409 : 502;
+    return delegatedErrorResponse(c, code, status);
+  }
+  process.stderr.write(`[mlclaw] delegated BrokerKit request failed: ${formatError(error)}\n`);
+  return delegatedErrorResponse(c, "source_unavailable", 502);
+}
+
+function delegatedHeaders(c: Context): void {
+  c.header("access-control-allow-origin", "null");
+  c.header("access-control-allow-credentials", "true");
+  c.header("cache-control", "no-store");
+  c.header("vary", "origin");
+  c.header("x-content-type-options", "nosniff");
+}
+
+function delegatedBrokerCode(value: string | undefined): string {
+  if (value === "not_found" || value === "request_not_found") return "request_not_found";
+  if (value === "revision_conflict" || value === "revision_stale") return "revision_stale";
+  if (
+    value === "invalid_transition" ||
+    value === "constraint_exceeded" ||
+    value === "idempotency_conflict" ||
+    value === "request_terminal" ||
+    value === "action_not_allowed"
+  ) {
+    return "action_not_allowed";
+  }
+  return "source_unavailable";
 }
 
 function unauthenticated(c: Context, config: SpaceRuntimeConfig): Response {
@@ -766,6 +821,67 @@ async function readJson(c: Context): Promise<Record<string, unknown> | undefined
   } catch {
     return undefined;
   }
+}
+
+async function readBoundedJson(c: Context, maximum: number): Promise<Record<string, unknown> | undefined> {
+  if (c.req.header("content-type")?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json") return undefined;
+  const declaredLength = Number(c.req.header("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > maximum) return undefined;
+  const body = c.req.raw.body;
+  if (!body) return undefined;
+  const reader = body.getReader();
+  const chunks: Buffer[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maximum) {
+        await reader.cancel();
+        return undefined;
+      }
+      chunks.push(Buffer.from(value));
+    }
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks));
+    return recordValue(JSON.parse(text));
+  } catch {
+    return undefined;
+  }
+}
+
+function positiveJsonInteger(value: unknown): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : 0;
+}
+
+function optionalPositiveJsonInteger(value: unknown): number | "invalid" | undefined {
+  if (value === undefined) return undefined;
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : "invalid";
+}
+
+function fixedWindowRateLimit(limit: number, windowMs: number): (key: string) => boolean {
+  const windows = new Map<string, { startedAt: number; count: number }>();
+  return (key) => {
+    const now = Date.now();
+    const current = windows.get(key);
+    if (!current || now - current.startedAt >= windowMs) {
+      if (!current && windows.size >= 1_024) {
+        for (const [candidate, entry] of windows) {
+          if (now - entry.startedAt >= windowMs) windows.delete(candidate);
+        }
+        if (windows.size >= 1_024) return false;
+      }
+      windows.set(key, { startedAt: now, count: 1 });
+      return true;
+    }
+    if (current.count >= limit) return false;
+    current.count += 1;
+    return true;
+  };
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 }
 
 async function writeRuntimeSettingsFile(

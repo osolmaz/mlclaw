@@ -100,14 +100,36 @@ ML Claw validates the complete file and every referenced token before opening
 its HTTP listener. It does not reload either file during requests. A restart is
 required after changing broker entries or rotating tokens.
 
-The backend exposes only fixed list, detail, event, approve, deny, cancel, and
-revoke operations. Browser routes include the broker ID, so grant IDs only need
-to be unique within one broker.
+The backend discovers and validates each broker's BrokerKit Operator V1 API,
+then exposes only fixed list, detail, approve, deny, cancel, and revoke
+operations to the packaged OpenClaw plugin UI. Browser actions address
+short-lived opaque handles; canonical broker and request IDs are display and
+audit fields and are never accepted for routing. The browser receives a
+short-lived token bound to the authenticated ML Claw admin; that token cannot
+call a broker directly.
+
+The OpenClaw plugin registers the Gateway tab, but ML Claw intercepts the tab's
+fixed UI path and serves the immutable packaged assets from its trusted HTTP
+boundary. The framed tab contains only a launcher. After an operator clicks it,
+ML Claw navigates the whole tab to an authenticated, unframeable document with
+an opaque CSP-sandboxed origin and a short-lived delegated session. The document
+renews that session using its current bearer token; it never sends ML Claw
+cookies to the delegated API. The OpenClaw process therefore never receives
+broker credentials, delegated decision tokens, or control over the decision UI.
+
+ML Claw refreshes current request state and revision immediately before every
+decision. It sends actor attribution and a deterministic idempotency key to the
+selected broker. An unavailable broker is reported as a redacted source error
+without hiding healthy brokers.
 
 Unknown top-level or broker fields are rejected. Relative token paths, duplicate
 IDs, duplicate URLs, inline tokens, and unsupported versions are invalid.
 
 ## Scope
 
-This format configures operator inbox connectivity only. It does not configure
-agent credentials, policy, Telegram, broker storage, or privileged execution.
+This format configures operator inbox connectivity only. The OpenClaw plugin is
+installed and registered by the ML Claw runtime in `delegated-web` mode; it does
+not receive broker credentials or register approval commands. Delegated
+sessions are issued only to the protected top-level document after navigation
+from the sandboxed launcher. This file does not configure agent credentials,
+policy, channels, broker storage, or privileged execution.

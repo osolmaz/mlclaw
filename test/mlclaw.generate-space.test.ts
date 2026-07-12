@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { generateSpaceRepo } from "../src/mlclaw/git.js";
-import { OPENCLAW_BASE_IMAGE } from "../src/mlclaw/runtime-image.js";
+import { BROKERKIT_PLUGIN_VERSION, BROKERKIT_VERSION, OPENCLAW_BASE_IMAGE } from "../src/mlclaw/runtime-image.js";
 
 async function listFiles(root: string): Promise<string[]> {
   const entries = await fs.readdir(root, { recursive: true, withFileTypes: true });
@@ -38,10 +38,7 @@ describe("generated Space repository", () => {
     expect(files.some((file) => /^assets\/mlclaw-control-ui\/assets\/.*\.css$/.test(file))).toBe(true);
     for (const file of files) {
       expect(
-        file === ".gitattributes" ||
-          file === "Dockerfile" ||
-          file === "README.md" ||
-          file.startsWith("assets/"),
+        file === ".gitattributes" || file === "Dockerfile" || file === "README.md" || file.startsWith("assets/"),
       ).toBe(true);
     }
 
@@ -105,17 +102,32 @@ describe("generated Space repository", () => {
 
     const dockerfile = await fs.readFile(path.join(outDir, "Dockerfile"), "utf8");
     expect(dockerfile).toContain(`FROM ${OPENCLAW_BASE_IMAGE}`);
-    expect(dockerfile).toContain('git -C /src fetch --depth=1 https://github.com/osolmaz/hf-broker.git "$HF_BROKER_VERSION"');
+    expect(dockerfile).toContain(
+      'git -C /src fetch --depth=1 https://github.com/osolmaz/hf-broker.git "$HF_BROKER_VERSION"',
+    );
     expect(dockerfile).toContain('test "$(git -C /src rev-parse HEAD)" = "$HF_BROKER_VERSION"');
     expect(dockerfile.match(/ARG HF_BROKER_VERSION=bb65192b4dca845289427e63e1d5fa72f64914d8/g)).toHaveLength(2);
+    expect(dockerfile).toContain(`ARG BROKERKIT_PLUGIN_VERSION=${BROKERKIT_PLUGIN_VERSION}`);
+    expect(dockerfile).toContain(`ARG BROKERKIT_VERSION=${BROKERKIT_VERSION}`);
+    expect(dockerfile).toContain(
+      'git -C /src fetch --depth=1 https://github.com/osolmaz/brokerkit.git "$BROKERKIT_VERSION"',
+    );
+    expect(dockerfile).toContain('test "$(git -C /src rev-parse HEAD)" = "$BROKERKIT_VERSION"');
+    expect(dockerfile).toContain(
+      "COPY --from=brokerkit-plugin-build /out/openclaw-brokerkit-${BROKERKIT_PLUGIN_VERSION}.tgz",
+    );
+    expect(dockerfile).toContain("/opt/openclaw-plugins/node_modules/openclaw-brokerkit/openclaw.plugin.json");
+    expect(dockerfile).toContain(
+      "ENV MLCLAW_BROKERKIT_PLUGIN_PATH=/opt/openclaw-plugins/node_modules/openclaw-brokerkit",
+    );
     expect(dockerfile).toContain("COPY runtime/hf-broker.scope.json /app/hf-broker.scope.json");
     expect(dockerfile).toContain("COPY --chown=node:node runtime/hf-state-sync.js /app/hf-state-sync.js");
     expect(dockerfile).toContain("COPY --chown=node:node runtime/hf-tooling-seed.js /app/hf-tooling-seed.js");
-    expect(dockerfile).toContain("\"hf-discover==1.3.7\"");
-    expect(dockerfile).toContain("\"uv==0.11.28\"");
-    expect(dockerfile).toContain("CMD [\"/app/entrypoint.sh\"]");
+    expect(dockerfile).toContain('"hf-discover==1.3.7"');
+    expect(dockerfile).toContain('"uv==0.11.28"');
+    expect(dockerfile).toContain('CMD ["/app/entrypoint.sh"]');
     await expect(fs.readFile(path.join(outDir, "runtime/openclaw.default.json"), "utf8")).resolves.toContain(
-      "\"dangerouslyDisableDeviceAuth\": true",
+      '"dangerouslyDisableDeviceAuth": true',
     );
   });
 });

@@ -26,41 +26,42 @@ export type BrokerDisplayField = {
 export type BrokerApproval = {
   id: string;
   revision: number;
-  client: string;
+  requester: string;
   operation: string;
-  status: string;
+  status: "pending" | "active" | "denied" | "canceled" | "expired" | "consumed" | "revoked";
   requested_at: string;
-  pending_expires_at: string;
+  pending_expires_at?: string;
   active_expires_at?: string;
   requested_duration_seconds: number;
-  max_uses: number;
+  requested_max_uses: number;
+  granted_max_uses: number | null;
   used_count: number;
-  reserved_count: number;
-  reason?: string;
+  request_reason?: string;
   decided_at?: string;
   decided_by?: string;
+  decided_on_behalf_of?: string;
   decision_reason?: string;
   presentation: {
     risk: "unknown" | "low" | "medium" | "high" | "critical";
     title: string;
     summary?: string;
-    target: string;
-    fields?: BrokerDisplayField[];
-    plan_hash?: string;
-    audit?: BrokerDisplayField[];
+    facts?: BrokerDisplayField[];
   };
   presentation_unavailable?: boolean;
+  allowed_actions: Array<"approve" | "deny" | "cancel" | "revoke">;
+  approval_bounds?: { max_duration_seconds: number; max_uses: number };
 };
 
 export type BrokerApprovalPage = {
-  items: BrokerApproval[];
+  requests: BrokerApproval[];
   next_cursor?: string;
-  has_more: boolean;
+  event_cursor?: string;
 };
 
 export type BrokerDecision = {
   expectedRevision: number;
-  expectedStatus?: string;
+  idempotencyKey: string;
+  onBehalfOf: string;
   reason?: string;
   durationSeconds?: number;
   maxUses?: number;
@@ -73,51 +74,57 @@ export type BrokerOperatorClientOptions = OperatorBrokerConfig & {
 
 const displayFieldSchema = z
   .object({
-    label: z.string().min(1).max(120),
-    value: z.string().max(4_096),
+    label: z.string().min(1).max(80),
+    value: z.string().min(1).max(500),
   })
-  .passthrough();
+  .strict();
 
 const approvalSchema = z
   .object({
-    id: z.string().min(1).max(200),
-    revision: z.number().int().positive(),
-    client: z.string().min(1).max(200),
-    operation: z.string().min(1).max(200),
-    status: z.string().min(1).max(40),
-    requested_at: z.string().min(1).max(80),
-    pending_expires_at: z.string().min(1).max(80),
-    active_expires_at: z.string().min(1).max(80).optional(),
-    requested_duration_seconds: z.number().int().nonnegative(),
-    max_uses: z.number().int().nonnegative(),
-    used_count: z.number().int().nonnegative(),
-    reserved_count: z.number().int().nonnegative(),
-    reason: z.string().max(2_000).optional(),
-    decided_at: z.string().min(1).max(80).optional(),
+    id: z.string().min(1).max(128),
+    revision: z.number().int().positive().safe(),
+    requester: z.string().min(1).max(80),
+    operation: z.string().min(1).max(500),
+    status: z.enum(["pending", "active", "denied", "canceled", "expired", "consumed", "revoked"]),
+    requested_at: z.string().datetime({ offset: true }),
+    pending_expires_at: z.string().datetime({ offset: true }).optional(),
+    active_expires_at: z.string().datetime({ offset: true }).optional(),
+    requested_duration_seconds: z.number().int().positive().safe(),
+    requested_max_uses: z.number().int().positive().safe(),
+    granted_max_uses: z.number().int().positive().safe().nullable(),
+    used_count: z.number().int().nonnegative().safe(),
+    request_reason: z.string().max(2_000).optional(),
+    decided_at: z.string().datetime({ offset: true }).optional(),
     decided_by: z.string().max(200).optional(),
+    decided_on_behalf_of: z.string().max(200).optional(),
     decision_reason: z.string().max(2_000).optional(),
     presentation: z
       .object({
         risk: z.enum(["unknown", "low", "medium", "high", "critical"]),
-        title: z.string().min(1).max(240),
-        summary: z.string().max(4_096).optional(),
-        target: z.string().min(1).max(2_000),
-        fields: z.array(displayFieldSchema).max(100).optional(),
-        plan_hash: z.string().max(256).optional(),
-        audit: z.array(displayFieldSchema).max(100).optional(),
+        title: z.string().min(1).max(200),
+        summary: z.string().max(2_000).optional(),
+        facts: z.array(displayFieldSchema).max(20).optional(),
       })
-      .passthrough(),
+      .strict(),
     presentation_unavailable: z.boolean().optional(),
+    allowed_actions: z.array(z.enum(["approve", "deny", "cancel", "revoke"])).max(4),
+    approval_bounds: z
+      .object({
+        max_duration_seconds: z.number().int().positive().safe(),
+        max_uses: z.number().int().positive().safe(),
+      })
+      .strict()
+      .optional(),
   })
-  .passthrough();
+  .strict();
 
 const approvalPageSchema = z
   .object({
-    items: z.array(approvalSchema),
-    next_cursor: z.string().min(1).max(4_096).optional(),
-    has_more: z.boolean(),
+    requests: z.array(approvalSchema).max(100),
+    next_cursor: z.string().min(1).max(1_024).optional(),
+    event_cursor: z.string().min(1).max(1_024).optional(),
   })
-  .passthrough();
+  .strict();
 
 const operatorErrorSchema = z
   .object({
@@ -170,7 +177,19 @@ export class BrokerOperatorClient {
     return { id: this.options.id, label: this.options.label };
   }
 
-  list(params: { status?: "pending" | "history"; cursor?: string; limit?: number } = {}): Promise<BrokerApprovalPage> {
+  discover(signal?: AbortSignal): Promise<{ api_version: "brokerkit.io/operator/v1" }> {
+    return this.request(
+      "/.well-known/brokerkit-operator",
+      signal ? { signal } : undefined,
+      z.object({ api_version: z.literal("brokerkit.io/operator/v1") }).passthrough(),
+      "discovery",
+    );
+  }
+
+  list(
+    params: { status?: "pending" | "active" | "history" | "all"; cursor?: string; limit?: number } = {},
+    signal?: AbortSignal,
+  ): Promise<BrokerApprovalPage> {
     const query = new URLSearchParams();
     if (params.status) {
       query.set("status", params.status);
@@ -182,11 +201,21 @@ export class BrokerOperatorClient {
       query.set("limit", String(params.limit));
     }
     const suffix = query.size > 0 ? `?${query}` : "";
-    return this.request<BrokerApprovalPage>(`/api/grants${suffix}`, undefined, approvalPageSchema, "grant list");
+    return this.request<BrokerApprovalPage>(
+      `/api/operator/v1/requests${suffix}`,
+      signal ? { signal } : undefined,
+      approvalPageSchema,
+      "request list",
+    );
   }
 
   get(id: string): Promise<BrokerApproval> {
-    return this.request<BrokerApproval>(`/api/grants/${approvalId(id)}`, undefined, approvalSchema, "grant");
+    return this.request<BrokerApproval>(
+      `/api/operator/v1/requests/${approvalId(id)}`,
+      undefined,
+      approvalSchema,
+      "request",
+    );
   }
 
   decide(
@@ -195,20 +224,27 @@ export class BrokerOperatorClient {
     decision: BrokerDecision,
   ): Promise<BrokerApproval> {
     return this.request<BrokerApproval>(
-      `/api/grants/${approvalId(id)}/${action}`,
+      `/api/operator/v1/requests/${approvalId(id)}/${action}`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           expected_revision: decision.expectedRevision,
-          ...(decision.expectedStatus ? { expected_status: decision.expectedStatus } : {}),
-          ...(decision.reason ? { reason: decision.reason } : {}),
-          ...(decision.durationSeconds ? { duration_seconds: decision.durationSeconds } : {}),
-          ...(decision.maxUses ? { max_uses: decision.maxUses } : {}),
+          idempotency_key: decision.idempotencyKey,
+          on_behalf_of: decision.onBehalfOf,
+          ...(decision.reason ? { decision_reason: decision.reason } : {}),
+          ...(decision.durationSeconds || decision.maxUses
+            ? {
+                constraints: {
+                  ...(decision.durationSeconds ? { duration_seconds: decision.durationSeconds } : {}),
+                  ...(decision.maxUses ? { max_uses: decision.maxUses } : {}),
+                },
+              }
+            : {}),
         }),
       },
       approvalSchema,
-      "grant",
+      "request",
     );
   }
 
@@ -217,10 +253,8 @@ export class BrokerOperatorClient {
       accept: "text/event-stream",
       authorization: `Bearer ${this.options.token}`,
     };
-    if (lastEventId) {
-      headers["last-event-id"] = lastEventId;
-    }
-    const response = await this.fetchImpl(`${this.baseUrl}/api/grants/events`, {
+    const cursor = lastEventId ? `?cursor=${encodeURIComponent(lastEventId)}` : "";
+    const response = await this.fetchImpl(`${this.baseUrl}/api/operator/v1/events${cursor}`, {
       headers,
       redirect: "error",
       ...(signal ? { signal } : {}),
@@ -311,6 +345,10 @@ export class OperatorBrokerRegistry {
 
   get(id: string): BrokerOperatorClient | undefined {
     return this.clients.get(id);
+  }
+
+  entries(): Array<[OperatorBrokerSummary, BrokerOperatorClient]> {
+    return [...this.clients.values()].map((client) => [client.summary(), client]);
   }
 }
 
@@ -413,11 +451,7 @@ function readBoundedFile(file: string, maximum: number, label: string): string {
 }
 
 function approvalId(id: string): string {
-  const normalized = id.trim();
-  if (!normalized || normalized.length > 200 || normalized.includes("/") || normalized.includes("\\")) {
-    throw new Error("invalid approval request id");
-  }
-  return encodeURIComponent(normalized);
+  return encodeURIComponent(id);
 }
 
 async function boundedJson(response: Response): Promise<unknown> {

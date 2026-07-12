@@ -56,9 +56,13 @@ jobs:
         run: |
           version="$(node -p 'require("./package.json").version')"
           openclaw_version="$(node -p 'require("./package.json").config.openclawVersion')"
+          brokerkit_plugin_version="$(node -p 'require("./package.json").config.brokerkitPluginVersion')"
+          brokerkit_version="$(node -p 'require("./package.json").config.brokerkitVersion')"
           runtime_image="$(node -p 'require("./package.json").config.runtimeImageRepository')"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "openclaw_version=${openclaw_version}" >> "$GITHUB_OUTPUT"
+          echo "brokerkit_plugin_version=${brokerkit_plugin_version}" >> "$GITHUB_OUTPUT"
+          echo "brokerkit_version=${brokerkit_version}" >> "$GITHUB_OUTPUT"
           echo "runtime_image=${runtime_image}" >> "$GITHUB_OUTPUT"
           echo "runtime_tag=${version}-openclaw-${openclaw_version}" >> "$GITHUB_OUTPUT"
       - run: npm ci
@@ -107,6 +111,8 @@ jobs:
           build-args: |
             OPENCLAW_VERSION=${{ steps.runtime-config.outputs.openclaw_version }}
             OPENCLAW_BASE_IMAGE=ghcr.io/openclaw/openclaw:${{ steps.runtime-config.outputs.openclaw_version }}
+            BROKERKIT_PLUGIN_VERSION=${{ steps.runtime-config.outputs.brokerkit_plugin_version }}
+            BROKERKIT_VERSION=${{ steps.runtime-config.outputs.brokerkit_version }}
             MLCLAW_RUNTIME_IMAGE=${{ steps.runtime-config.outputs.runtime_image }}:${{ steps.runtime-config.outputs.runtime_tag }}
           tags: |
             ${{ steps.runtime-config.outputs.runtime_image }}:${{ steps.runtime-config.outputs.runtime_tag }}

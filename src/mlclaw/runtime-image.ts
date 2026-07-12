@@ -2,7 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const DEFAULT_OPENCLAW_VERSION = "2026.7.1-beta.2";
+const DEFAULT_OPENCLAW_VERSION = "2026.7.1-beta.5";
+const DEFAULT_BROKERKIT_PLUGIN_VERSION = "0.1.0";
+const DEFAULT_BROKERKIT_VERSION = "fcfc5f2304436d952b18e7c9583bb378d1952776";
 const DEFAULT_RUNTIME_IMAGE_REPOSITORY = "ghcr.io/osolmaz/mlclaw";
 
 const PACKAGE_METADATA = readPackageMetadata();
@@ -10,6 +12,11 @@ const PACKAGE_METADATA = readPackageMetadata();
 export const PACKAGE_VERSION = packageString("version", "unknown");
 export const OPENCLAW_VERSION = packageConfigString("openclawVersion", DEFAULT_OPENCLAW_VERSION);
 export const OPENCLAW_BASE_IMAGE = `ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}`;
+export const BROKERKIT_PLUGIN_VERSION = packageConfigString(
+  "brokerkitPluginVersion",
+  DEFAULT_BROKERKIT_PLUGIN_VERSION,
+);
+export const BROKERKIT_VERSION = packageConfigString("brokerkitVersion", DEFAULT_BROKERKIT_VERSION);
 export const RUNTIME_IMAGE_REPOSITORY = packageConfigString("runtimeImageRepository", DEFAULT_RUNTIME_IMAGE_REPOSITORY);
 export const DEFAULT_RUNTIME_IMAGE_TAG = `${PACKAGE_VERSION}-openclaw-${OPENCLAW_VERSION}`;
 export const DEFAULT_RUNTIME_IMAGE = `${RUNTIME_IMAGE_REPOSITORY}:${DEFAULT_RUNTIME_IMAGE_TAG}`;

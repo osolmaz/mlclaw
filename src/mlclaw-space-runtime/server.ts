@@ -211,6 +211,8 @@ export class SpaceRuntimeServer {
       pathname === "/assets/assistant-avatar.svg" ||
       pathname === "/assets/mlclaw-control-branding.js" ||
       pathname === "/assets/brand/logo" ||
+      pathname === "/plugins/brokerkit/ui" ||
+      pathname.startsWith("/plugins/brokerkit/ui/") ||
       pathname === "/login" ||
       pathname === "/logout" ||
       pathname.startsWith("/oauth/") ||

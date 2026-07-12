@@ -24,9 +24,11 @@ export async function configureOpenClawGateway(config: SpaceRuntimeConfig): Prom
     ...(typeof gateway.controlUi === "object" && gateway.controlUi ? gateway.controlUi : {}),
     dangerouslyDisableDeviceAuth: true,
     allowedOrigins: [config.publicUrl],
+    embedSandbox: "scripts",
   };
   configureOpenClawModels(openclawConfig, config);
   configureManagedMcpServers(openclawConfig, config);
+  configureBrokerKitPlugin(openclawConfig, config);
 
   await fs.mkdir(path.dirname(config.openclawConfigPath), { recursive: true });
   await fs.writeFile(config.openclawConfigPath, `${JSON.stringify(openclawConfig, null, 2)}\n`, { mode: 0o600 });
@@ -36,11 +38,28 @@ export async function configureOpenClawGateway(config: SpaceRuntimeConfig): Prom
   }
 }
 
-export async function managedMcpServerStatus(config: SpaceRuntimeConfig): Promise<Array<{
-  id: string;
-  name: string;
-  enabled: boolean;
-}>> {
+function configureBrokerKitPlugin(openclawConfig: Record<string, unknown>, config: SpaceRuntimeConfig): void {
+  const plugins = object(openclawConfig, "plugins");
+  const load = object(plugins, "load");
+  load.paths = uniqueStrings(load.paths, config.brokerKitPluginPath);
+  if (plugins.allow !== undefined) plugins.allow = uniqueStrings(plugins.allow, "brokerkit");
+  const entries = object(plugins, "entries");
+  entries.brokerkit = {
+    enabled: true,
+    config: {
+      mode: "delegated-web",
+      delegatedWeb: { basePath: "/mlclaw/api/brokerkit" },
+    },
+  };
+}
+
+export async function managedMcpServerStatus(config: SpaceRuntimeConfig): Promise<
+  Array<{
+    id: string;
+    name: string;
+    enabled: boolean;
+  }>
+> {
   const raw = JSON.parse(await fs.readFile(config.openclawConfigPath, "utf8")) as Record<string, unknown>;
   const servers = object(object(raw, "mcp"), "servers");
   return [
@@ -57,9 +76,8 @@ function configureManagedMcpServers(openclawConfig: Record<string, unknown>, con
   const servers = object(mcp, "servers");
   for (const [name, managed] of Object.entries(managedMcpServerConfig(config))) {
     const existing = servers[name];
-    const userFields = existing && typeof existing === "object" && !Array.isArray(existing)
-      ? existing as Record<string, unknown>
-      : {};
+    const userFields =
+      existing && typeof existing === "object" && !Array.isArray(existing) ? (existing as Record<string, unknown>) : {};
     servers[name] = {
       ...userFields,
       ...managed,
@@ -74,9 +92,10 @@ function configureManagedMcpServers(openclawConfig: Record<string, unknown>, con
 function configureOpenClawModels(openclawConfig: Record<string, unknown>, config: SpaceRuntimeConfig): void {
   const agents = object(openclawConfig, "agents");
   const defaults = object(agents, "defaults");
-  const existingModel = defaults.model && typeof defaults.model === "object" && !Array.isArray(defaults.model)
-    ? defaults.model as Record<string, unknown>
-    : {};
+  const existingModel =
+    defaults.model && typeof defaults.model === "object" && !Array.isArray(defaults.model)
+      ? (defaults.model as Record<string, unknown>)
+      : {};
   defaults.model = {
     ...existingModel,
     primary: config.model,
@@ -141,23 +160,26 @@ function inputModalitiesForChoice(choice: ModelChoice): string[] {
 }
 
 function aliasForChoice(choice: ModelChoice): string {
-  const base = displayNameFromModelId(choice.modelId)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48) || "model";
+  const base =
+    displayNameFromModelId(choice.modelId)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "model";
   return `${base}-${choice.provider}`.slice(0, 64);
 }
 
 function isLikelyImageModel(id: string): boolean {
   const lower = id.toLowerCase();
-  return lower.includes("-vl") ||
+  return (
+    lower.includes("-vl") ||
     lower.includes("vision") ||
     lower.includes("multimodal") ||
     lower.includes("gemma-3") ||
     lower.includes("gemma-4") ||
     lower.includes("llama-4") ||
-    lower.includes("qwen3.6");
+    lower.includes("qwen3.6")
+  );
 }
 
 function contextWindowForModel(id: string): number {
@@ -186,7 +208,10 @@ function object(parent: Record<string, unknown>, key: string): Record<string, un
 }
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined;
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+function uniqueStrings(value: unknown, required: string): string[] {
+  const current = Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  return [...new Set([...current, required])];
 }

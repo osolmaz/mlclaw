@@ -16,16 +16,22 @@ function approval(id: string, status: string, revision: number) {
   return {
     id,
     revision,
-    client: "bob",
+    requester: "bob",
     operation: "repo.update",
     status,
     requested_at: "2026-07-11T00:00:00Z",
     pending_expires_at: "2026-07-11T00:05:00Z",
     requested_duration_seconds: 300,
-    max_uses: 1,
+    requested_max_uses: 1,
+    granted_max_uses: status === "active" ? 1 : null,
     used_count: 0,
-    reserved_count: 0,
-    presentation: { risk: "medium", title: "Update repository", target: "osolmaz/example" },
+    presentation: {
+      risk: "medium",
+      title: "Update repository",
+      facts: [{ label: "Repository", value: "osolmaz/example" }],
+    },
+    allowed_actions: status === "pending" ? ["approve", "deny", "cancel"] : ["revoke"],
+    approval_bounds: { max_duration_seconds: 300, max_uses: 1 },
   };
 }
 
@@ -51,7 +57,7 @@ describe("Brokerkit operator backends", () => {
       if (req.url?.includes("/approve")) {
         res.end(JSON.stringify(approval("grant-1", "active", 2)));
       } else {
-        res.end(JSON.stringify({ items: [], has_more: false }));
+        res.end(JSON.stringify({ requests: [] }));
       }
     });
     const port = await listen(server);
@@ -66,7 +72,8 @@ describe("Brokerkit operator backends", () => {
     await client.list({ status: "pending", limit: 50 });
     await client.decide("grant-1", "approve", {
       expectedRevision: 1,
-      expectedStatus: "pending",
+      idempotencyKey: "decision-1",
+      onBehalfOf: "mlclaw:alice",
       durationSeconds: 300,
       maxUses: 1,
     });
@@ -74,32 +81,38 @@ describe("Brokerkit operator backends", () => {
     expect(requests).toEqual([
       {
         method: "GET",
-        url: "/api/grants?status=pending&limit=50",
+        url: "/api/operator/v1/requests?status=pending&limit=50",
         authorization: "Bearer operator-secret",
         body: "",
       },
       {
         method: "POST",
-        url: "/api/grants/grant-1/approve",
+        url: "/api/operator/v1/requests/grant-1/approve",
         authorization: "Bearer operator-secret",
         body: JSON.stringify({
           expected_revision: 1,
-          expected_status: "pending",
-          duration_seconds: 300,
-          max_uses: 1,
+          idempotency_key: "decision-1",
+          on_behalf_of: "mlclaw:alice",
+          constraints: { duration_seconds: 300, max_uses: 1 },
         }),
       },
     ]);
   });
 
-  it("rejects path-like request identifiers before sending", async () => {
+  it("preserves opaque request identifiers while encoding the path segment", async () => {
+    let requestedUrl = "";
     const client = new BrokerOperatorClient({
       id: "sudo-broker",
       label: "Unix access",
-      baseUrl: "http://127.0.0.1:1",
+      baseUrl: "http://broker.example",
       token: "operator-secret",
+      fetch: async (input) => {
+        requestedUrl = String(input);
+        return Response.json(approval(" request/one ", "pending", 1));
+      },
     });
-    expect(() => client.get("../healthz")).toThrow("invalid approval request id");
+    await expect(client.get(" request/one ")).resolves.toMatchObject({ id: " request/one " });
+    expect(requestedUrl).toBe("http://broker.example/api/operator/v1/requests/%20request%2Fone%20");
   });
 
   it("forwards durable event cursors and maps only bounded safe errors", async () => {
@@ -107,7 +120,7 @@ describe("Brokerkit operator backends", () => {
     const fetchImpl: typeof fetch = async (input, init) => {
       const request = new Request(input, init);
       requests.push(request);
-      if (request.url.endsWith("/events")) {
+      if (request.url.includes("/events")) {
         return new Response("id: cursor-2\ndata: {}\n\n", {
           headers: { "content-type": "text/event-stream; charset=utf-8" },
         });
@@ -133,7 +146,7 @@ describe("Brokerkit operator backends", () => {
     const controller = new AbortController();
     const events = await client.events("cursor-1", controller.signal);
     expect(await events.text()).toContain("cursor-2");
-    expect(requests[0]?.headers.get("last-event-id")).toBe("cursor-1");
+    expect(requests[0]?.url).toContain("/api/operator/v1/events?cursor=cursor-1");
     expect(requests[0]?.headers.get("authorization")).toBe("Bearer operator-secret");
     expect(await client.get("grant-1")).toMatchObject({ id: "grant-1" });
     await expect(client.list({ status: "history", cursor: "next", limit: 12 })).rejects.toMatchObject({
@@ -186,9 +199,38 @@ describe("Brokerkit operator backends", () => {
       label: "GitHub",
       baseUrl: "http://broker.example",
       token: "operator-secret",
-      fetch: async () => new Response(JSON.stringify({ items: null, has_more: false })),
+      fetch: async () => new Response(JSON.stringify({ requests: null })),
     });
-    await expect(malformed.list()).rejects.toThrow("broker grant list response is invalid");
+    await expect(malformed.list()).rejects.toThrow("broker request list response is invalid");
+    const malformedFact = new BrokerOperatorClient({
+      id: "gh-broker",
+      label: "GitHub",
+      baseUrl: "http://broker.example",
+      token: "operator-secret",
+      fetch: async () => {
+        const item = approval("request-1", "pending", 1);
+        return Response.json({
+          requests: [
+            {
+              ...item,
+              presentation: {
+                ...item.presentation,
+                facts: [{ label: "Repository", value: "", unexpected: "not-safe" }],
+              },
+            },
+          ],
+        });
+      },
+    });
+    await expect(malformedFact.list()).rejects.toThrow("broker request list response is invalid");
+    const unsafeRevision = new BrokerOperatorClient({
+      id: "gh-broker",
+      label: "GitHub",
+      baseUrl: "http://broker.example",
+      token: "operator-secret",
+      fetch: async () => Response.json({ requests: [approval("request-1", "pending", 2 ** 53)] }),
+    });
+    await expect(unsafeRevision.list()).rejects.toThrow("broker request list response is invalid");
   });
 
   it("times out stalled non-streaming broker requests", async () => {

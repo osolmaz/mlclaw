@@ -4684,42 +4684,45 @@ var MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 var DEFAULT_REQUEST_TIMEOUT_MS = 1e4;
 var BROKER_ID = /^[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
 var displayFieldSchema = external_exports.object({
-  label: external_exports.string().min(1).max(120),
-  value: external_exports.string().max(4096)
-}).passthrough();
+  label: external_exports.string().min(1).max(80),
+  value: external_exports.string().min(1).max(500)
+}).strict();
 var approvalSchema = external_exports.object({
-  id: external_exports.string().min(1).max(200),
-  revision: external_exports.number().int().positive(),
-  client: external_exports.string().min(1).max(200),
-  operation: external_exports.string().min(1).max(200),
-  status: external_exports.string().min(1).max(40),
-  requested_at: external_exports.string().min(1).max(80),
-  pending_expires_at: external_exports.string().min(1).max(80),
-  active_expires_at: external_exports.string().min(1).max(80).optional(),
-  requested_duration_seconds: external_exports.number().int().nonnegative(),
-  max_uses: external_exports.number().int().nonnegative(),
-  used_count: external_exports.number().int().nonnegative(),
-  reserved_count: external_exports.number().int().nonnegative(),
-  reason: external_exports.string().max(2e3).optional(),
-  decided_at: external_exports.string().min(1).max(80).optional(),
+  id: external_exports.string().min(1).max(128),
+  revision: external_exports.number().int().positive().safe(),
+  requester: external_exports.string().min(1).max(80),
+  operation: external_exports.string().min(1).max(500),
+  status: external_exports.enum(["pending", "active", "denied", "canceled", "expired", "consumed", "revoked"]),
+  requested_at: external_exports.string().datetime({ offset: true }),
+  pending_expires_at: external_exports.string().datetime({ offset: true }).optional(),
+  active_expires_at: external_exports.string().datetime({ offset: true }).optional(),
+  requested_duration_seconds: external_exports.number().int().positive().safe(),
+  requested_max_uses: external_exports.number().int().positive().safe(),
+  granted_max_uses: external_exports.number().int().positive().safe().nullable(),
+  used_count: external_exports.number().int().nonnegative().safe(),
+  request_reason: external_exports.string().max(2e3).optional(),
+  decided_at: external_exports.string().datetime({ offset: true }).optional(),
   decided_by: external_exports.string().max(200).optional(),
+  decided_on_behalf_of: external_exports.string().max(200).optional(),
   decision_reason: external_exports.string().max(2e3).optional(),
   presentation: external_exports.object({
     risk: external_exports.enum(["unknown", "low", "medium", "high", "critical"]),
-    title: external_exports.string().min(1).max(240),
-    summary: external_exports.string().max(4096).optional(),
-    target: external_exports.string().min(1).max(2e3),
-    fields: external_exports.array(displayFieldSchema).max(100).optional(),
-    plan_hash: external_exports.string().max(256).optional(),
-    audit: external_exports.array(displayFieldSchema).max(100).optional()
-  }).passthrough(),
-  presentation_unavailable: external_exports.boolean().optional()
-}).passthrough();
+    title: external_exports.string().min(1).max(200),
+    summary: external_exports.string().max(2e3).optional(),
+    facts: external_exports.array(displayFieldSchema).max(20).optional()
+  }).strict(),
+  presentation_unavailable: external_exports.boolean().optional(),
+  allowed_actions: external_exports.array(external_exports.enum(["approve", "deny", "cancel", "revoke"])).max(4),
+  approval_bounds: external_exports.object({
+    max_duration_seconds: external_exports.number().int().positive().safe(),
+    max_uses: external_exports.number().int().positive().safe()
+  }).strict().optional()
+}).strict();
 var approvalPageSchema = external_exports.object({
-  items: external_exports.array(approvalSchema),
-  next_cursor: external_exports.string().min(1).max(4096).optional(),
-  has_more: external_exports.boolean()
-}).passthrough();
+  requests: external_exports.array(approvalSchema).max(100),
+  next_cursor: external_exports.string().min(1).max(1024).optional(),
+  event_cursor: external_exports.string().min(1).max(1024).optional()
+}).strict();
 var operatorErrorSchema = external_exports.object({
   error: external_exports.object({
     code: external_exports.string().min(1).max(200).optional(),
@@ -4760,7 +4763,15 @@ var BrokerOperatorClient = class {
   summary() {
     return { id: this.options.id, label: this.options.label };
   }
-  list(params = {}) {
+  discover(signal) {
+    return this.request(
+      "/.well-known/brokerkit-operator",
+      signal ? { signal } : void 0,
+      external_exports.object({ api_version: external_exports.literal("brokerkit.io/operator/v1") }).passthrough(),
+      "discovery"
+    );
+  }
+  list(params = {}, signal) {
     const query = new URLSearchParams();
     if (params.status) {
       query.set("status", params.status);
@@ -4772,27 +4783,42 @@ var BrokerOperatorClient = class {
       query.set("limit", String(params.limit));
     }
     const suffix = query.size > 0 ? `?${query}` : "";
-    return this.request(`/api/grants${suffix}`, void 0, approvalPageSchema, "grant list");
+    return this.request(
+      `/api/operator/v1/requests${suffix}`,
+      signal ? { signal } : void 0,
+      approvalPageSchema,
+      "request list"
+    );
   }
   get(id) {
-    return this.request(`/api/grants/${approvalId(id)}`, void 0, approvalSchema, "grant");
+    return this.request(
+      `/api/operator/v1/requests/${approvalId(id)}`,
+      void 0,
+      approvalSchema,
+      "request"
+    );
   }
   decide(id, action, decision) {
     return this.request(
-      `/api/grants/${approvalId(id)}/${action}`,
+      `/api/operator/v1/requests/${approvalId(id)}/${action}`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           expected_revision: decision.expectedRevision,
-          ...decision.expectedStatus ? { expected_status: decision.expectedStatus } : {},
-          ...decision.reason ? { reason: decision.reason } : {},
-          ...decision.durationSeconds ? { duration_seconds: decision.durationSeconds } : {},
-          ...decision.maxUses ? { max_uses: decision.maxUses } : {}
+          idempotency_key: decision.idempotencyKey,
+          on_behalf_of: decision.onBehalfOf,
+          ...decision.reason ? { decision_reason: decision.reason } : {},
+          ...decision.durationSeconds || decision.maxUses ? {
+            constraints: {
+              ...decision.durationSeconds ? { duration_seconds: decision.durationSeconds } : {},
+              ...decision.maxUses ? { max_uses: decision.maxUses } : {}
+            }
+          } : {}
         })
       },
       approvalSchema,
-      "grant"
+      "request"
     );
   }
   async events(lastEventId, signal) {
@@ -4800,10 +4826,8 @@ var BrokerOperatorClient = class {
       accept: "text/event-stream",
       authorization: `Bearer ${this.options.token}`
     };
-    if (lastEventId) {
-      headers["last-event-id"] = lastEventId;
-    }
-    const response = await this.fetchImpl(`${this.baseUrl}/api/grants/events`, {
+    const cursor = lastEventId ? `?cursor=${encodeURIComponent(lastEventId)}` : "";
+    const response = await this.fetchImpl(`${this.baseUrl}/api/operator/v1/events${cursor}`, {
       headers,
       redirect: "error",
       ...signal ? { signal } : {}
@@ -4883,6 +4907,9 @@ var OperatorBrokerRegistry = class {
   }
   get(id) {
     return this.clients.get(id);
+  }
+  entries() {
+    return [...this.clients.values()].map((client) => [client.summary(), client]);
   }
 };
 function loadOperatorBrokers(file) {
@@ -4979,11 +5006,7 @@ function readBoundedFile(file, maximum, label) {
   return value;
 }
 function approvalId(id) {
-  const normalized = id.trim();
-  if (!normalized || normalized.length > 200 || normalized.includes("/") || normalized.includes("\\")) {
-    throw new Error("invalid approval request id");
-  }
-  return encodeURIComponent(normalized);
+  return encodeURIComponent(id);
 }
 async function boundedJson(response) {
   if (!response.body) {
@@ -5095,6 +5118,7 @@ function loadConfig(env = process.env) {
     openclawConfigPath: trim(env.OPENCLAW_CONFIG_PATH) ?? "/home/node/.local/share/mlclaw/live/.openclaw/openclaw.json",
     openclawCommand,
     openclawArgs,
+    brokerKitPluginPath: trim(env.MLCLAW_BROKERKIT_PLUGIN_PATH) ?? "/opt/openclaw-plugins/node_modules/openclaw-brokerkit",
     agentName,
     model,
     modelChoices: runtimeSettings2.modelChoices ?? parseModelChoicesEnv(env.MLCLAW_MODEL_CHOICES, model),
@@ -7335,6 +7359,347 @@ function signatureMatches(a, b) {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
+// src/mlclaw-space-runtime/delegated-brokerkit.ts
+import { createHash, createHmac as createHmac2, randomBytes as randomBytes3, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+var API_VERSION = "brokerkit.io/delegated-web/v1";
+var TOKEN_LIFETIME_SECONDS = 4 * 60;
+var MAX_PAGES_PER_SOURCE = 32;
+var MAX_HANDLES = 4096;
+var SOURCE_DEADLINE_MS = 15e3;
+var DelegatedBrokerKit = class {
+  constructor(registry, sessionSecret, now = () => /* @__PURE__ */ new Date(), sourceDeadlineMs = SOURCE_DEADLINE_MS) {
+    this.registry = registry;
+    this.now = now;
+    this.sourceDeadlineMs = sourceDeadlineMs;
+    this.key = createHmac2("sha256", sessionSecret).update("mlclaw/brokerkit-delegated-web/v1", "utf8").digest();
+  }
+  key;
+  handles = /* @__PURE__ */ new Map();
+  handlesByIdentity = /* @__PURE__ */ new Map();
+  snapshotInFlight;
+  issueSession(actor) {
+    const issuedAt = Math.floor(this.now().getTime() / 1e3);
+    const expiresAt = issuedAt + TOKEN_LIFETIME_SECONDS;
+    const payload = {
+      version: 1,
+      audience: "brokerkit-delegated-web",
+      subject: actor,
+      issuedAt,
+      expiresAt,
+      nonce: randomBytes3(16).toString("base64url")
+    };
+    const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+    const signature = this.sign(encoded);
+    return {
+      api_version: API_VERSION,
+      actor,
+      decision_token: `${encoded}.${signature}`,
+      expires_at: new Date(expiresAt * 1e3).toISOString()
+    };
+  }
+  authorize(header) {
+    return this.authorizeSession(header)?.actor;
+  }
+  authorizeSession(header) {
+    const encoded = authenticatedTokenPayload(header, (value) => this.sign(value));
+    if (!encoded) return void 0;
+    const payload = parseTokenPayload(encoded);
+    return payload && tokenIsCurrent(payload, this.now()) ? { actor: payload.subject, sessionId: payload.nonce } : void 0;
+  }
+  async snapshot() {
+    if (this.snapshotInFlight) return this.snapshotInFlight;
+    const pending = this.buildSnapshot();
+    this.snapshotInFlight = pending;
+    try {
+      return await pending;
+    } finally {
+      if (this.snapshotInFlight === pending) this.snapshotInFlight = void 0;
+    }
+  }
+  async buildSnapshot() {
+    this.pruneHandles();
+    const synchronizedAt = this.now().toISOString();
+    const results = await Promise.all(
+      this.registry.entries().map(async ([summary, client]) => this.sourceSnapshot(summary, client, synchronizedAt))
+    );
+    const selected = selectSnapshotRequests(results, MAX_HANDLES);
+    const reservedHandles = this.selectedExistingHandles(selected);
+    return {
+      sources: results.map((result) => result.source),
+      requests: selected.map(
+        ({ source, request }) => project(source, request, this.handle(source.id, request, reservedHandles))
+      ),
+      synchronizedAt
+    };
+  }
+  async detail(handle) {
+    const record = this.resolveHandle(handle);
+    const source = this.registry.get(record.sourceId);
+    if (!source) throw delegatedError("source_unavailable");
+    const request = await source.get(record.requestId);
+    if (request.revision !== record.revision) throw delegatedError("revision_stale");
+    return project(source.summary(), request, handle);
+  }
+  async decide(handle, action, expectedRevision, actor, options = {}) {
+    const record = this.resolveHandle(handle);
+    const source = this.registry.get(record.sourceId);
+    if (!source) throw delegatedError("source_unavailable");
+    const current = await source.get(record.requestId);
+    assertDecisionAllowed(current, record, action, expectedRevision, options);
+    const decision = decisionOptions(record, action, expectedRevision, actor, options);
+    const updated = await decideWithRecovery(source, record.requestId, action, decision);
+    if (updated.status === "pending" || updated.status === "active") {
+      this.removeHandle(handle, record);
+      return project(source.summary(), updated, this.handle(record.sourceId, updated));
+    }
+    this.removeHandle(handle, record);
+    return project(source.summary(), updated, handle);
+  }
+  async sourceSnapshot(summary, client, synchronizedAt) {
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(), this.sourceDeadlineMs);
+    timer.unref?.();
+    try {
+      await client.discover(deadline.signal);
+      const pages = await Promise.all([
+        this.sourceRequests(client, "pending", deadline.signal),
+        this.sourceRequests(client, "active", deadline.signal)
+      ]);
+      const requests = reconcileRequests(pages.map((page2) => page2.requests));
+      return {
+        source: deadline.signal.aborted ? { ...summary, healthy: false, error: "broker_timeout" } : pages.some((page2) => page2.truncated) ? { ...summary, healthy: false, error: "source_truncated" } : { ...summary, healthy: true, lastSyncAt: synchronizedAt },
+        requests
+      };
+    } catch (error) {
+      return {
+        source: { ...summary, healthy: false, error: safeSourceError(error) },
+        requests: []
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  async sourceRequests(client, status, signal) {
+    const requests = [];
+    let cursor;
+    try {
+      for (let pageNumber = 0; pageNumber < MAX_PAGES_PER_SOURCE; pageNumber += 1) {
+        const page2 = await client.list({ status, ...cursor ? { cursor } : {}, limit: 100 }, signal);
+        requests.push(...page2.requests);
+        cursor = page2.next_cursor;
+        if (!cursor) return { requests, truncated: false };
+      }
+    } catch (error) {
+      if (!signal.aborted) throw error;
+    }
+    return { requests, truncated: Boolean(cursor) };
+  }
+  selectedExistingHandles(selected) {
+    const handles = /* @__PURE__ */ new Set();
+    for (const { source, request } of selected) {
+      const handle = this.handlesByIdentity.get(requestIdentity(source.id, request.id, request.revision));
+      if (handle && this.handles.has(handle)) handles.add(handle);
+    }
+    return handles;
+  }
+  handle(sourceId, request, reservedHandles = /* @__PURE__ */ new Set()) {
+    const identity = requestIdentity(sourceId, request.id, request.revision);
+    const existing = this.handlesByIdentity.get(identity);
+    if (existing && this.handles.has(existing)) {
+      reservedHandles.add(existing);
+      return existing;
+    }
+    if (this.handles.size >= MAX_HANDLES && !this.pruneOldestHandle(reservedHandles)) {
+      throw delegatedError("source_unavailable");
+    }
+    const handle = randomBytes3(18).toString("base64url");
+    const requestExpiry = Date.parse(handleExpiry(request));
+    const expiresAtMs = Number.isFinite(requestExpiry) ? Math.min(requestExpiry, this.now().getTime() + 24 * 60 * 6e4) : this.now().getTime() + 5 * 6e4;
+    this.handles.set(handle, { sourceId, requestId: request.id, revision: request.revision, expiresAtMs });
+    this.handlesByIdentity.set(identity, handle);
+    reservedHandles.add(handle);
+    return handle;
+  }
+  resolveHandle(handle) {
+    if (!/^[A-Za-z0-9_-]{24}$/u.test(handle)) throw delegatedError("request_not_found");
+    const record = this.handles.get(handle);
+    if (!record || record.expiresAtMs <= this.now().getTime()) {
+      if (record) this.removeHandle(handle, record);
+      throw delegatedError("request_not_found");
+    }
+    return record;
+  }
+  pruneHandles() {
+    for (const [handle, record] of this.handles) {
+      if (record.expiresAtMs <= this.now().getTime()) this.removeHandle(handle, record);
+    }
+  }
+  pruneOldestHandle(reservedHandles) {
+    for (const [handle, record] of this.handles) {
+      if (reservedHandles.has(handle)) continue;
+      this.removeHandle(handle, record);
+      return true;
+    }
+    return false;
+  }
+  removeHandle(handle, record) {
+    this.handles.delete(handle);
+    this.handlesByIdentity.delete(requestIdentity(record.sourceId, record.requestId, record.revision));
+  }
+  sign(encoded) {
+    return createHmac2("sha256", this.key).update(encoded, "utf8").digest("base64url");
+  }
+};
+async function decideWithRecovery(source, requestId, action, decision) {
+  try {
+    return await source.decide(requestId, action, decision);
+  } catch (error) {
+    if (error instanceof BrokerOperatorError) throw error;
+    try {
+      await source.get(requestId);
+    } catch {
+      throw delegatedError("source_unavailable");
+    }
+    try {
+      return await source.decide(requestId, action, decision);
+    } catch (retryError) {
+      if (retryError instanceof BrokerOperatorError) throw retryError;
+      throw delegatedError("source_unavailable");
+    }
+  }
+}
+function selectSnapshotRequests(results, limit) {
+  const buckets = results.flatMap(
+    (result) => ["pending", "active"].map((status) => ({
+      source: result.source,
+      requests: result.requests.filter((request) => request.status === status),
+      index: 0
+    }))
+  );
+  const selected = [];
+  while (selected.length < limit) {
+    let added = false;
+    for (const bucket of buckets) {
+      const request = bucket.requests[bucket.index];
+      if (!request) continue;
+      selected.push({ source: bucket.source, request });
+      bucket.index += 1;
+      added = true;
+      if (selected.length === limit) break;
+    }
+    if (!added) break;
+  }
+  return selected;
+}
+function reconcileRequests(pages) {
+  const requests = /* @__PURE__ */ new Map();
+  for (const request of pages.flat()) {
+    const current = requests.get(request.id);
+    if (!current || request.revision > current.revision || request.revision === current.revision && request.status === "active" && current.status !== "active") {
+      requests.set(request.id, request);
+    }
+  }
+  return [...requests.values()];
+}
+var DelegatedBrokerKitError = class extends Error {
+  constructor(code) {
+    super(code);
+    this.code = code;
+  }
+};
+function delegatedError(code) {
+  return new DelegatedBrokerKitError(code);
+}
+function project(source, request, handle) {
+  return { ...request, sourceId: source.id, sourceLabel: source.label, handle };
+}
+function requestIdentity(sourceId, requestId, revision) {
+  return `${sourceId}\0${requestId}\0${revision}`;
+}
+function handleExpiry(request) {
+  if (request.status === "active") return request.active_expires_at ?? "";
+  return request.pending_expires_at ?? request.active_expires_at ?? "";
+}
+function decisionKey(record, action, actor) {
+  return createHash("sha256").update(
+    ["mlclaw-brokerkit-decision-v1", record.sourceId, record.requestId, String(record.revision), action, actor].join(
+      "\0"
+    ),
+    "utf8"
+  ).digest("base64url");
+}
+function decisionOptions(record, action, expectedRevision, actor, options) {
+  return {
+    expectedRevision,
+    idempotencyKey: decisionKey(record, action, actor),
+    onBehalfOf: `mlclaw:${actor}`,
+    ...options.reason ? { reason: options.reason } : {},
+    ...options.durationSeconds ? { durationSeconds: options.durationSeconds } : {},
+    ...options.maxUses ? { maxUses: options.maxUses } : {}
+  };
+}
+function decisionWithinBounds(action, request, options) {
+  if (options.durationSeconds === void 0 && options.maxUses === void 0) return true;
+  const bounds = request.approval_bounds;
+  return Boolean(
+    action === "approve" && bounds && options.durationSeconds !== void 0 && options.durationSeconds <= bounds.max_duration_seconds && options.maxUses !== void 0 && options.maxUses <= bounds.max_uses
+  );
+}
+function assertDecisionAllowed(request, record, action, expectedRevision, options) {
+  if (request.revision !== record.revision || request.revision !== expectedRevision) {
+    throw delegatedError("revision_stale");
+  }
+  if (!request.allowed_actions.includes(action) || !decisionWithinBounds(action, request, options)) {
+    throw delegatedError("action_not_allowed");
+  }
+}
+function authenticatedTokenPayload(header, sign3) {
+  if (!header?.startsWith("Bearer ")) return void 0;
+  const token = header.slice("Bearer ".length);
+  if (token.length > 4096) return void 0;
+  const [encoded, signature, extra] = token.split(".");
+  return encoded && signature && extra === void 0 && safeEqual(signature, sign3(encoded)) ? encoded : void 0;
+}
+function parseTokenPayload(encoded) {
+  try {
+    const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+    return validTokenPayload(payload) ? payload : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function tokenIsCurrent(payload, now) {
+  const current = Math.floor(now.getTime() / 1e3);
+  return payload.issuedAt <= current + 5 && payload.expiresAt > current && payload.expiresAt - payload.issuedAt <= TOKEN_LIFETIME_SECONDS;
+}
+function validTokenPayload(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value;
+  return hasExactTokenFields(record) && validTokenIdentity(record) && validTokenTimes(record) && validTokenNonce(record);
+}
+function hasExactTokenFields(record) {
+  return Object.keys(record).sort().join(",") === "audience,expiresAt,issuedAt,nonce,subject,version";
+}
+function validTokenIdentity(record) {
+  return record.version === 1 && record.audience === "brokerkit-delegated-web" && typeof record.subject === "string" && record.subject.length >= 1 && record.subject.length <= 200;
+}
+function validTokenTimes(record) {
+  return typeof record.issuedAt === "number" && Number.isSafeInteger(record.issuedAt) && typeof record.expiresAt === "number" && Number.isSafeInteger(record.expiresAt);
+}
+function validTokenNonce(record) {
+  return typeof record.nonce === "string" && /^[A-Za-z0-9_-]{22}$/u.test(record.nonce);
+}
+function safeEqual(left, right) {
+  const a = Buffer.from(left, "utf8");
+  const b = Buffer.from(right, "utf8");
+  return a.length === b.length && timingSafeEqual2(a, b);
+}
+function safeSourceError(error) {
+  const code = error instanceof BrokerOperatorError ? error.code : error instanceof DelegatedBrokerKitError ? error.code : void 0;
+  if (code === "broker_timeout" || code === "unavailable" || code === "source_unavailable") return code;
+  return "source_unavailable";
+}
+
 // src/mlclaw-space-runtime/hub-settings.ts
 function runtimeSettings(config2) {
   return {
@@ -7487,7 +7852,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 // src/mlclaw-space-runtime/mcp-integrations.ts
-import { createHmac as createHmac2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { createHmac as createHmac3, timingSafeEqual as timingSafeEqual3 } from "node:crypto";
 import http from "node:http";
 import { Readable } from "node:stream";
 var MAX_REQUEST_BYTES = 16 * 1024 * 1024;
@@ -7751,7 +8116,7 @@ var ResearchRpcError = class extends Error {
   }
 };
 function deriveInternalToken(secret) {
-  return createHmac2("sha256", secret).update("mlclaw:mcp-integrations:v1").digest("base64url");
+  return createHmac3("sha256", secret).update("mlclaw:mcp-integrations:v1").digest("base64url");
 }
 function managedMcpServerConfig(config2) {
   const headers = { [INTERNAL_HEADER]: deriveInternalToken(config2.sessionSecret) };
@@ -7981,7 +8346,7 @@ function validInternalToken(value, expected) {
   }
   const actualBuffer = Buffer.from(value);
   const expectedBuffer = Buffer.from(expected);
-  return actualBuffer.length === expectedBuffer.length && timingSafeEqual2(actualBuffer, expectedBuffer);
+  return actualBuffer.length === expectedBuffer.length && timingSafeEqual3(actualBuffer, expectedBuffer);
 }
 function requestHeader(headers, name) {
   const value = headers[name];
@@ -8059,10 +8424,12 @@ async function configureOpenClawGateway(config2) {
   gateway.controlUi = {
     ...typeof gateway.controlUi === "object" && gateway.controlUi ? gateway.controlUi : {},
     dangerouslyDisableDeviceAuth: true,
-    allowedOrigins: [config2.publicUrl]
+    allowedOrigins: [config2.publicUrl],
+    embedSandbox: "scripts"
   };
   configureOpenClawModels(openclawConfig, config2);
   configureManagedMcpServers(openclawConfig, config2);
+  configureBrokerKitPlugin(openclawConfig, config2);
   await fs.mkdir(path.dirname(config2.openclawConfigPath), { recursive: true });
   await fs.writeFile(config2.openclawConfigPath, `${JSON.stringify(openclawConfig, null, 2)}
 `, { mode: 384 });
@@ -8070,6 +8437,20 @@ async function configureOpenClawGateway(config2) {
   if (process.getuid?.() === 0) {
     await fs.chown(config2.openclawConfigPath, config2.openclawUid, config2.openclawGid);
   }
+}
+function configureBrokerKitPlugin(openclawConfig, config2) {
+  const plugins = object(openclawConfig, "plugins");
+  const load = object(plugins, "load");
+  load.paths = uniqueStrings(load.paths, config2.brokerKitPluginPath);
+  if (plugins.allow !== void 0) plugins.allow = uniqueStrings(plugins.allow, "brokerkit");
+  const entries = object(plugins, "entries");
+  entries.brokerkit = {
+    enabled: true,
+    config: {
+      mode: "delegated-web",
+      delegatedWeb: { basePath: "/mlclaw/api/brokerkit" }
+    }
+  };
 }
 async function managedMcpServerStatus(config2) {
   const raw2 = JSON.parse(await fs.readFile(config2.openclawConfigPath, "utf8"));
@@ -8189,9 +8570,13 @@ function object(parent, key) {
 function objectValue2(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : void 0;
 }
+function uniqueStrings(value, required) {
+  const current = Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+  return [.../* @__PURE__ */ new Set([...current, required])];
+}
 
 // src/mlclaw-space-runtime/openai-credentials.ts
-import { createCipheriv, createDecipheriv, hkdfSync, randomBytes as randomBytes3 } from "node:crypto";
+import { createCipheriv, createDecipheriv, hkdfSync, randomBytes as randomBytes4 } from "node:crypto";
 import fs2 from "node:fs/promises";
 import path2 from "node:path";
 function openAiConfigured(env = process.env) {
@@ -8260,7 +8645,7 @@ var OpenAiCredentialStore = class {
     if (!normalized) {
       throw new Error("valid OpenAI API key is required");
     }
-    const iv = randomBytes3(12);
+    const iv = randomBytes4(12);
     const cipher = createCipheriv("aes-256-gcm", this.key, iv);
     const ciphertext = Buffer.concat([cipher.update(normalized, "utf8"), cipher.final()]);
     const envelope = {
@@ -8271,7 +8656,7 @@ var OpenAiCredentialStore = class {
       ciphertext: ciphertext.toString("base64url")
     };
     const directory = path2.dirname(this.file);
-    const temporary = `${this.file}.${process.pid}.${randomBytes3(6).toString("hex")}.tmp`;
+    const temporary = `${this.file}.${process.pid}.${randomBytes4(6).toString("hex")}.tmp`;
     await fs2.mkdir(directory, { recursive: true, mode: 448 });
     try {
       await fs2.writeFile(temporary, `${JSON.stringify(envelope)}
@@ -8557,7 +8942,7 @@ function positiveNumber2(value) {
 }
 
 // src/mlclaw-space-runtime/cookies.ts
-import { createHmac as createHmac3, randomBytes as randomBytes4, timingSafeEqual as timingSafeEqual3 } from "node:crypto";
+import { createHmac as createHmac4, randomBytes as randomBytes5, timingSafeEqual as timingSafeEqual4 } from "node:crypto";
 function createSignedCookie(options, payload) {
   const body = Buffer.from(JSON.stringify({
     ...payload,
@@ -8606,15 +8991,15 @@ function clearCookie(name, secure) {
   });
 }
 function randomState() {
-  return randomBytes4(24).toString("base64url");
+  return randomBytes5(24).toString("base64url");
 }
 function sign2(value, secret) {
-  return createHmac3("sha256", secret).update(value).digest("base64url");
+  return createHmac4("sha256", secret).update(value).digest("base64url");
 }
 function signatureMatches2(a, b) {
   const left = Buffer.from(a);
   const right = Buffer.from(b);
-  return left.length === right.length && timingSafeEqual3(left, right);
+  return left.length === right.length && timingSafeEqual4(left, right);
 }
 function parseCookies(header) {
   const cookies = /* @__PURE__ */ new Map();
@@ -8767,55 +9152,31 @@ var CONTROL_BRANDING_SCRIPT = `(function () {
       }
     });
   }
-  function installApprovals() {
-    var button = document.querySelector("[data-mlclaw-approvals-button]");
-    var frame = document.querySelector("[data-mlclaw-approvals-frame]");
-    var badge = document.querySelector("[data-mlclaw-approvals-badge]");
-    if (!button || !frame || button.getAttribute("data-ready") === "1") return;
-    button.setAttribute("data-ready", "1");
-    button.addEventListener("click", function () {
-      var open = frame.style.display !== "none";
-      frame.style.display = open ? "none" : "block";
-      button.setAttribute("aria-expanded", open ? "false" : "true");
-    });
-    window.addEventListener("message", function (event) {
-      if (event.origin === window.location.origin && event.data && event.data.type === "mlclaw-approvals-close") {
-        frame.style.display = "none";
-        button.setAttribute("aria-expanded", "false");
+  function brokerKitFrameIn(root, source) {
+    if (!root.querySelectorAll) return;
+    var frames = root.querySelectorAll("iframe");
+    for (var i = 0; i < frames.length; i++) {
+      try {
+        var frameUrl = new URL(frames[i].src, location.href);
+        if (frames[i].contentWindow === source && frameUrl.origin === location.origin &&
+            frameUrl.pathname === "/plugins/brokerkit/ui/" && !frameUrl.search) return frames[i];
+      } catch (_) {}
+    }
+    var elements = root.querySelectorAll("*");
+    for (var j = 0; j < elements.length; j++) {
+      if (elements[j].shadowRoot) {
+        var nested = brokerKitFrameIn(elements[j].shadowRoot, source);
+        if (nested) return nested;
       }
-    });
-    function refresh() {
-      listBrokers().then(function (brokers) {
-        return Promise.all(brokers.map(function (broker) {
-          return fetch("/mlclaw/api/approvals?broker=" + encodeURIComponent(broker.id) + "&status=pending&limit=100", { credentials: "same-origin" })
-            .then(function (response) { return response.ok ? response.json() : null; })
-            .catch(function () { return null; });
-        }));
-      }).then(function (pages) {
-          var count = pages.reduce(function (total, page) {
-            return total + (page && Array.isArray(page.items) ? page.items.length : 0);
-          }, 0);
-          if (!badge) return;
-          badge.textContent = count > 99 ? "99" : String(count);
-          badge.style.display = count > 0 ? "grid" : "none";
-        }).catch(function () {});
     }
-    function listBrokers() {
-      return fetch("/mlclaw/api/approvals/brokers", { credentials: "same-origin" })
-        .then(function (response) { return response.ok ? response.json() : { brokers: [] }; })
-        .then(function (value) { return value && Array.isArray(value.brokers) ? value.brokers : []; });
-    }
-    refresh();
-    listBrokers().then(function (brokers) {
-      brokers.forEach(function (broker) {
-        var events = new EventSource("/mlclaw/api/approvals/events?broker=" + encodeURIComponent(broker.id), { withCredentials: true });
-        events.onmessage = refresh;
-        ["request.created", "request.updated", "request.decided"].forEach(function (kind) {
-          events.addEventListener(kind, refresh);
-        });
-      });
-    });
   }
+  window.addEventListener("message", function (event) {
+    var message = event.data;
+    if (event.origin !== "null" || !message || message.type !== "brokerkit.delegated-web.open" ||
+        message.version !== 1 || typeof message.nonce !== "string" || !/^[a-f0-9]{32}$/.test(message.nonce)) return;
+    var frame = brokerKitFrameIn(document, event.source);
+    if (frame) location.assign(frame.src);
+  });
   if (!document.documentElement.hasAttribute(marker)) {
     document.documentElement.setAttribute(marker, "1");
     var attachShadow = Element.prototype.attachShadow;
@@ -8829,7 +9190,6 @@ var CONTROL_BRANDING_SCRIPT = `(function () {
     requestAnimationFrame(function () {
       observeExistingShadowRoots(document);
       scan(document);
-      installApprovals();
     });
   }
 })();
@@ -8869,13 +9229,8 @@ function injectMlClawShell(html, branding) {
       <circle cx="12" cy="12" r="3"></circle>
     </svg>
   </a>
-  <button data-mlclaw-approvals-button type="button" aria-label="Open approval requests" aria-expanded="false" style="position:relative;box-sizing:border-box;display:grid;width:34px;height:34px;place-items:center;border:1px solid rgba(15,23,42,.16);border-radius:8px;background:rgba(255,255,255,.94);box-shadow:0 8px 18px rgba(15,23,42,.14);color:#111827;cursor:pointer;">
-    <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"></path><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"></path></svg>
-    <span data-mlclaw-approvals-badge style="position:absolute;display:none;place-items:center;min-width:17px;height:17px;right:-6px;top:-7px;padding:0 4px;border:2px solid white;border-radius:999px;background:#dc2626;color:white;font:700 9px system-ui;"></span>
-  </button>
   </div>
 </div>
-<iframe data-mlclaw-approvals-frame src="/mlclaw?embed=approvals" title="Approval requests" style="display:none;position:fixed;z-index:2147483646;right:0;top:0;width:min(460px,100vw);height:100dvh;border:0;background:white;box-shadow:-12px 0 36px rgba(15,23,42,.22);"></iframe>
 `;
   const brandingScript = `<script ${CONTROL_BRANDING_MARKER} src="${CONTROL_BRANDING_SCRIPT_PATH}"></script>
 `;
@@ -8914,6 +9269,9 @@ function escapeHtml2(value) {
 function createSpaceRuntimeApp(config2, controls) {
   const app = new Hono2();
   const operatorBrokers = new OperatorBrokerRegistry(config2.operatorBrokers);
+  const delegatedBrokerKit = new DelegatedBrokerKit(operatorBrokers, config2.sessionSecret);
+  const allowDelegatedSessionSnapshot = fixedWindowRateLimit(12, 6e4);
+  const allowDelegatedActorSnapshot = fixedWindowRateLimit(60, 6e4);
   const openAiCredentials = new OpenAiCredentialStore(config2.openaiCredentialStoreFile, config2.credentialKey);
   app.get("/health", (c) => health(c, config2, controls));
   app.get("/healthz", (c) => health(c, config2, controls));
@@ -8930,6 +9288,8 @@ function createSpaceRuntimeApp(config2, controls) {
     async () => serveFile(path3.join(config2.assetsDir, "assistant-avatar.svg"), "image/svg+xml; charset=utf-8")
   );
   app.get("/assets/mlclaw-control-branding.js", () => staticScript(CONTROL_BRANDING_SCRIPT));
+  app.get("/plugins/brokerkit/ui", (c) => c.redirect("/plugins/brokerkit/ui/", 308));
+  app.get("/plugins/brokerkit/ui/*", (c) => trustedBrokerKitUi(c, config2, delegatedBrokerKit));
   app.get("/assets/brand/logo", async () => serveBrandAsset(config2, config2.branding.logoAsset));
   app.get("/favicon.svg", async () => serveBrandAsset(config2, config2.branding.faviconSvgAsset));
   app.get("/favicon-32.png", async () => serveBrandAsset(config2, config2.branding.favicon32Asset));
@@ -8981,119 +9341,59 @@ function createSpaceRuntimeApp(config2, controls) {
     }
     return c.json(await statusPayload(config2, controls));
   });
-  app.get("/mlclaw/api/approvals/brokers", (c) => {
-    const auth = requireAdmin(c, config2);
-    if (auth instanceof Response) {
-      return auth;
-    }
-    return c.json({ brokers: operatorBrokers.list() });
+  app.options("/mlclaw/api/brokerkit/*", (c) => delegatedPreflight(c));
+  app.post("/mlclaw/api/brokerkit/session", (c) => {
+    const identity = delegatedIdentity(c, delegatedBrokerKit);
+    if (!identity) return delegatedErrorResponse(c, "not_authorized", 401);
+    return delegatedJson(c, delegatedBrokerKit.issueSession(identity.actor));
   });
-  app.get("/mlclaw/api/approvals", async (c) => {
-    const auth = requireAdmin(c, config2);
-    if (auth instanceof Response) {
-      return auth;
-    }
-    const broker = selectedOperatorBroker(c, operatorBrokers);
-    if (broker instanceof Response) {
-      return broker;
-    }
-    const rawStatus = c.req.query("status");
-    if (rawStatus && rawStatus !== "pending" && rawStatus !== "history") {
-      return c.json({ ok: false, error: "status must be pending or history" }, 400);
-    }
-    const status = rawStatus === "pending" || rawStatus === "history" ? rawStatus : void 0;
-    const cursor = c.req.query("cursor");
-    try {
-      const page2 = await broker.list({
-        ...status ? { status } : {},
-        ...cursor ? { cursor } : {},
-        limit: boundedInteger(c.req.query("limit"), 50, 100)
-      });
-      return c.json({ broker: broker.summary(), ...page2 });
-    } catch (err) {
-      return brokerFailure(c, err, broker.summary());
-    }
-  });
-  app.get("/mlclaw/api/approvals/events", async (c) => {
-    const auth = requireAdmin(c, config2);
-    if (auth instanceof Response) {
-      return auth;
-    }
-    const broker = selectedOperatorBroker(c, operatorBrokers);
-    if (broker instanceof Response) {
-      return broker;
+  app.get("/mlclaw/api/brokerkit/snapshot", async (c) => {
+    const identity = delegatedIdentity(c, delegatedBrokerKit);
+    if (!identity) return delegatedErrorResponse(c, "not_authorized", 401);
+    if (!allowDelegatedSessionSnapshot(identity.sessionId) || !allowDelegatedActorSnapshot(identity.actor)) {
+      return delegatedErrorResponse(c, "rate_limited", 429);
     }
     try {
-      const upstream = await broker.events(c.req.header("last-event-id"), c.req.raw.signal);
-      return new Response(upstream.body, {
-        status: 200,
-        headers: {
-          "cache-control": "no-store",
-          "content-type": "text/event-stream",
-          "x-accel-buffering": "no"
-        }
-      });
-    } catch (err) {
-      return brokerFailure(c, err, broker.summary());
+      return delegatedJson(c, await delegatedBrokerKit.snapshot());
+    } catch (error) {
+      return delegatedFailure(c, error);
     }
   });
-  app.get("/mlclaw/api/approvals/:broker/:id", async (c) => {
-    const auth = requireAdmin(c, config2);
-    if (auth instanceof Response) {
-      return auth;
-    }
-    const broker = operatorBrokers.get(c.req.param("broker"));
-    if (!broker) {
-      return c.json({ ok: false, error: "operator broker is not configured" }, 404);
-    }
+  app.get("/mlclaw/api/brokerkit/requests/:handle", async (c) => {
+    const identity = delegatedIdentity(c, delegatedBrokerKit);
+    if (!identity) return delegatedErrorResponse(c, "not_authorized", 401);
     try {
-      return c.json({ broker: broker.summary(), item: await broker.get(c.req.param("id")) });
-    } catch (err) {
-      return brokerFailure(c, err, broker.summary());
+      return delegatedJson(c, await delegatedBrokerKit.detail(c.req.param("handle")));
+    } catch (error) {
+      return delegatedFailure(c, error);
     }
   });
-  for (const [browserAction, brokerAction] of [
-    ["approve", "approve"],
-    ["deny", "deny"],
-    ["cancel", "cancel"],
-    ["revoke", "revoke"]
-  ]) {
-    app.post(`/mlclaw/api/approvals/:broker/:id/${browserAction}`, async (c) => {
-      const auth = requireAdmin(c, config2);
-      if (auth instanceof Response) {
-        return auth;
+  for (const action of ["approve", "deny", "cancel", "revoke"]) {
+    app.post(`/mlclaw/api/brokerkit/requests/:handle/${action}`, async (c) => {
+      const identity = delegatedIdentity(c, delegatedBrokerKit);
+      if (!identity) return delegatedErrorResponse(c, "not_authorized", 401);
+      const body = await readBoundedJson(c, 16384);
+      if (!body || Object.keys(body).some((key) => !["expectedRevision", "reason", "constraints"].includes(key))) {
+        return delegatedErrorResponse(c, "invalid_input", 400);
       }
-      const csrf = requireCsrf(c, config2, auth.username);
-      if (csrf) {
-        return csrf;
-      }
-      const broker = operatorBrokers.get(c.req.param("broker"));
-      if (!broker) {
-        return c.json({ ok: false, error: "operator broker is not configured" }, 404);
-      }
-      const body = await readJson(c);
-      const expectedRevision = boundedInteger(body?.expectedRevision, 0, Number.MAX_SAFE_INTEGER);
-      if (!expectedRevision) {
-        return c.json({ ok: false, error: "expectedRevision is required" }, 400);
-      }
-      const durationSeconds = optionalPositiveInteger(body?.durationSeconds, 86400);
-      const maxUses = optionalPositiveInteger(body?.maxUses, 100);
-      if (browserAction === "approve" && (durationSeconds === "invalid" || maxUses === "invalid")) {
-        return c.json({ ok: false, error: "approval bounds are invalid" }, 400);
+      const constraints = recordValue(body.constraints);
+      const expectedRevision = positiveJsonInteger(body.expectedRevision);
+      const durationSeconds = optionalPositiveJsonInteger(constraints?.durationSeconds);
+      const maxUses = optionalPositiveJsonInteger(constraints?.maxUses);
+      if (!expectedRevision || body.reason !== void 0 && (typeof body.reason !== "string" || body.reason.length > 2e3) || body.constraints !== void 0 && (!constraints || Object.keys(constraints).some((key) => !["durationSeconds", "maxUses"].includes(key)) || durationSeconds === void 0 || maxUses === void 0) || durationSeconds === "invalid" || maxUses === "invalid" || action !== "approve" && (durationSeconds !== void 0 || maxUses !== void 0)) {
+        return delegatedErrorResponse(c, "invalid_input", 400);
       }
       try {
-        const item = await broker.decide(c.req.param("id"), brokerAction, {
-          expectedRevision,
-          ...typeof body?.expectedStatus === "string" ? { expectedStatus: body.expectedStatus } : {},
-          ...typeof body?.reason === "string" ? { reason: body.reason.slice(0, 2e3) } : {},
-          ...browserAction === "approve" ? {
+        return delegatedJson(
+          c,
+          await delegatedBrokerKit.decide(c.req.param("handle"), action, expectedRevision, identity.actor, {
+            ...typeof body.reason === "string" ? { reason: body.reason } : {},
             ...typeof durationSeconds === "number" ? { durationSeconds } : {},
             ...typeof maxUses === "number" ? { maxUses } : {}
-          } : {}
-        });
-        return c.json({ broker: broker.summary(), item });
-      } catch (err) {
-        return brokerFailure(c, err, broker.summary());
+          })
+        );
+      } catch (error) {
+        return delegatedFailure(c, error);
       }
     });
   }
@@ -9358,6 +9658,51 @@ async function controlUi(c, config2) {
   }
   return serveFile(path3.join(config2.assetsDir, "mlclaw-control-ui", "index.html"), "text/html; charset=utf-8");
 }
+async function trustedBrokerKitUi(c, config2, delegatedBrokerKit) {
+  const prefix = "/plugins/brokerkit/ui/";
+  const requested = c.req.path.slice(prefix.length);
+  const relative = requested ? safeRelativePath(requested) : "index.html";
+  if (!relative) return c.text("not found\n", 404);
+  const uiDir = path3.join(config2.brokerKitPluginPath, "dist", "ui");
+  const file = path3.join(uiDir, relative);
+  if (relative === "index.html") {
+    const destination = c.req.header("sec-fetch-dest");
+    if (destination !== "iframe" && destination !== "document") return c.text("not found\n", 404);
+    const auth = requireAdmin(c, config2);
+    if (auth instanceof Response) return auth;
+    try {
+      const template = await fs3.readFile(file, "utf8");
+      const marker = destination === "iframe" ? '<meta name="brokerkit-delegated-top-level">' : `<meta name="brokerkit-delegated-session" content="${Buffer.from(
+        JSON.stringify(delegatedBrokerKit.issueSession(auth.username)),
+        "utf8"
+      ).toString("base64url")}">`;
+      if (!template.includes("</head>")) return c.text("not found\n", 404);
+      const headers2 = trustedBrokerKitHeaders(destination === "iframe" ? "launcher" : "top-level");
+      headers2.set("content-type", "text/html; charset=utf-8");
+      return new Response(template.replace("</head>", `${marker}</head>`), { status: 200, headers: headers2 });
+    } catch {
+      return c.text("not found\n", 404);
+    }
+  }
+  const response = await serveFile(file, contentType(file), true);
+  if (response.status !== 200) return response;
+  const headers = trustedBrokerKitHeaders("asset");
+  headers.set("content-type", response.headers.get("content-type") ?? "application/octet-stream");
+  return new Response(response.body, { status: response.status, headers });
+}
+function trustedBrokerKitHeaders(mode) {
+  const asset = mode === "asset";
+  const headers = new Headers({
+    "cache-control": asset ? "public, max-age=31536000, immutable" : "no-store",
+    "content-security-policy": `sandbox allow-scripts; default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors ${mode === "top-level" ? "'none'" : "'self'"}`,
+    "cross-origin-resource-policy": asset ? "cross-origin" : "same-origin",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": mode === "top-level" ? "DENY" : "SAMEORIGIN"
+  });
+  if (asset) headers.set("access-control-allow-origin", "null");
+  return headers;
+}
 function logoutResponse(config2, json) {
   const headers = new Headers();
   headers.append("set-cookie", clearSessionCookie(config2.cookieSecure));
@@ -9399,35 +9744,57 @@ function requireCsrf(c, config2, username) {
   }
   return c.json({ ok: false, error: "csrf token is invalid or missing" }, 403);
 }
-function boundedInteger(value, fallback, maximum) {
-  const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
-  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > maximum) {
-    return fallback;
-  }
-  return parsed;
+function delegatedOriginAllowed(c) {
+  return c.req.header("origin") === "null";
 }
-function optionalPositiveInteger(value, maximum) {
-  if (value === void 0 || value === null || value === "") {
-    return void 0;
-  }
-  const parsed = typeof value === "number" ? value : Number(String(value));
-  return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= maximum ? parsed : "invalid";
+function delegatedIdentity(c, delegated) {
+  if (!delegatedOriginAllowed(c)) return void 0;
+  return delegated.authorizeSession(c.req.header("authorization"));
 }
-function selectedOperatorBroker(c, registry) {
-  const id = c.req.query("broker");
-  if (!id) {
-    return c.json({ ok: false, error: "broker is required" }, 400);
-  }
-  return registry.get(id) ?? c.json({ ok: false, error: "operator broker is not configured" }, 404);
+function delegatedPreflight(c) {
+  if (!delegatedOriginAllowed(c)) return delegatedErrorResponse(c, "not_authorized", 403);
+  delegatedHeaders(c);
+  c.header("access-control-allow-headers", "authorization, content-type");
+  c.header("access-control-allow-methods", "GET, POST, OPTIONS");
+  c.header("access-control-max-age", "300");
+  return c.body(null, 204);
 }
-function brokerFailure(c, err, broker) {
-  const upstream = err instanceof BrokerOperatorError ? ` status=${err.status}${err.code ? ` code=${err.code}` : ""}` : "";
-  process.stderr.write(`[mlclaw] ${broker.id} operator request failed${upstream}: ${formatError(err)}
+function delegatedJson(c, value, status = 200) {
+  delegatedHeaders(c);
+  return c.json(value, status);
+}
+function delegatedErrorResponse(c, code, status) {
+  delegatedHeaders(c);
+  return c.json({ error: { code } }, status);
+}
+function delegatedFailure(c, error) {
+  if (error instanceof DelegatedBrokerKitError) {
+    const status = error.code === "request_not_found" ? 404 : error.code === "revision_stale" || error.code === "action_not_allowed" ? 409 : 502;
+    return delegatedErrorResponse(c, error.code, status);
+  }
+  if (error instanceof BrokerOperatorError) {
+    const code = delegatedBrokerCode(error.code);
+    const status = error.status === 404 ? 404 : error.status === 409 ? 409 : 502;
+    return delegatedErrorResponse(c, code, status);
+  }
+  process.stderr.write(`[mlclaw] delegated BrokerKit request failed: ${formatError(error)}
 `);
-  if (err instanceof BrokerOperatorError && err.status >= 400 && err.status < 500) {
-    return c.json({ ok: false, error: err.message, ...err.code ? { code: err.code } : {} }, err.status);
+  return delegatedErrorResponse(c, "source_unavailable", 502);
+}
+function delegatedHeaders(c) {
+  c.header("access-control-allow-origin", "null");
+  c.header("access-control-allow-credentials", "true");
+  c.header("cache-control", "no-store");
+  c.header("vary", "origin");
+  c.header("x-content-type-options", "nosniff");
+}
+function delegatedBrokerCode(value) {
+  if (value === "not_found" || value === "request_not_found") return "request_not_found";
+  if (value === "revision_conflict" || value === "revision_stale") return "revision_stale";
+  if (value === "invalid_transition" || value === "constraint_exceeded" || value === "idempotency_conflict" || value === "request_terminal" || value === "action_not_allowed") {
+    return "action_not_allowed";
   }
-  return c.json({ ok: false, error: `${broker.label} operator API is unavailable` }, 502);
+  return "source_unavailable";
 }
 function unauthenticated(c, config2) {
   const next = normalizeNext(c.req.path + new URL(c.req.url).search);
@@ -9560,6 +9927,62 @@ async function readJson(c) {
     return void 0;
   }
 }
+async function readBoundedJson(c, maximum) {
+  if (c.req.header("content-type")?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json") return void 0;
+  const declaredLength = Number(c.req.header("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > maximum) return void 0;
+  const body = c.req.raw.body;
+  if (!body) return void 0;
+  const reader = body.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maximum) {
+        await reader.cancel();
+        return void 0;
+      }
+      chunks.push(Buffer.from(value));
+    }
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks));
+    return recordValue(JSON.parse(text));
+  } catch {
+    return void 0;
+  }
+}
+function positiveJsonInteger(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : 0;
+}
+function optionalPositiveJsonInteger(value) {
+  if (value === void 0) return void 0;
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : "invalid";
+}
+function fixedWindowRateLimit(limit, windowMs) {
+  const windows = /* @__PURE__ */ new Map();
+  return (key) => {
+    const now = Date.now();
+    const current = windows.get(key);
+    if (!current || now - current.startedAt >= windowMs) {
+      if (!current && windows.size >= 1024) {
+        for (const [candidate, entry] of windows) {
+          if (now - entry.startedAt >= windowMs) windows.delete(candidate);
+        }
+        if (windows.size >= 1024) return false;
+      }
+      windows.set(key, { startedAt: now, count: 1 });
+      return true;
+    }
+    if (current.count >= limit) return false;
+    current.count += 1;
+    return true;
+  };
+}
+function recordValue(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : void 0;
+}
 async function writeRuntimeSettingsFile(config2, model, choices) {
   await fs3.mkdir(path3.dirname(config2.runtimeSettingsFile), { recursive: true });
   await fs3.writeFile(
@@ -9643,7 +10066,7 @@ function contentType(file) {
 }
 
 // src/mlclaw-space-runtime/mcp-credentials.ts
-import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, hkdfSync as hkdfSync2, randomBytes as randomBytes5 } from "node:crypto";
+import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, hkdfSync as hkdfSync2, randomBytes as randomBytes6 } from "node:crypto";
 import fs4 from "node:fs/promises";
 import path4 from "node:path";
 var DEFAULT_REFRESH_TIMEOUT_MS = 3e4;
@@ -9776,7 +10199,7 @@ var McpCredentialStore = class {
   async persist() {
     const directory = path4.dirname(this.options.file);
     await fs4.mkdir(directory, { recursive: true, mode: 448 });
-    const temporary = `${this.options.file}.${process.pid}.${randomBytes5(6).toString("hex")}.tmp`;
+    const temporary = `${this.options.file}.${process.pid}.${randomBytes6(6).toString("hex")}.tmp`;
     const encrypted = encryptDocument(this.document, this.key);
     try {
       await fs4.writeFile(temporary, `${JSON.stringify(encrypted)}
@@ -9854,7 +10277,7 @@ var InvalidCredentialFileError = class extends Error {
   }
 };
 function encryptDocument(document, key) {
-  const iv = randomBytes5(12);
+  const iv = randomBytes6(12);
   const cipher = createCipheriv2("aes-256-gcm", key, iv);
   const plaintext = Buffer.from(JSON.stringify(document), "utf8");
   const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
@@ -9936,11 +10359,7 @@ var ADMIN_CONTROL_UI_SCOPES = [
   "operator.approvals",
   "operator.pairing"
 ];
-var USER_CONTROL_UI_SCOPES = [
-  "operator.read",
-  "operator.write",
-  "operator.approvals"
-];
+var USER_CONTROL_UI_SCOPES = ["operator.read", "operator.write"];
 var HOP_BY_HOP_HEADERS = /* @__PURE__ */ new Set([
   "connection",
   "keep-alive",
@@ -9959,37 +10378,40 @@ async function proxyHttp(req, res, config2, identity) {
     delete headers["Accept-Encoding"];
   }
   addTrustedProxyHeaders(headers, config2, identity);
-  const upstream = http2.request({
-    host: config2.openclawHost,
-    port: config2.openclawPort,
-    method: req.method,
-    path: req.url,
-    headers
-  }, (upstreamResponse) => {
-    const responseHeaders2 = sanitizeHeaders(upstreamResponse.headers);
-    const inject = shouldInjectShell({
+  const upstream = http2.request(
+    {
+      host: config2.openclawHost,
+      port: config2.openclawPort,
       method: req.method,
-      requestAccept: String(req.headers.accept ?? ""),
-      responseContentType: headerValue(upstreamResponse.headers["content-type"]),
-      responseContentEncoding: headerValue(upstreamResponse.headers["content-encoding"])
-    });
-    if (!inject) {
-      res.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders2);
-      upstreamResponse.pipe(res);
-      return;
+      path: req.url,
+      headers
+    },
+    (upstreamResponse) => {
+      const responseHeaders2 = sanitizeHeaders(upstreamResponse.headers);
+      const inject = shouldInjectShell({
+        method: req.method,
+        requestAccept: String(req.headers.accept ?? ""),
+        responseContentType: headerValue(upstreamResponse.headers["content-type"]),
+        responseContentEncoding: headerValue(upstreamResponse.headers["content-encoding"])
+      });
+      if (!inject) {
+        res.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders2);
+        upstreamResponse.pipe(res);
+        return;
+      }
+      const chunks = [];
+      upstreamResponse.on("data", (chunk) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      upstreamResponse.on("end", () => {
+        const body = rewriteOpenClawHtml(Buffer.concat(chunks).toString("utf8"), config2.branding);
+        delete responseHeaders2["content-length"];
+        delete responseHeaders2["Content-Length"];
+        res.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders2);
+        res.end(body);
+      });
     }
-    const chunks = [];
-    upstreamResponse.on("data", (chunk) => {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    });
-    upstreamResponse.on("end", () => {
-      const body = rewriteOpenClawHtml(Buffer.concat(chunks).toString("utf8"), config2.branding);
-      delete responseHeaders2["content-length"];
-      delete responseHeaders2["Content-Length"];
-      res.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders2);
-      res.end(body);
-    });
-  });
+  );
   upstream.on("error", (err) => {
     process.stderr.write(`[mlclaw] upstream HTTP proxy failed: ${err.stack ?? err.message}
 `);
@@ -10249,7 +10671,7 @@ var SpaceRuntimeServer = class {
     await proxyHttp(req, res, this.config, { username: session.username });
   }
   shouldRouteToMlClaw(pathname) {
-    return pathname === "/health" || pathname === "/healthz" || pathname === "/favicon.svg" || pathname === "/favicon-32.png" || pathname === "/favicon.ico" || pathname === "/apple-touch-icon.png" || pathname === "/manifest.webmanifest" || pathname === "/sw.js" || pathname === "/assets/hf-logo.svg" || pathname === "/assets/mlclaw.svg" || pathname === "/assets/assistant-avatar.svg" || pathname === "/assets/mlclaw-control-branding.js" || pathname === "/assets/brand/logo" || pathname === "/login" || pathname === "/logout" || pathname.startsWith("/oauth/") || pathname === "/mlclaw" || pathname.startsWith("/mlclaw/");
+    return pathname === "/health" || pathname === "/healthz" || pathname === "/favicon.svg" || pathname === "/favicon-32.png" || pathname === "/favicon.ico" || pathname === "/apple-touch-icon.png" || pathname === "/manifest.webmanifest" || pathname === "/sw.js" || pathname === "/assets/hf-logo.svg" || pathname === "/assets/mlclaw.svg" || pathname === "/assets/assistant-avatar.svg" || pathname === "/assets/mlclaw-control-branding.js" || pathname === "/assets/brand/logo" || pathname === "/plugins/brokerkit/ui" || pathname.startsWith("/plugins/brokerkit/ui/") || pathname === "/login" || pathname === "/logout" || pathname.startsWith("/oauth/") || pathname === "/mlclaw" || pathname.startsWith("/mlclaw/");
   }
   async startOpenClaw(extraEnv = {}) {
     if (this.openclawStarting || this.openclaw && !this.openclaw.killed) {
