@@ -108,14 +108,17 @@ audit fields and are never accepted for routing. The browser receives a
 short-lived token bound to the authenticated ML Claw admin; that token cannot
 call a broker directly.
 
-The OpenClaw plugin registers the Gateway tab, but ML Claw intercepts the tab's
-fixed UI path and serves the immutable packaged assets from its trusted HTTP
-boundary. The framed tab contains only a launcher. After an operator clicks it,
-ML Claw navigates the whole tab to an authenticated, unframeable document with
-an opaque CSP-sandboxed origin and a short-lived delegated session. The document
-renews that session using its current bearer token; it never sends ML Claw
-cookies to the delegated API. The OpenClaw process therefore never receives
-broker credentials, delegated decision tokens, or control over the decision UI.
+The OpenClaw plugin registers the Gateway tab, but ML Claw intercepts the fixed
+UI path and serves the immutable packaged assets from its trusted HTTP boundary.
+An authenticated administrator can inspect and decide requests directly in the
+Gateway popover. The iframe has an opaque CSP-sandboxed origin and a short-lived
+delegated decision session. It renews that session using its current bearer
+token and never sends ML Claw cookies to the delegated API. The OpenClaw process
+cannot read broker credentials or delegated decision tokens. Because OpenClaw
+controls the surrounding page, deployments that require protection from a
+compromised Gateway frontend should leave
+`MLCLAW_BROKERKIT_POPOVER_DECISIONS` unset. Set it to `true` only when the
+deployment explicitly accepts that tradeoff; the default popover is read-only.
 
 ML Claw refreshes current request state and revision immediately before every
 decision. It sends actor attribution and a deterministic idempotency key to the
@@ -130,6 +133,6 @@ IDs, duplicate URLs, inline tokens, and unsupported versions are invalid.
 This format configures operator inbox connectivity only. The OpenClaw plugin is
 installed and registered by the ML Claw runtime in `delegated-web` mode; it does
 not receive broker credentials or register approval commands. Delegated
-sessions are issued only to the protected top-level document after navigation
-from the sandboxed launcher. This file does not configure agent credentials,
-policy, channels, broker storage, or privileged execution.
+sessions are issued only to authenticated administrators in the sandboxed
+popover or standalone packaged UI. This file does not configure agent
+credentials, policy, channels, broker storage, or privileged execution.

@@ -532,7 +532,12 @@ async function trustedBrokerKitUi(
       const marker = !delegatedSession
         ? '<meta name="brokerkit-delegated-top-level">'
         : `<meta name="brokerkit-delegated-session" content="${Buffer.from(
-            JSON.stringify(delegatedBrokerKit.issueSession(auth.username, embeddedPopover ? "read" : "decide")),
+            JSON.stringify(
+              delegatedBrokerKit.issueSession(
+                auth.username,
+                embeddedPopover && !config.brokerKitPopoverDecisions ? "read" : "decide",
+              ),
+            ),
             "utf8",
           ).toString("base64url")}">`;
       if (!template.includes("</head>")) return c.text("not found\n", 404);

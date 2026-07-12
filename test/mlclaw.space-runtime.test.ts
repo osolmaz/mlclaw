@@ -230,6 +230,7 @@ describe("ML Claw Space runtime", () => {
       allowedUsers: ["alice", "bob"],
       adminUsers: ["alice"],
       brokerKitPluginPath: pluginRoot,
+      brokerKitPopoverDecisions: true,
       operatorBrokers: [
         {
           id: "hf-broker",
@@ -279,7 +280,7 @@ describe("ML Claw Space runtime", () => {
       access: string;
       renewal_transport: string;
     };
-    expect(popoverSessionBody.access).toBe("read");
+    expect(popoverSessionBody.access).toBe("decide");
     expect(popoverSessionBody.renewal_transport).toBe("direct");
     expect(session.status).toBe(200);
     expect(session.headers.get("cache-control")).toBe("no-store");
@@ -313,19 +314,12 @@ describe("ML Claw Space runtime", () => {
     expect(snapshotBody.requests).toHaveLength(1);
     expect(snapshotBody.requests[0]?.id).toBe("request-1");
     expect(snapshotBody.requests[0]?.handle).toMatch(/^[A-Za-z0-9_-]{24}$/u);
-    const readOnlyHeaders = {
+    const popoverHeaders = {
       origin: "null",
       authorization: `Bearer ${popoverSessionBody.token}`,
     };
-    const popoverSnapshot = await fetch(`${base}/snapshot`, { headers: readOnlyHeaders });
+    const popoverSnapshot = await fetch(`${base}/snapshot`, { headers: popoverHeaders });
     expect(popoverSnapshot.status).toBe(200);
-    const readOnlyDecision = await fetch(`${base}/requests/${snapshotBody.requests[0]?.handle}/approve`, {
-      method: "POST",
-      headers: { ...readOnlyHeaders, "content-type": "application/json" },
-      body: JSON.stringify({ expectedRevision: 1 }),
-    });
-    expect(readOnlyDecision.status).toBe(401);
-    expect(await readOnlyDecision.json()).toEqual({ error: { code: "not_authorized" } });
     const summary = await fetch(`${base}/summary`, { headers: { cookie: sessionCookie(config, "alice") } });
     expect(summary.status).toBe(200);
     expect(await summary.json()).toEqual({ pending: 1, healthy: true });
@@ -381,13 +375,13 @@ describe("ML Claw Space runtime", () => {
     const requestUrl = `${base}/requests/${snapshotBody.requests[0]?.handle}/approve`;
     const oversized = await fetch(requestUrl, {
       method: "POST",
-      headers: { ...authorizedHeaders, "content-type": "application/json" },
+      headers: { ...popoverHeaders, "content-type": "application/json" },
       body: JSON.stringify({ expectedRevision: 1, reason: "x".repeat(17_000) }),
     });
     expect(oversized.status).toBe(400);
     const legacyShape = await fetch(requestUrl, {
       method: "POST",
-      headers: { ...authorizedHeaders, "content-type": "application/json" },
+      headers: { ...popoverHeaders, "content-type": "application/json" },
       body: JSON.stringify({ expectedRevision: 1, durationSeconds: 300, maxUses: 1 }),
     });
     expect(legacyShape.status).toBe(400);
@@ -399,7 +393,7 @@ describe("ML Claw Space runtime", () => {
     });
     const conflict = await fetch(requestUrl, {
       method: "POST",
-      headers: { ...authorizedHeaders, "content-type": "application/json" },
+      headers: { ...popoverHeaders, "content-type": "application/json" },
       body: decisionBody,
     });
     expect(conflict.status).toBe(409);
@@ -407,7 +401,7 @@ describe("ML Claw Space runtime", () => {
 
     const approve = await fetch(requestUrl, {
       method: "POST",
-      headers: { ...authorizedHeaders, "content-type": "application/json" },
+      headers: { ...popoverHeaders, "content-type": "application/json" },
       body: decisionBody,
     });
     expect(approve.status).toBe(200);
@@ -1939,6 +1933,18 @@ describe("ML Claw Space runtime", () => {
 
     expect(config.adminUsers).toEqual(["osolmaz"]);
     expect(config.allowedUsers).toEqual(["alice", "bob", "osolmaz"]);
+    expect(config.brokerKitPopoverDecisions).toBe(false);
+  });
+
+  it("requires explicit opt-in for decisions inside the Gateway popover", () => {
+    const config = loadConfig({
+      SPACE_ID: "osolmaz/research",
+      MLCLAW_BROKERKIT_POPOVER_DECISIONS: "true",
+      MLCLAW_SESSION_SECRET: "x".repeat(48),
+      MLCLAW_CREDENTIAL_KEY: "k".repeat(48),
+    });
+
+    expect(config.brokerKitPopoverDecisions).toBe(true);
   });
 
   it("loads the trusted local integration token from a protected file", async () => {
@@ -2110,6 +2116,7 @@ async function testConfig(overrides: Partial<SpaceRuntimeConfig> = {}): Promise<
     brokerAgentSecret: undefined,
     brokerAgentSecretFile: undefined,
     operatorBrokers: [],
+    brokerKitPopoverDecisions: false,
     hubUrl: "https://huggingface.co",
     openaiCredentialFile: path.join(root, "secrets", "openai.env"),
     openaiCredentialStoreFile: path.join(root, "durable", "openai-api-key.enc"),

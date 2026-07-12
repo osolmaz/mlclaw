@@ -209,10 +209,12 @@ merges every BrokerKit-compatible backend configured in
 `MLCLAW_OPERATOR_BROKERS_FILE` and lets administrators inspect, approve, deny,
 cancel, or revoke requests. The plugin registers the Gateway tab, while ML Claw
 serves the immutable packaged UI from its trusted HTTP boundary and gives it a
-small launcher inside the Gateway. Decisions open in an unframeable protected
-document with a renewable, short-lived, admin-bound browser token. Broker
-operator tokens remain in backend-only files and are never sent to the browser
-or OpenClaw. See
+small popover inside the Gateway. Administrators decide requests directly in
+the sandboxed popover when `MLCLAW_BROKERKIT_POPOVER_DECISIONS=true`; otherwise
+the popover remains read-only and decisions use the standalone protected page.
+Both flows use a renewable, short-lived, admin-bound browser token.
+Broker operator tokens remain in backend-only files and are never sent to the
+browser or OpenClaw. See
 [Operator Broker Configuration](docs/operator-brokers-config.md).
 
 - `/mlclaw/credentials`: connect or disconnect Hugging Face MCP and Research
