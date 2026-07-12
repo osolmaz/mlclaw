@@ -1417,18 +1417,18 @@ describe("ML Claw Space runtime", () => {
       icons: [{ src: "./favicon.svg" }, { src: "./favicon-32.png" }, { src: "./apple-touch-icon.png" }],
     });
 
-    for (const pathname of [
-      "/assets/brand/logo",
-      "/favicon.svg",
-      "/favicon-32.png",
-      "/favicon.ico",
-      "/apple-touch-icon.png",
-      "/assets/assistant-avatar.svg",
-    ]) {
+    for (const pathname of ["/assets/brand/logo", "/favicon.svg", "/favicon.ico", "/assets/assistant-avatar.svg"]) {
       const response = await fetch(`http://127.0.0.1:${config.port}${pathname}`);
       expect(response.status, pathname).toBe(200);
       expect(response.headers.get("cache-control"), pathname).toBeNull();
       expect(await response.text(), pathname).toContain("<svg");
+    }
+    for (const pathname of ["/favicon-32.png", "/apple-touch-icon.png"]) {
+      const response = await fetch(`http://127.0.0.1:${config.port}${pathname}`);
+      expect(response.status, pathname).toBe(200);
+      expect(response.headers.get("content-type"), pathname).toBe("image/png");
+      expect(response.headers.get("cache-control"), pathname).toBeNull();
+      expect([...new Uint8Array(await response.arrayBuffer()).slice(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
     }
   });
 
@@ -1933,9 +1933,9 @@ describe("ML Claw Space runtime", () => {
       themeColor: "#111827",
       logoAsset: "mlclaw.svg",
       faviconSvgAsset: "hf-logo.svg",
-      favicon32Asset: "hf-logo.svg",
+      favicon32Asset: "hf-logo.png",
       faviconIcoAsset: "hf-logo.svg",
-      appleTouchIconAsset: "assistant-avatar.svg",
+      appleTouchIconAsset: "hf-logo.png",
     });
 
     const explicit = loadConfig({
@@ -1988,6 +1988,13 @@ describe("ML Claw Space runtime", () => {
     const avatar = await fetch(`http://127.0.0.1:${config.port}/assets/assistant-avatar.svg`);
     expect(avatar.status).toBe(200);
     expect(avatar.headers.get("content-type")).toBe("image/svg+xml; charset=utf-8");
+
+    for (const pathname of ["/favicon-32.png", "/apple-touch-icon.png"]) {
+      const icon = await fetch(`http://127.0.0.1:${config.port}${pathname}`);
+      expect(icon.status).toBe(200);
+      expect(icon.headers.get("content-type")).toBe("image/png");
+      expect([...new Uint8Array(await icon.arrayBuffer()).slice(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+    }
   });
 });
 

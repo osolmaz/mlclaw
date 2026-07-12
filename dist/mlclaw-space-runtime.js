@@ -26,7 +26,7 @@ var DEFAULT_BRAND_NAME = "ML Claw";
 var DEFAULT_THEME_COLOR = "#111827";
 var DEFAULT_LOGO_ASSET = "mlclaw.svg";
 var DEFAULT_HUGGING_FACE_ASSET = "hf-logo.svg";
-var DEFAULT_ASSISTANT_AVATAR_ASSET = "assistant-avatar.svg";
+var DEFAULT_HUGGING_FACE_PNG_ASSET = "hf-logo.png";
 function resolveBranding(env, agentName) {
   const defaultName = defaultBrandName(agentName);
   const name = cleanText(env.MLCLAW_BRAND_NAME) ?? defaultName;
@@ -41,16 +41,13 @@ function resolveBranding(env, agentName) {
     ),
     favicon32Asset: normalizeAssetRef(
       env.MLCLAW_BRAND_FAVICON_32 ?? env.MLCLAW_BRAND_FAVICON_PNG ?? env.MLCLAW_BRAND_FAVICON,
-      DEFAULT_HUGGING_FACE_ASSET
+      DEFAULT_HUGGING_FACE_PNG_ASSET
     ),
     faviconIcoAsset: normalizeAssetRef(
       env.MLCLAW_BRAND_FAVICON_ICO ?? env.MLCLAW_BRAND_FAVICON,
       DEFAULT_HUGGING_FACE_ASSET
     ),
-    appleTouchIconAsset: normalizeAssetRef(
-      env.MLCLAW_BRAND_APPLE_TOUCH_ICON ?? env.MLCLAW_BRAND_ASSISTANT_AVATAR,
-      DEFAULT_ASSISTANT_AVATAR_ASSET
-    )
+    appleTouchIconAsset: normalizeAssetRef(env.MLCLAW_BRAND_APPLE_TOUCH_ICON, DEFAULT_HUGGING_FACE_PNG_ASSET)
   };
 }
 function publicBranding(branding) {
@@ -62,33 +59,37 @@ function publicBranding(branding) {
   };
 }
 function brandingManifest(branding) {
-  return `${JSON.stringify({
-    name: branding.name,
-    short_name: branding.shortName,
-    description: `${branding.name} browser gateway`,
-    start_url: "./",
-    display: "standalone",
-    theme_color: branding.themeColor,
-    background_color: branding.themeColor,
-    icons: [
-      {
-        src: "./favicon.svg",
-        sizes: "any",
-        type: "image/svg+xml",
-        purpose: "any"
-      },
-      {
-        src: "./favicon-32.png",
-        sizes: "32x32",
-        type: "image/png"
-      },
-      {
-        src: "./apple-touch-icon.png",
-        sizes: "180x180",
-        type: "image/png"
-      }
-    ]
-  }, null, 2)}
+  return `${JSON.stringify(
+    {
+      name: branding.name,
+      short_name: branding.shortName,
+      description: `${branding.name} browser gateway`,
+      start_url: "./",
+      display: "standalone",
+      theme_color: branding.themeColor,
+      background_color: branding.themeColor,
+      icons: [
+        {
+          src: "./favicon.svg",
+          sizes: "any",
+          type: "image/svg+xml",
+          purpose: "any"
+        },
+        {
+          src: "./favicon-32.png",
+          sizes: "32x32",
+          type: "image/png"
+        },
+        {
+          src: "./apple-touch-icon.png",
+          sizes: "180x180",
+          type: "image/png"
+        }
+      ]
+    },
+    null,
+    2
+  )}
 `;
 }
 function defaultBrandName(agentName) {

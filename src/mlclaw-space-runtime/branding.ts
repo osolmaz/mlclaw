@@ -20,12 +20,9 @@ const DEFAULT_BRAND_NAME = "ML Claw";
 const DEFAULT_THEME_COLOR = "#111827";
 const DEFAULT_LOGO_ASSET = "mlclaw.svg";
 const DEFAULT_HUGGING_FACE_ASSET = "hf-logo.svg";
-const DEFAULT_ASSISTANT_AVATAR_ASSET = "assistant-avatar.svg";
+const DEFAULT_HUGGING_FACE_PNG_ASSET = "hf-logo.png";
 
-export function resolveBranding(
-  env: NodeJS.ProcessEnv,
-  agentName: string | undefined,
-): RuntimeBranding {
+export function resolveBranding(env: NodeJS.ProcessEnv, agentName: string | undefined): RuntimeBranding {
   const defaultName = defaultBrandName(agentName);
   const name = cleanText(env.MLCLAW_BRAND_NAME) ?? defaultName;
   return {
@@ -39,16 +36,13 @@ export function resolveBranding(
     ),
     favicon32Asset: normalizeAssetRef(
       env.MLCLAW_BRAND_FAVICON_32 ?? env.MLCLAW_BRAND_FAVICON_PNG ?? env.MLCLAW_BRAND_FAVICON,
-      DEFAULT_HUGGING_FACE_ASSET,
+      DEFAULT_HUGGING_FACE_PNG_ASSET,
     ),
     faviconIcoAsset: normalizeAssetRef(
       env.MLCLAW_BRAND_FAVICON_ICO ?? env.MLCLAW_BRAND_FAVICON,
       DEFAULT_HUGGING_FACE_ASSET,
     ),
-    appleTouchIconAsset: normalizeAssetRef(
-      env.MLCLAW_BRAND_APPLE_TOUCH_ICON ?? env.MLCLAW_BRAND_ASSISTANT_AVATAR,
-      DEFAULT_ASSISTANT_AVATAR_ASSET,
-    ),
+    appleTouchIconAsset: normalizeAssetRef(env.MLCLAW_BRAND_APPLE_TOUCH_ICON, DEFAULT_HUGGING_FACE_PNG_ASSET),
   };
 }
 
@@ -62,33 +56,37 @@ export function publicBranding(branding: RuntimeBranding): PublicBranding {
 }
 
 export function brandingManifest(branding: RuntimeBranding): string {
-  return `${JSON.stringify({
-    name: branding.name,
-    short_name: branding.shortName,
-    description: `${branding.name} browser gateway`,
-    start_url: "./",
-    display: "standalone",
-    theme_color: branding.themeColor,
-    background_color: branding.themeColor,
-    icons: [
-      {
-        src: "./favicon.svg",
-        sizes: "any",
-        type: "image/svg+xml",
-        purpose: "any",
-      },
-      {
-        src: "./favicon-32.png",
-        sizes: "32x32",
-        type: "image/png",
-      },
-      {
-        src: "./apple-touch-icon.png",
-        sizes: "180x180",
-        type: "image/png",
-      },
-    ],
-  }, null, 2)}\n`;
+  return `${JSON.stringify(
+    {
+      name: branding.name,
+      short_name: branding.shortName,
+      description: `${branding.name} browser gateway`,
+      start_url: "./",
+      display: "standalone",
+      theme_color: branding.themeColor,
+      background_color: branding.themeColor,
+      icons: [
+        {
+          src: "./favicon.svg",
+          sizes: "any",
+          type: "image/svg+xml",
+          purpose: "any",
+        },
+        {
+          src: "./favicon-32.png",
+          sizes: "32x32",
+          type: "image/png",
+        },
+        {
+          src: "./apple-touch-icon.png",
+          sizes: "180x180",
+          type: "image/png",
+        },
+      ],
+    },
+    null,
+    2,
+  )}\n`;
 }
 
 function defaultBrandName(agentName: string | undefined): string {
@@ -102,9 +100,7 @@ function defaultBrandName(agentName: string | undefined): string {
   return cleaned
     .split(/[-_\s]+/)
     .filter(Boolean)
-    .map((word) => /^mlclaw$/i.test(word)
-      ? DEFAULT_BRAND_NAME
-      : `${word.slice(0, 1).toUpperCase()}${word.slice(1)}`)
+    .map((word) => (/^mlclaw$/i.test(word) ? DEFAULT_BRAND_NAME : `${word.slice(0, 1).toUpperCase()}${word.slice(1)}`))
     .join(" ");
 }
 
@@ -122,7 +118,11 @@ function normalizeThemeColor(value: string | undefined): string | undefined {
     return undefined;
   }
   if (/^#[0-9a-fA-F]{3}$/.test(cleaned)) {
-    return `#${cleaned.slice(1).split("").map((char) => `${char}${char}`).join("")}`.toLowerCase();
+    return `#${cleaned
+      .slice(1)
+      .split("")
+      .map((char) => `${char}${char}`)
+      .join("")}`.toLowerCase();
   }
   if (/^#[0-9a-fA-F]{6}$/.test(cleaned)) {
     return cleaned.toLowerCase();
@@ -133,10 +133,7 @@ function normalizeThemeColor(value: string | undefined): string | undefined {
 function normalizeAssetRef(value: string | undefined, fallback: string): string {
   const raw = value?.trim() || fallback;
   const withoutAssetsPrefix = raw.replace(/^\/?assets\/+/, "");
-  const normalized = withoutAssetsPrefix
-    .split("/")
-    .filter(Boolean)
-    .join("/");
+  const normalized = withoutAssetsPrefix.split("/").filter(Boolean).join("/");
   if (
     !normalized ||
     normalized === "." ||

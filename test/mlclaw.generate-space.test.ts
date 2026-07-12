@@ -25,6 +25,7 @@ describe("generated Space repository", () => {
       "README.md",
       "assets/assistant-avatar.svg",
       "assets/hf-logo.svg",
+      "assets/hf-logo.png.base64",
       "assets/mlclaw.svg",
       "assets/mlclaw-control-ui/index.html",
       "assets/hf-tooling/manifest.json",
@@ -67,6 +68,7 @@ describe("generated Space repository", () => {
       "README.md",
       "assets/assistant-avatar.svg",
       "assets/hf-logo.svg",
+      "assets/hf-logo.png.base64",
       "assets/mlclaw.svg",
       "assets/mlclaw-control-ui/index.html",
       "assets/hf-tooling/manifest.json",
@@ -118,6 +120,9 @@ describe("generated Space repository", () => {
       "ENV MLCLAW_BROKERKIT_PLUGIN_PATH=/opt/openclaw-plugins/node_modules/openclaw-brokerkit",
     );
     expect(dockerfile).toContain("COPY runtime/hf-broker.scope.json /app/hf-broker.scope.json");
+    expect(dockerfile).toContain("base64 -d /app/assets/hf-logo.png.base64 > /app/assets/hf-logo.png");
+    const encodedHfLogo = await fs.readFile(path.join(outDir, "assets/hf-logo.png.base64"), "utf8");
+    expect([...Buffer.from(encodedHfLogo.trim(), "base64").subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
     const brokerScope = JSON.parse(await fs.readFile(path.join(outDir, "runtime/hf-broker.scope.json"), "utf8")) as {
       rules: Array<{ operations: string[] }>;
     };
