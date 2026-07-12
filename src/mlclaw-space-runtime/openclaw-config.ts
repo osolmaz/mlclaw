@@ -40,8 +40,11 @@ export async function configureOpenClawGateway(config: SpaceRuntimeConfig): Prom
 }
 
 function configureBrokerMcpServer(openclawConfig: Record<string, unknown>, config: SpaceRuntimeConfig): void {
-  if (!config.brokerAgentUrl || !config.brokerAgentSecretFile) return;
   const servers = object(object(openclawConfig, "mcp"), "servers");
+  if (!config.brokerAgentUrl || !config.brokerAgentSecretFile) {
+    delete servers["huggingface-broker"];
+    return;
+  }
   const existing = objectValue(servers["huggingface-broker"]);
   servers["huggingface-broker"] = {
     ...existing,

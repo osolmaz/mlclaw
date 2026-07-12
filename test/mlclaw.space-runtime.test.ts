@@ -1842,6 +1842,18 @@ describe("ML Claw Space runtime", () => {
     expect(JSON.stringify(rewritten)).not.toContain("operator-secret");
   });
 
+  it("removes a stale managed broker MCP server when the broker is unavailable", async () => {
+    const config = await testConfig({ brokerAgentUrl: undefined, brokerAgentSecretFile: undefined });
+    const existing = JSON.parse(await fs.readFile(config.openclawConfigPath, "utf8"));
+    existing.mcp = { servers: { "huggingface-broker": { command: "/missing/hf-broker", enabled: true } } };
+    await fs.writeFile(config.openclawConfigPath, JSON.stringify(existing));
+
+    await configureOpenClawGateway(config);
+
+    const rewritten = JSON.parse(await fs.readFile(config.openclawConfigPath, "utf8"));
+    expect(rewritten.mcp.servers["huggingface-broker"]).toBeUndefined();
+  });
+
   it("makes the duplicated Space owner the default admin", () => {
     const config = loadConfig({
       SPACE_ID: "osolmaz/research",

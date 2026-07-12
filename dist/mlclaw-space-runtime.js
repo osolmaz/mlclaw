@@ -8441,8 +8441,11 @@ async function configureOpenClawGateway(config2) {
   }
 }
 function configureBrokerMcpServer(openclawConfig, config2) {
-  if (!config2.brokerAgentUrl || !config2.brokerAgentSecretFile) return;
   const servers = object(object(openclawConfig, "mcp"), "servers");
+  if (!config2.brokerAgentUrl || !config2.brokerAgentSecretFile) {
+    delete servers["huggingface-broker"];
+    return;
+  }
   const existing = objectValue2(servers["huggingface-broker"]);
   servers["huggingface-broker"] = {
     ...existing,
@@ -10783,6 +10786,8 @@ var OPENCLAW_ENV_ALLOWLIST = [
   "OPENCLAW_LIVE_DIR",
   "OPENCLAW_STATE_DIR",
   "OPENCLAW_WORKSPACE_DIR",
+  "MLCLAW_HF_BROKER_URL",
+  "MLCLAW_HF_BROKER_AGENT_SECRET_FILE",
   "TELEGRAM_API_ROOT",
   "TELEGRAM_ALLOWED_USERS",
   "TELEGRAM_BOT_TOKEN",
