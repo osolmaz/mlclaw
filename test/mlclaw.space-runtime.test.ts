@@ -258,6 +258,9 @@ describe("ML Claw Space runtime", () => {
     const launcher = await fetch(ui, {
       headers: { ...iframeHeaders, cookie: sessionCookie(config, "alice") },
     });
+    const popover = await fetch(`${ui}?embed=popover`, {
+      headers: { ...iframeHeaders, cookie: sessionCookie(config, "alice") },
+    });
     const session = await fetch(ui, {
       headers: { "sec-fetch-dest": "document", cookie: sessionCookie(config, "alice") },
     });
@@ -268,6 +271,8 @@ describe("ML Claw Space runtime", () => {
     const launcherHtml = await launcher.text();
     expect(launcherHtml).toContain('name="brokerkit-delegated-top-level"');
     expect(launcherHtml).not.toContain("brokerkit-delegated-session");
+    expect(popover.status).toBe(200);
+    expect(await popover.text()).toContain('name="brokerkit-delegated-session"');
     expect(session.status).toBe(200);
     expect(session.headers.get("cache-control")).toBe("no-store");
     expect(session.headers.get("content-security-policy")).toContain("sandbox allow-scripts");
@@ -296,6 +301,9 @@ describe("ML Claw Space runtime", () => {
     expect(snapshotBody.requests).toHaveLength(1);
     expect(snapshotBody.requests[0]?.id).toBe("request-1");
     expect(snapshotBody.requests[0]?.handle).toMatch(/^[A-Za-z0-9_-]{24}$/u);
+    const summary = await fetch(`${base}/summary`, { headers: { cookie: sessionCookie(config, "alice") } });
+    expect(summary.status).toBe(200);
+    expect(await summary.json()).toEqual({ pending: 1, healthy: true });
 
     const refreshes = await Promise.all(
       Array.from({ length: 11 }, () => fetch(`${base}/snapshot`, { headers: authorizedHeaders })),
@@ -1254,9 +1262,11 @@ describe("ML Claw Space runtime", () => {
     expect(body).toContain('name="application-name" content="Research"');
     expect(body).toContain("data-mlclaw-shell");
     expect(body).toContain("data-mlclaw-control-branding");
-    expect(body).not.toContain("data-mlclaw-approvals-button");
-    expect(body).not.toContain("data-mlclaw-approvals-frame");
-    expect(body).not.toContain("mlclaw-approvals-popover");
+    expect(body).toContain("data-mlclaw-approvals-button");
+    expect(body).toContain("data-mlclaw-approvals-frame");
+    expect(body).toContain("data-mlclaw-approvals-popover");
+    expect(body).toContain('data-src="/plugins/brokerkit/ui/?embed=popover"');
+    expect(body).toContain("width:min(420px,calc(100vw - 24px))");
     expect(body).toContain('src="/assets/mlclaw-control-branding.js"');
     expect(body).toContain('href="/mlclaw"');
     expect(body).toContain("width:34px;height:34px");
@@ -1288,9 +1298,9 @@ describe("ML Claw Space runtime", () => {
     expect(brandingScript).toContain('var productName = "ML Claw"');
     expect(brandingScript).not.toContain("brokerkit.delegated-web.session.request");
     expect(brandingScript).not.toContain("brokerKitSession");
-    expect(brandingScript).toContain("brokerkit.delegated-web.open");
-    expect(brandingScript).toContain("brokerKitFrameIn(document, event.source)");
-    expect(brandingScript).toContain('frameUrl.pathname === "/plugins/brokerkit/ui/"');
+    expect(brandingScript).toContain("installApprovals");
+    expect(brandingScript).toContain('fetch("/mlclaw/api/brokerkit/summary"');
+    expect(brandingScript).toContain("window.setInterval(refresh, 15000)");
 
     const sw = await fetch(`http://127.0.0.1:${config.port}/sw.js`);
     expect(sw.status).toBe(200);
@@ -1335,6 +1345,21 @@ describe("ML Claw Space runtime", () => {
     expect(page.headers.get("content-security-policy")).toContain("frame-ancestors 'self'");
     expect(page.headers.get("content-security-policy")).toContain("sandbox allow-scripts");
     expect(page.headers.get("x-frame-options")).toBe("SAMEORIGIN");
+
+    const popover = await fetch(`${base}?embed=popover`, {
+      headers: { "sec-fetch-dest": "iframe", cookie: sessionCookie(config, "alice") },
+    });
+    const popoverHtml = await popover.text();
+    expect(popover.status).toBe(200);
+    expect(popoverHtml).toContain('name="brokerkit-delegated-session"');
+    expect(popoverHtml).not.toContain("brokerkit-delegated-top-level");
+    expect(popover.headers.get("content-security-policy")).toContain("frame-ancestors 'self'");
+    expect(popover.headers.get("x-frame-options")).toBe("SAMEORIGIN");
+
+    const invalidEmbed = await fetch(`${base}?embed=other`, {
+      headers: { "sec-fetch-dest": "iframe", cookie: sessionCookie(config, "alice") },
+    });
+    expect(invalidEmbed.status).toBe(404);
 
     const topLevel = await fetch(base, {
       headers: { "sec-fetch-dest": "document", cookie: sessionCookie(config, "alice") },

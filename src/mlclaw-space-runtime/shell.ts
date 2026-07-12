@@ -73,31 +73,42 @@ export const CONTROL_BRANDING_SCRIPT = `(function () {
       }
     });
   }
-  function brokerKitFrameIn(root, source) {
-    if (!root.querySelectorAll) return;
-    var frames = root.querySelectorAll("iframe");
-    for (var i = 0; i < frames.length; i++) {
-      try {
-        var frameUrl = new URL(frames[i].src, location.href);
-        if (frames[i].contentWindow === source && frameUrl.origin === location.origin &&
-            frameUrl.pathname === "/plugins/brokerkit/ui/" && !frameUrl.search) return frames[i];
-      } catch (_) {}
+  function installApprovals() {
+    var shell = document.querySelector("[data-mlclaw-shell]");
+    var button = document.querySelector("[data-mlclaw-approvals-button]");
+    var popover = document.querySelector("[data-mlclaw-approvals-popover]");
+    var frame = document.querySelector("[data-mlclaw-approvals-frame]");
+    var badge = document.querySelector("[data-mlclaw-approvals-badge]");
+    var close = document.querySelector("[data-mlclaw-approvals-close]");
+    if (!shell || !button || !popover || !frame || button.getAttribute("data-ready") === "1") return;
+    button.setAttribute("data-ready", "1");
+    function setOpen(open) {
+      popover.hidden = !open;
+      button.setAttribute("aria-expanded", open ? "true" : "false");
+      if (open && !frame.getAttribute("src")) frame.setAttribute("src", frame.getAttribute("data-src"));
     }
-    var elements = root.querySelectorAll("*");
-    for (var j = 0; j < elements.length; j++) {
-      if (elements[j].shadowRoot) {
-        var nested = brokerKitFrameIn(elements[j].shadowRoot, source);
-        if (nested) return nested;
-      }
+    button.addEventListener("click", function () { setOpen(popover.hidden); });
+    if (close) close.addEventListener("click", function () { setOpen(false); });
+    document.addEventListener("click", function (event) {
+      if (!popover.hidden && !shell.contains(event.target)) setOpen(false);
+    });
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") setOpen(false);
+    });
+    function refresh() {
+      fetch("/mlclaw/api/brokerkit/summary", { credentials: "same-origin" })
+        .then(function (response) { return response.ok ? response.json() : null; })
+        .then(function (summary) {
+          if (!badge || !summary || typeof summary.pending !== "number") return;
+          badge.textContent = summary.pending > 99 ? "99+" : String(summary.pending);
+          badge.hidden = summary.pending < 1;
+          button.setAttribute("aria-label", summary.pending > 0 ? "Open approval requests (" + summary.pending + " pending)" : "Open approval requests");
+        }).catch(function () {});
     }
+    refresh();
+    window.setInterval(refresh, 15000);
+    window.addEventListener("focus", refresh);
   }
-  window.addEventListener("message", function (event) {
-    var message = event.data;
-    if (event.origin !== "null" || !message || message.type !== "brokerkit.delegated-web.open" ||
-        message.version !== 1 || typeof message.nonce !== "string" || !/^[a-f0-9]{32}$/.test(message.nonce)) return;
-    var frame = brokerKitFrameIn(document, event.source);
-    if (frame) location.assign(frame.src);
-  });
   if (!document.documentElement.hasAttribute(marker)) {
     document.documentElement.setAttribute(marker, "1");
     var attachShadow = Element.prototype.attachShadow;
@@ -111,6 +122,7 @@ export const CONTROL_BRANDING_SCRIPT = `(function () {
     requestAnimationFrame(function () {
       observeExistingShadowRoots(document);
       scan(document);
+      installApprovals();
     });
   }
 })();
@@ -157,6 +169,13 @@ export function rewriteOpenClawHtml(html: string, branding: RuntimeBranding): st
 export function injectMlClawShell(html: string, branding: RuntimeBranding): string {
   const shell = `
 <div ${SHELL_MARKER} style="position:fixed;left:max(12px,env(safe-area-inset-left));bottom:max(12px,env(safe-area-inset-bottom));z-index:2147483647;">
+  <section data-mlclaw-approvals-popover hidden aria-label="Approval requests" style="position:absolute;left:0;bottom:44px;box-sizing:border-box;width:min(420px,calc(100vw - 24px));height:min(620px,calc(100dvh - 72px));overflow:hidden;border:1px solid rgba(15,23,42,.16);border-radius:14px;background:white;box-shadow:0 18px 48px rgba(15,23,42,.24);">
+    <header style="box-sizing:border-box;display:flex;height:42px;align-items:center;justify-content:space-between;padding:0 10px 0 14px;border-bottom:1px solid rgba(15,23,42,.1);color:#111827;font:600 14px system-ui;">
+      <span>Approvals</span>
+      <button data-mlclaw-approvals-close type="button" aria-label="Close approval requests" style="display:grid;width:30px;height:30px;place-items:center;border:0;border-radius:7px;background:transparent;color:#475569;cursor:pointer;font:20px/1 system-ui;">&times;</button>
+    </header>
+    <iframe data-mlclaw-approvals-frame data-src="/plugins/brokerkit/ui/?embed=popover" title="Approval requests" sandbox="allow-scripts" style="display:block;width:100%;height:calc(100% - 42px);border:0;background:white;"></iframe>
+  </section>
   <div style="display:flex;gap:8px;align-items:center;">
   <a href="/mlclaw" aria-label="Open ${escapeHtml(branding.name)} settings" title="${escapeHtml(branding.name)}" style="box-sizing:border-box;display:flex;width:34px;height:34px;aspect-ratio:1/1;align-items:center;justify-content:center;border:1px solid rgba(15,23,42,.16);border-radius:8px;background:rgba(255,255,255,.94);box-shadow:0 8px 18px rgba(15,23,42,.14);color:#111827;text-decoration:none;">
     <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block;width:18px;height:18px;">
@@ -164,6 +183,10 @@ export function injectMlClawShell(html: string, branding: RuntimeBranding): stri
       <circle cx="12" cy="12" r="3"></circle>
     </svg>
   </a>
+  <button data-mlclaw-approvals-button type="button" aria-label="Open approval requests" aria-expanded="false" style="position:relative;box-sizing:border-box;display:grid;width:34px;height:34px;place-items:center;border:1px solid rgba(15,23,42,.16);border-radius:8px;background:rgba(255,255,255,.94);box-shadow:0 8px 18px rgba(15,23,42,.14);color:#111827;cursor:pointer;">
+    <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"></path><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"></path></svg>
+    <span data-mlclaw-approvals-badge hidden style="position:absolute;place-items:center;min-width:17px;height:17px;right:-6px;top:-7px;padding:0 4px;border:2px solid white;border-radius:999px;background:#dc2626;color:white;font:700 9px system-ui;"></span>
+  </button>
   </div>
 </div>
 `;

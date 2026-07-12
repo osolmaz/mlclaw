@@ -62,6 +62,7 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
   const delegatedBrokerKit = new DelegatedBrokerKit(operatorBrokers, config.sessionSecret);
   const allowDelegatedSessionSnapshot = fixedWindowRateLimit(12, 60_000);
   const allowDelegatedActorSnapshot = fixedWindowRateLimit(60, 60_000);
+  const allowBrokerKitSummary = fixedWindowRateLimit(12, 60_000);
   const openAiCredentials = new OpenAiCredentialStore(config.openaiCredentialStoreFile, config.credentialKey);
 
   app.get("/health", (c) => health(c, config, controls));
@@ -134,6 +135,21 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
       return auth;
     }
     return c.json(await statusPayload(config, controls));
+  });
+
+  app.get("/mlclaw/api/brokerkit/summary", async (c) => {
+    const auth = requireAdmin(c, config);
+    if (auth instanceof Response) return auth;
+    if (!allowBrokerKitSummary(auth.username)) return c.json({ ok: false, error: "rate limited" }, 429);
+    try {
+      const snapshot = await delegatedBrokerKit.snapshot();
+      return c.json({
+        pending: snapshot.requests.filter((request) => request.status === "pending").length,
+        healthy: snapshot.sources.every((source) => source.healthy),
+      });
+    } catch {
+      return c.json({ ok: false, error: "operator inbox unavailable" }, 503);
+    }
   });
 
   app.options("/mlclaw/api/brokerkit/*", (c) => delegatedPreflight(c));
@@ -505,19 +521,24 @@ async function trustedBrokerKitUi(
   if (relative === "index.html") {
     const destination = c.req.header("sec-fetch-dest");
     if (destination !== "iframe" && destination !== "document") return c.text("not found\n", 404);
+    const query = new URL(c.req.url).search;
+    const embeddedPopover = destination === "iframe" && query === "?embed=popover";
+    if (query && !embeddedPopover) return c.text("not found\n", 404);
     const auth = requireAdmin(c, config);
     if (auth instanceof Response) return auth;
     try {
       const template = await fs.readFile(file, "utf8");
-      const marker =
-        destination === "iframe"
-          ? '<meta name="brokerkit-delegated-top-level">'
-          : `<meta name="brokerkit-delegated-session" content="${Buffer.from(
-              JSON.stringify(delegatedBrokerKit.issueSession(auth.username)),
-              "utf8",
-            ).toString("base64url")}">`;
+      const delegatedSession = destination === "document" || embeddedPopover;
+      const marker = !delegatedSession
+        ? '<meta name="brokerkit-delegated-top-level">'
+        : `<meta name="brokerkit-delegated-session" content="${Buffer.from(
+            JSON.stringify(delegatedBrokerKit.issueSession(auth.username)),
+            "utf8",
+          ).toString("base64url")}">`;
       if (!template.includes("</head>")) return c.text("not found\n", 404);
-      const headers = trustedBrokerKitHeaders(destination === "iframe" ? "launcher" : "top-level");
+      const headers = trustedBrokerKitHeaders(
+        embeddedPopover ? "popover" : destination === "iframe" ? "launcher" : "top-level",
+      );
       headers.set("content-type", "text/html; charset=utf-8");
       return new Response(template.replace("</head>", `${marker}</head>`), { status: 200, headers });
     } catch {
@@ -531,7 +552,7 @@ async function trustedBrokerKitUi(
   return new Response(response.body, { status: response.status, headers });
 }
 
-function trustedBrokerKitHeaders(mode: "launcher" | "top-level" | "asset"): Headers {
+function trustedBrokerKitHeaders(mode: "launcher" | "popover" | "top-level" | "asset"): Headers {
   const asset = mode === "asset";
   const headers = new Headers({
     "cache-control": asset ? "public, max-age=31536000, immutable" : "no-store",
