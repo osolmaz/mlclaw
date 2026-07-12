@@ -272,7 +272,15 @@ describe("ML Claw Space runtime", () => {
     expect(launcherHtml).toContain('name="brokerkit-delegated-top-level"');
     expect(launcherHtml).not.toContain("brokerkit-delegated-session");
     expect(popover.status).toBe(200);
-    expect(await popover.text()).toContain('name="brokerkit-delegated-session"');
+    const popoverHtml = await popover.text();
+    const popoverEmbedded = popoverHtml.match(/name="brokerkit-delegated-session" content="([A-Za-z0-9_-]+)"/u)?.[1];
+    const popoverSessionBody = JSON.parse(Buffer.from(popoverEmbedded ?? "", "base64url").toString("utf8")) as {
+      token: string;
+      access: string;
+      renewal_transport: string;
+    };
+    expect(popoverSessionBody.access).toBe("read");
+    expect(popoverSessionBody.renewal_transport).toBe("direct");
     expect(session.status).toBe(200);
     expect(session.headers.get("cache-control")).toBe("no-store");
     expect(session.headers.get("content-security-policy")).toContain("sandbox allow-scripts");
@@ -282,10 +290,14 @@ describe("ML Claw Space runtime", () => {
     const embedded = sessionHtml.match(/name="brokerkit-delegated-session" content="([A-Za-z0-9_-]+)"/u)?.[1];
     expect(embedded).toBeDefined();
     const sessionBody = JSON.parse(Buffer.from(embedded ?? "", "base64url").toString("utf8")) as {
-      decision_token: string;
+      token: string;
       expires_at: string;
+      access: string;
+      renewal_transport: string;
     };
-    expect(sessionBody.decision_token).not.toContain("operator-secret");
+    expect(sessionBody.access).toBe("decide");
+    expect(sessionBody.renewal_transport).toBe("direct");
+    expect(sessionBody.token).not.toContain("operator-secret");
     expect(Date.parse(sessionBody.expires_at) - Date.now()).toBeLessThanOrEqual(5 * 60_000);
     const cookieOnly = await fetch(`${base}/snapshot`, {
       headers: { origin: "null", cookie: sessionCookie(config, "alice") },
@@ -293,7 +305,7 @@ describe("ML Claw Space runtime", () => {
     expect(cookieOnly.status).toBe(401);
     const authorizedHeaders = {
       origin: "null",
-      authorization: `Bearer ${sessionBody.decision_token}`,
+      authorization: `Bearer ${sessionBody.token}`,
     };
     const snapshot = await fetch(`${base}/snapshot`, { headers: authorizedHeaders });
     expect(snapshot.status).toBe(200);
@@ -301,6 +313,19 @@ describe("ML Claw Space runtime", () => {
     expect(snapshotBody.requests).toHaveLength(1);
     expect(snapshotBody.requests[0]?.id).toBe("request-1");
     expect(snapshotBody.requests[0]?.handle).toMatch(/^[A-Za-z0-9_-]{24}$/u);
+    const readOnlyHeaders = {
+      origin: "null",
+      authorization: `Bearer ${popoverSessionBody.token}`,
+    };
+    const popoverSnapshot = await fetch(`${base}/snapshot`, { headers: readOnlyHeaders });
+    expect(popoverSnapshot.status).toBe(200);
+    const readOnlyDecision = await fetch(`${base}/requests/${snapshotBody.requests[0]?.handle}/approve`, {
+      method: "POST",
+      headers: { ...readOnlyHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ expectedRevision: 1 }),
+    });
+    expect(readOnlyDecision.status).toBe(401);
+    expect(await readOnlyDecision.json()).toEqual({ error: { code: "not_authorized" } });
     const summary = await fetch(`${base}/summary`, { headers: { cookie: sessionCookie(config, "alice") } });
     expect(summary.status).toBe(200);
     expect(await summary.json()).toEqual({ pending: 1, healthy: true });
@@ -314,40 +339,41 @@ describe("ML Claw Space runtime", () => {
     expect(await rateLimited.json()).toEqual({ error: { code: "rate_limited" } });
     const renewedSession = await fetch(`${base}/session`, { method: "POST", headers: authorizedHeaders });
     expect(renewedSession.status).toBe(200);
-    const renewedSessionBody = (await renewedSession.json()) as { decision_token: string };
-    expect(renewedSessionBody.decision_token).not.toBe(sessionBody.decision_token);
+    const renewedSessionBody = (await renewedSession.json()) as { token: string; access: string };
+    expect(renewedSessionBody.token).not.toBe(sessionBody.token);
+    expect(renewedSessionBody.access).toBe("decide");
     const anotherSession = await fetch(ui, {
       headers: { "sec-fetch-dest": "document", cookie: sessionCookie(config, "alice") },
     });
     const anotherHtml = await anotherSession.text();
     const anotherEmbedded = anotherHtml.match(/name="brokerkit-delegated-session" content="([A-Za-z0-9_-]+)"/u)?.[1];
     const anotherSessionBody = JSON.parse(Buffer.from(anotherEmbedded ?? "", "base64url").toString("utf8")) as {
-      decision_token: string;
+      token: string;
     };
     const independentTab = await fetch(`${base}/snapshot`, {
-      headers: { origin: "null", authorization: `Bearer ${anotherSessionBody.decision_token}` },
+      headers: { origin: "null", authorization: `Bearer ${anotherSessionBody.token}` },
     });
     expect(independentTab.status).toBe(200);
-    for (const requestCount of [12, 12, 12, 11]) {
+    for (const requestCount of [12, 12, 12, 10]) {
       const actorSession = await fetch(ui, {
         headers: { "sec-fetch-dest": "document", cookie: sessionCookie(config, "alice") },
       });
       const actorHtml = await actorSession.text();
       const actorEmbedded = actorHtml.match(/name="brokerkit-delegated-session" content="([A-Za-z0-9_-]+)"/u)?.[1];
       const actorBody = JSON.parse(Buffer.from(actorEmbedded ?? "", "base64url").toString("utf8")) as {
-        decision_token: string;
+        token: string;
       };
       const responses = await Promise.all(
         Array.from({ length: requestCount }, () =>
           fetch(`${base}/snapshot`, {
-            headers: { origin: "null", authorization: `Bearer ${actorBody.decision_token}` },
+            headers: { origin: "null", authorization: `Bearer ${actorBody.token}` },
           }),
         ),
       );
       expect(responses.every((response) => response.status === 200)).toBe(true);
     }
     const actorLimited = await fetch(`${base}/snapshot`, {
-      headers: { origin: "null", authorization: `Bearer ${renewedSessionBody.decision_token}` },
+      headers: { origin: "null", authorization: `Bearer ${renewedSessionBody.token}` },
     });
     expect(actorLimited.status).toBe(429);
     brokerRequests.length = 0;
@@ -1298,6 +1324,9 @@ describe("ML Claw Space runtime", () => {
     expect(brandingScript).toContain('var productName = "ML Claw"');
     expect(brandingScript).not.toContain("brokerkit.delegated-web.session.request");
     expect(brandingScript).not.toContain("brokerKitSession");
+    expect(brandingScript).toContain('data.type !== "brokerkit.delegated-web.open"');
+    expect(brandingScript).toContain("event.source !== frame.contentWindow");
+    expect(brandingScript).toContain('window.location.assign("/plugins/brokerkit/ui/")');
     expect(brandingScript).toContain("installApprovals");
     expect(brandingScript).toContain('fetch("/mlclaw/api/brokerkit/summary"');
     expect(brandingScript).toContain("window.setInterval(refresh, 15000)");
@@ -1353,6 +1382,12 @@ describe("ML Claw Space runtime", () => {
     expect(popover.status).toBe(200);
     expect(popoverHtml).toContain('name="brokerkit-delegated-session"');
     expect(popoverHtml).not.toContain("brokerkit-delegated-top-level");
+    const popoverSession = popoverHtml.match(/name="brokerkit-delegated-session" content="([A-Za-z0-9_-]+)"/u)?.[1];
+    expect(JSON.parse(Buffer.from(popoverSession ?? "", "base64url").toString("utf8"))).toMatchObject({
+      api_version: "brokerkit.io/delegated-web/v1",
+      access: "read",
+      renewal_transport: "direct",
+    });
     expect(popover.headers.get("content-security-policy")).toContain("frame-ancestors 'self'");
     expect(popover.headers.get("x-frame-options")).toBe("SAMEORIGIN");
 
@@ -1368,6 +1403,12 @@ describe("ML Claw Space runtime", () => {
     expect(topLevel.status).toBe(200);
     expect(topLevelHtml).toContain('name="brokerkit-delegated-session"');
     expect(topLevelHtml).not.toContain("brokerkit-delegated-top-level");
+    const topLevelSession = topLevelHtml.match(/name="brokerkit-delegated-session" content="([A-Za-z0-9_-]+)"/u)?.[1];
+    expect(JSON.parse(Buffer.from(topLevelSession ?? "", "base64url").toString("utf8"))).toMatchObject({
+      api_version: "brokerkit.io/delegated-web/v1",
+      access: "decide",
+      renewal_transport: "direct",
+    });
     expect(topLevel.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
     expect(topLevel.headers.get("x-frame-options")).toBe("DENY");
 

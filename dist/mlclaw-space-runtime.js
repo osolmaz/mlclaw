@@ -7379,7 +7379,7 @@ var DelegatedBrokerKit = class {
   handles = /* @__PURE__ */ new Map();
   handlesByIdentity = /* @__PURE__ */ new Map();
   snapshotInFlight;
-  issueSession(actor) {
+  issueSession(actor, access) {
     const issuedAt = Math.floor(this.now().getTime() / 1e3);
     const expiresAt = issuedAt + TOKEN_LIFETIME_SECONDS;
     const payload = {
@@ -7388,15 +7388,17 @@ var DelegatedBrokerKit = class {
       subject: actor,
       issuedAt,
       expiresAt,
-      nonce: randomBytes3(16).toString("base64url")
+      nonce: randomBytes3(16).toString("base64url"),
+      access
     };
     const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
     const signature = this.sign(encoded);
     return {
       api_version: API_VERSION,
-      actor,
-      decision_token: `${encoded}.${signature}`,
-      expires_at: new Date(expiresAt * 1e3).toISOString()
+      token: `${encoded}.${signature}`,
+      expires_at: new Date(expiresAt * 1e3).toISOString(),
+      access,
+      renewal_transport: "direct"
     };
   }
   authorize(header) {
@@ -7406,7 +7408,7 @@ var DelegatedBrokerKit = class {
     const encoded = authenticatedTokenPayload(header, (value) => this.sign(value));
     if (!encoded) return void 0;
     const payload = parseTokenPayload(encoded);
-    return payload && tokenIsCurrent(payload, this.now()) ? { actor: payload.subject, sessionId: payload.nonce } : void 0;
+    return payload && tokenIsCurrent(payload, this.now()) ? { actor: payload.subject, sessionId: payload.nonce, access: payload.access } : void 0;
   }
   async snapshot() {
     if (this.snapshotInFlight) return this.snapshotInFlight;
@@ -7680,10 +7682,10 @@ function validTokenPayload(value) {
   return hasExactTokenFields(record) && validTokenIdentity(record) && validTokenTimes(record) && validTokenNonce(record);
 }
 function hasExactTokenFields(record) {
-  return Object.keys(record).sort().join(",") === "audience,expiresAt,issuedAt,nonce,subject,version";
+  return Object.keys(record).sort().join(",") === "access,audience,expiresAt,issuedAt,nonce,subject,version";
 }
 function validTokenIdentity(record) {
-  return record.version === 1 && record.audience === "brokerkit-delegated-web" && typeof record.subject === "string" && record.subject.length >= 1 && record.subject.length <= 200;
+  return record.version === 1 && record.audience === "brokerkit-delegated-web" && (record.access === "read" || record.access === "decide") && typeof record.subject === "string" && record.subject.length >= 1 && record.subject.length <= 200;
 }
 function validTokenTimes(record) {
   return typeof record.issuedAt === "number" && Number.isSafeInteger(record.issuedAt) && typeof record.expiresAt === "number" && Number.isSafeInteger(record.expiresAt);
@@ -9195,6 +9197,20 @@ var CONTROL_BRANDING_SCRIPT = `(function () {
     document.addEventListener("keydown", function (event) {
       if (event.key === "Escape") setOpen(false);
     });
+    window.addEventListener("message", function (event) {
+      var data = event.data;
+      if (
+        event.source !== frame.contentWindow ||
+        !data ||
+        typeof data !== "object" ||
+        Object.keys(data).sort().join(",") !== "nonce,type,version" ||
+        data.type !== "brokerkit.delegated-web.open" ||
+        data.version !== 1 ||
+        typeof data.nonce !== "string" ||
+        !/^[a-f0-9]{32}$/.test(data.nonce)
+      ) return;
+      window.location.assign("/plugins/brokerkit/ui/");
+    });
     function refresh() {
       fetch("/mlclaw/api/brokerkit/summary", { credentials: "same-origin" })
         .then(function (response) { return response.ok ? response.json() : null; })
@@ -9404,7 +9420,7 @@ function createSpaceRuntimeApp(config2, controls) {
   app.post("/mlclaw/api/brokerkit/session", (c) => {
     const identity = delegatedIdentity(c, delegatedBrokerKit);
     if (!identity) return delegatedErrorResponse(c, "not_authorized", 401);
-    return delegatedJson(c, delegatedBrokerKit.issueSession(identity.actor));
+    return delegatedJson(c, delegatedBrokerKit.issueSession(identity.actor, identity.access));
   });
   app.get("/mlclaw/api/brokerkit/snapshot", async (c) => {
     const identity = delegatedIdentity(c, delegatedBrokerKit);
@@ -9430,7 +9446,7 @@ function createSpaceRuntimeApp(config2, controls) {
   for (const action of ["approve", "deny", "cancel", "revoke"]) {
     app.post(`/mlclaw/api/brokerkit/requests/:handle/${action}`, async (c) => {
       const identity = delegatedIdentity(c, delegatedBrokerKit);
-      if (!identity) return delegatedErrorResponse(c, "not_authorized", 401);
+      if (!identity || identity.access !== "decide") return delegatedErrorResponse(c, "not_authorized", 401);
       const body = await readBoundedJson(c, 16384);
       if (!body || Object.keys(body).some((key) => !["expectedRevision", "reason", "constraints"].includes(key))) {
         return delegatedErrorResponse(c, "invalid_input", 400);
@@ -9736,7 +9752,7 @@ async function trustedBrokerKitUi(c, config2, delegatedBrokerKit) {
       const template = await fs3.readFile(file, "utf8");
       const delegatedSession = destination === "document" || embeddedPopover;
       const marker = !delegatedSession ? '<meta name="brokerkit-delegated-top-level">' : `<meta name="brokerkit-delegated-session" content="${Buffer.from(
-        JSON.stringify(delegatedBrokerKit.issueSession(auth.username)),
+        JSON.stringify(delegatedBrokerKit.issueSession(auth.username, embeddedPopover ? "read" : "decide")),
         "utf8"
       ).toString("base64url")}">`;
       if (!template.includes("</head>")) return c.text("not found\n", 404);

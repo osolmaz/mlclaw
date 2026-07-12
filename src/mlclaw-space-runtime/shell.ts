@@ -95,6 +95,20 @@ export const CONTROL_BRANDING_SCRIPT = `(function () {
     document.addEventListener("keydown", function (event) {
       if (event.key === "Escape") setOpen(false);
     });
+    window.addEventListener("message", function (event) {
+      var data = event.data;
+      if (
+        event.source !== frame.contentWindow ||
+        !data ||
+        typeof data !== "object" ||
+        Object.keys(data).sort().join(",") !== "nonce,type,version" ||
+        data.type !== "brokerkit.delegated-web.open" ||
+        data.version !== 1 ||
+        typeof data.nonce !== "string" ||
+        !/^[a-f0-9]{32}$/.test(data.nonce)
+      ) return;
+      window.location.assign("/plugins/brokerkit/ui/");
+    });
     function refresh() {
       fetch("/mlclaw/api/brokerkit/summary", { credentials: "same-origin" })
         .then(function (response) { return response.ok ? response.json() : null; })

@@ -40,16 +40,19 @@ describe("DelegatedBrokerKit", () => {
   it("issues short-lived audience-bound tokens and rejects tampering and expiry", () => {
     let now = new Date("2026-07-12T00:00:00Z");
     const delegated = new DelegatedBrokerKit(new OperatorBrokerRegistry([]), "s".repeat(48), () => now);
-    const session = delegated.issueSession("alice");
+    const session = delegated.issueSession("alice", "decide");
     expect(session.api_version).toBe("brokerkit.io/delegated-web/v1");
-    expect(delegated.authorize(`Bearer ${session.decision_token}`)).toBe("alice");
-    expect(delegated.authorizeSession(`Bearer ${session.decision_token}`)).toEqual({
+    expect(session.access).toBe("decide");
+    expect(session.renewal_transport).toBe("direct");
+    expect(delegated.authorize(`Bearer ${session.token}`)).toBe("alice");
+    expect(delegated.authorizeSession(`Bearer ${session.token}`)).toEqual({
       actor: "alice",
       sessionId: expect.stringMatching(/^[A-Za-z0-9_-]{22}$/u),
+      access: "decide",
     });
-    expect(delegated.authorize(`Bearer ${session.decision_token}x`)).toBeUndefined();
+    expect(delegated.authorize(`Bearer ${session.token}x`)).toBeUndefined();
     now = new Date("2026-07-12T00:05:00Z");
-    expect(delegated.authorize(`Bearer ${session.decision_token}`)).toBeUndefined();
+    expect(delegated.authorize(`Bearer ${session.token}`)).toBeUndefined();
   });
 
   it("isolates source failures and assigns distinct opaque handles", async () => {
