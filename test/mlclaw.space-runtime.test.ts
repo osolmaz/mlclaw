@@ -230,6 +230,7 @@ describe("ML Claw Space runtime", () => {
       allowedUsers: ["alice", "bob"],
       adminUsers: ["alice"],
       brokerKitPluginPath: pluginRoot,
+      brokerKitPopoverDecisions: true,
       operatorBrokers: [
         {
           id: "hf-broker",
@@ -1387,7 +1388,7 @@ describe("ML Claw Space runtime", () => {
     const popoverSession = popoverHtml.match(/name="brokerkit-delegated-session" content="([A-Za-z0-9_-]+)"/u)?.[1];
     expect(JSON.parse(Buffer.from(popoverSession ?? "", "base64url").toString("utf8"))).toMatchObject({
       api_version: "brokerkit.io/delegated-web/v1",
-      access: "decide",
+      access: "read",
       renewal_transport: "direct",
     });
     expect(popover.headers.get("content-security-policy")).toContain("frame-ancestors 'self'");
@@ -1932,6 +1933,18 @@ describe("ML Claw Space runtime", () => {
 
     expect(config.adminUsers).toEqual(["osolmaz"]);
     expect(config.allowedUsers).toEqual(["alice", "bob", "osolmaz"]);
+    expect(config.brokerKitPopoverDecisions).toBe(false);
+  });
+
+  it("requires explicit opt-in for decisions inside the Gateway popover", () => {
+    const config = loadConfig({
+      SPACE_ID: "osolmaz/research",
+      MLCLAW_BROKERKIT_POPOVER_DECISIONS: "true",
+      MLCLAW_SESSION_SECRET: "x".repeat(48),
+      MLCLAW_CREDENTIAL_KEY: "k".repeat(48),
+    });
+
+    expect(config.brokerKitPopoverDecisions).toBe(true);
   });
 
   it("loads the trusted local integration token from a protected file", async () => {
@@ -2103,6 +2116,7 @@ async function testConfig(overrides: Partial<SpaceRuntimeConfig> = {}): Promise<
     brokerAgentSecret: undefined,
     brokerAgentSecretFile: undefined,
     operatorBrokers: [],
+    brokerKitPopoverDecisions: false,
     hubUrl: "https://huggingface.co",
     openaiCredentialFile: path.join(root, "secrets", "openai.env"),
     openaiCredentialStoreFile: path.join(root, "durable", "openai-api-key.enc"),

@@ -5108,6 +5108,7 @@ function loadConfig(env = process.env) {
     brokerAgentSecret: readOptionalSecret(trim(env.MLCLAW_HF_BROKER_AGENT_SECRET_FILE)),
     brokerAgentSecretFile: trim(env.MLCLAW_HF_BROKER_AGENT_SECRET_FILE),
     operatorBrokers: loadOperatorBrokers(trim(env.MLCLAW_OPERATOR_BROKERS_FILE)),
+    brokerKitPopoverDecisions: env.MLCLAW_BROKERKIT_POPOVER_DECISIONS === "1" || env.MLCLAW_BROKERKIT_POPOVER_DECISIONS === "true",
     hubUrl: trim(env.HF_ENDPOINT) ?? "https://huggingface.co",
     openaiCredentialFile: trim(env.MLCLAW_OPENAI_CREDENTIAL_FILE) ?? "/tmp/mlclaw-secrets/openai.env",
     openaiCredentialStoreFile,
@@ -9756,7 +9757,12 @@ async function trustedBrokerKitUi(c, config2, delegatedBrokerKit) {
       const template = await fs3.readFile(file, "utf8");
       const delegatedSession = destination === "document" || embeddedPopover;
       const marker = !delegatedSession ? '<meta name="brokerkit-delegated-top-level">' : `<meta name="brokerkit-delegated-session" content="${Buffer.from(
-        JSON.stringify(delegatedBrokerKit.issueSession(auth.username, "decide")),
+        JSON.stringify(
+          delegatedBrokerKit.issueSession(
+            auth.username,
+            embeddedPopover && !config2.brokerKitPopoverDecisions ? "read" : "decide"
+          )
+        ),
         "utf8"
       ).toString("base64url")}">`;
       if (!template.includes("</head>")) return c.text("not found\n", 404);

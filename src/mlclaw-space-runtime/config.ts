@@ -37,6 +37,7 @@ export type SpaceRuntimeConfig = {
   brokerAgentSecret: string | undefined;
   brokerAgentSecretFile: string | undefined;
   operatorBrokers: OperatorBrokerConfig[];
+  brokerKitPopoverDecisions: boolean;
   hubUrl: string;
   openaiCredentialFile: string;
   openaiCredentialStoreFile: string;
@@ -145,6 +146,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpaceRuntimeCo
     brokerAgentSecret: readOptionalSecret(trim(env.MLCLAW_HF_BROKER_AGENT_SECRET_FILE)),
     brokerAgentSecretFile: trim(env.MLCLAW_HF_BROKER_AGENT_SECRET_FILE),
     operatorBrokers: loadOperatorBrokers(trim(env.MLCLAW_OPERATOR_BROKERS_FILE)),
+    brokerKitPopoverDecisions:
+      env.MLCLAW_BROKERKIT_POPOVER_DECISIONS === "1" || env.MLCLAW_BROKERKIT_POPOVER_DECISIONS === "true",
     hubUrl: trim(env.HF_ENDPOINT) ?? "https://huggingface.co",
     openaiCredentialFile: trim(env.MLCLAW_OPENAI_CREDENTIAL_FILE) ?? "/tmp/mlclaw-secrets/openai.env",
     openaiCredentialStoreFile,

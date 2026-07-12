@@ -116,7 +116,9 @@ delegated decision session. It renews that session using its current bearer
 token and never sends ML Claw cookies to the delegated API. The OpenClaw process
 cannot read broker credentials or delegated decision tokens. Because OpenClaw
 controls the surrounding page, deployments that require protection from a
-compromised Gateway frontend should not expose this embedded decision surface.
+compromised Gateway frontend should leave
+`MLCLAW_BROKERKIT_POPOVER_DECISIONS` unset. Set it to `true` only when the
+deployment explicitly accepts that tradeoff; the default popover is read-only.
 
 ML Claw refreshes current request state and revision immediately before every
 decision. It sends actor attribution and a deterministic idempotency key to the

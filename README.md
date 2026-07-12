@@ -210,7 +210,9 @@ merges every BrokerKit-compatible backend configured in
 cancel, or revoke requests. The plugin registers the Gateway tab, while ML Claw
 serves the immutable packaged UI from its trusted HTTP boundary and gives it a
 small popover inside the Gateway. Administrators decide requests directly in
-the sandboxed popover with a renewable, short-lived, admin-bound browser token.
+the sandboxed popover when `MLCLAW_BROKERKIT_POPOVER_DECISIONS=true`; otherwise
+the popover remains read-only and decisions use the standalone protected page.
+Both flows use a renewable, short-lived, admin-bound browser token.
 Broker operator tokens remain in backend-only files and are never sent to the
 browser or OpenClaw. See
 [Operator Broker Configuration](docs/operator-brokers-config.md).
