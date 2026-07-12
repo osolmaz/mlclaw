@@ -70,7 +70,6 @@ export async function generateSpaceRepo(
     [".gitattributes", ".gitattributes"],
     ["assets/assistant-avatar.svg", "assets/assistant-avatar.svg"],
     ["assets/hf-logo.svg", "assets/hf-logo.svg"],
-    ["assets/hf-logo.png", "assets/hf-logo.png"],
     ["assets/mlclaw.svg", "assets/mlclaw.svg"],
     ["assets/mlclaw-control-ui", "assets/mlclaw-control-ui"],
     ["assets/hf-tooling", "assets/hf-tooling"],
@@ -92,6 +91,8 @@ export async function generateSpaceRepo(
   for (const [from, to] of copies) {
     await copyExisting(path.join(sourceDir, from), path.join(outDir, to));
   }
+  const hfLogoPng = await fs.readFile(path.join(sourceDir, "assets/hf-logo.png"));
+  await fs.writeFile(path.join(outDir, "assets/hf-logo.png.base64"), `${hfLogoPng.toString("base64")}\n`, "utf8");
   await fs.writeFile(
     path.join(outDir, "Dockerfile"),
     options.runtimeImage ? imageDockerfile(options.runtimeImage) : bundledDockerfile(),
@@ -169,7 +170,10 @@ COPY --chown=node:node runtime/openclaw.default.json /app/openclaw.default.json
 COPY --chown=node:node runtime/entrypoint.sh /app/entrypoint.sh
 COPY --chown=node:node runtime/scripts/ /app/scripts/
 COPY --chown=node:node assets/ /app/assets/
-RUN chmod +x /app/entrypoint.sh
+RUN base64 -d /app/assets/hf-logo.png.base64 > /app/assets/hf-logo.png \
+  && rm /app/assets/hf-logo.png.base64 \
+  && chown node:node /app/assets/hf-logo.png \
+  && chmod +x /app/entrypoint.sh
 
 ENV PORT=7860
 ENV MLCLAW_OPENCLAW_PORT=7861
