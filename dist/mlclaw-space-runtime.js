@@ -9107,6 +9107,10 @@ function normalizeNext(value) {
 var SHELL_MARKER = "data-mlclaw-shell";
 var BRANDING_MARKER = "data-mlclaw-branding";
 var CONTROL_BRANDING_MARKER = "data-mlclaw-control-branding";
+var BROKERKIT_DELEGATED_UI_BOOTSTRAP = Buffer.from(
+  JSON.stringify({ version: 1, mode: "delegated-web", basePath: "/mlclaw/api/brokerkit" }),
+  "utf8"
+).toString("base64url");
 var CONTROL_BRANDING_SCRIPT_PATH = "/assets/mlclaw-control-branding.js";
 var CONTROL_BRANDING_SCRIPT = `(function () {
   var productName = "ML Claw";
@@ -9276,7 +9280,7 @@ function injectMlClawShell(html, branding) {
       <span>Approvals</span>
       <button data-mlclaw-approvals-close type="button" aria-label="Close approval requests" style="display:grid;width:30px;height:30px;place-items:center;border:0;border-radius:7px;background:transparent;color:#475569;cursor:pointer;font:20px/1 system-ui;">&times;</button>
     </header>
-    <iframe data-mlclaw-approvals-frame data-src="/plugins/brokerkit/ui/?embed=popover" title="Approval requests" sandbox="allow-scripts" style="display:block;width:100%;height:calc(100% - 42px);border:0;background:white;"></iframe>
+    <iframe data-mlclaw-approvals-frame data-src="/plugins/brokerkit/ui/?embed=popover#${BROKERKIT_DELEGATED_UI_BOOTSTRAP}" title="Approval requests" sandbox="allow-scripts" style="display:block;width:100%;height:calc(100% - 42px);border:0;background:white;"></iframe>
   </section>
   <div style="display:flex;gap:8px;align-items:center;">
   <a href="/mlclaw" aria-label="Open ${escapeHtml2(branding.name)} settings" title="${escapeHtml2(branding.name)}" style="box-sizing:border-box;display:flex;width:34px;height:34px;aspect-ratio:1/1;align-items:center;justify-content:center;border:1px solid rgba(15,23,42,.16);border-radius:8px;background:rgba(255,255,255,.94);box-shadow:0 8px 18px rgba(15,23,42,.14);color:#111827;text-decoration:none;">

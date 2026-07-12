@@ -1291,7 +1291,16 @@ describe("ML Claw Space runtime", () => {
     expect(body).toContain("data-mlclaw-approvals-button");
     expect(body).toContain("data-mlclaw-approvals-frame");
     expect(body).toContain("data-mlclaw-approvals-popover");
-    expect(body).toContain('data-src="/plugins/brokerkit/ui/?embed=popover"');
+    const popoverSrc = body.match(/data-mlclaw-approvals-frame data-src="([^"]+)"/u)?.[1];
+    expect(popoverSrc).toBeDefined();
+    const popoverUrl = new URL(popoverSrc ?? "", "http://mlclaw.test");
+    expect(popoverUrl.pathname).toBe("/plugins/brokerkit/ui/");
+    expect(popoverUrl.search).toBe("?embed=popover");
+    expect(JSON.parse(Buffer.from(popoverUrl.hash.slice(1), "base64url").toString("utf8"))).toEqual({
+      version: 1,
+      mode: "delegated-web",
+      basePath: "/mlclaw/api/brokerkit",
+    });
     expect(body).toContain("width:min(420px,calc(100vw - 24px))");
     expect(body).toContain('src="/assets/mlclaw-control-branding.js"');
     expect(body).toContain('href="/mlclaw"');
