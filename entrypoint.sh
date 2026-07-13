@@ -68,6 +68,13 @@ restore_protected_state() {
   fi
   install -d -m 0700 -o root -g root "$PROTECTED_STATE_DIR/control"
   install -d -m 0700 -o hf-broker -g hf-broker "$HF_BROKER_STATE_DIR"
+  rm -rf -- \
+    "$HF_BROKER_STATE_DIR/grants" \
+    "$HF_BROKER_STATE_DIR/operations" \
+    "$HF_BROKER_STATE_DIR/plans"
+  rm -f -- \
+    "$HF_BROKER_STATE_DIR/grants.json" \
+    "$HF_BROKER_STATE_DIR/operations.json"
   chown -R root:root "$PROTECTED_STATE_DIR/control"
   chown -R hf-broker:hf-broker "$HF_BROKER_STATE_DIR"
   chmod 0710 "$PROTECTED_STATE_DIR"
