@@ -284,7 +284,7 @@ describe("ML Claw Space runtime", () => {
     expect(popoverSessionBody.renewal_transport).toBe("direct");
     expect(session.status).toBe(200);
     expect(session.headers.get("cache-control")).toBe("no-store");
-    expect(session.headers.get("content-security-policy")).not.toContain("sandbox");
+    expect(session.headers.get("content-security-policy")).toContain("sandbox allow-scripts");
     expect(session.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
     expect(session.headers.get("content-security-policy")).toContain(
       `script-src 'self' http://127.0.0.1:${config.port}`,
@@ -1428,6 +1428,7 @@ describe("ML Claw Space runtime", () => {
       renewal_transport: "direct",
     });
     expect(popover.headers.get("content-security-policy")).toContain("frame-ancestors 'self'");
+    expect(popover.headers.get("content-security-policy")).not.toContain("sandbox");
     expect(popover.headers.get("x-frame-options")).toBe("SAMEORIGIN");
 
     const invalidEmbed = await fetch(`${base}?embed=other`, {
@@ -1449,6 +1450,7 @@ describe("ML Claw Space runtime", () => {
       renewal_transport: "direct",
     });
     expect(topLevel.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    expect(topLevel.headers.get("content-security-policy")).toContain("sandbox allow-scripts");
     expect(topLevel.headers.get("x-frame-options")).toBe("DENY");
 
     const asset = await fetch(`${base}assets/app.js`, {
