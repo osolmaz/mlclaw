@@ -565,6 +565,7 @@ async function trustedBrokerKitUi(
       if (!template.includes("</head>")) return c.text("not found\n", 404);
       const headers = trustedBrokerKitHeaders(
         embeddedPopover ? "popover" : destination === "iframe" ? "launcher" : "top-level",
+        new URL(c.req.url).origin,
       );
       headers.set("content-type", "text/html; charset=utf-8");
       return new Response(template.replace("</head>", `${marker}</head>`), { status: 200, headers });
@@ -574,16 +575,16 @@ async function trustedBrokerKitUi(
   }
   const response = await serveFile(file, contentType(file), true);
   if (response.status !== 200) return response;
-  const headers = trustedBrokerKitHeaders("asset");
+  const headers = trustedBrokerKitHeaders("asset", new URL(c.req.url).origin);
   headers.set("content-type", response.headers.get("content-type") ?? "application/octet-stream");
   return new Response(response.body, { status: response.status, headers });
 }
 
-function trustedBrokerKitHeaders(mode: "launcher" | "popover" | "top-level" | "asset"): Headers {
+function trustedBrokerKitHeaders(mode: "launcher" | "popover" | "top-level" | "asset", origin: string): Headers {
   const asset = mode === "asset";
   const headers = new Headers({
     "cache-control": asset ? "public, max-age=31536000, immutable" : "no-store",
-    "content-security-policy": `sandbox allow-scripts; default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors ${mode === "top-level" ? "'none'" : "'self'"}`,
+    "content-security-policy": `sandbox allow-scripts; default-src 'self'; script-src 'self' ${origin}; style-src 'self' 'unsafe-inline' ${origin}; connect-src 'self' ${origin}; img-src 'self' data:; frame-ancestors ${mode === "top-level" ? "'none'" : "'self'"}`,
     "cross-origin-resource-policy": asset ? "cross-origin" : "same-origin",
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",

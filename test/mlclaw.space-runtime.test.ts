@@ -286,6 +286,9 @@ describe("ML Claw Space runtime", () => {
     expect(session.headers.get("cache-control")).toBe("no-store");
     expect(session.headers.get("content-security-policy")).toContain("sandbox allow-scripts");
     expect(session.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    expect(session.headers.get("content-security-policy")).toContain(
+      `script-src 'self' http://127.0.0.1:${config.port}`,
+    );
     expect(session.headers.get("x-frame-options")).toBe("DENY");
     const sessionHtml = await session.text();
     const embedded = sessionHtml.match(/name="brokerkit-delegated-session" content="([A-Za-z0-9_-]+)"/u)?.[1];
@@ -1407,6 +1410,7 @@ describe("ML Claw Space runtime", () => {
     expect(page.headers.get("cache-control")).toBe("no-store");
     expect(page.headers.get("content-security-policy")).toContain("frame-ancestors 'self'");
     expect(page.headers.get("content-security-policy")).toContain("sandbox allow-scripts");
+    expect(page.headers.get("content-security-policy")).toContain(`connect-src 'self' http://127.0.0.1:${config.port}`);
     expect(page.headers.get("x-frame-options")).toBe("SAMEORIGIN");
 
     const popover = await fetch(`${base}?embed=popover`, {
