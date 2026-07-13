@@ -14838,16 +14838,13 @@ import path12 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 var DEFAULT_OPENCLAW_VERSION = "2026.7.1-beta.5";
 var DEFAULT_BROKERKIT_PLUGIN_VERSION = "0.1.0";
-var DEFAULT_BROKERKIT_VERSION = "96faccd0f76c1ed02f24a5a8c4258dd05647aca3";
+var DEFAULT_BROKERKIT_VERSION = "eb6a44fd57e94d08f21a3bff1fe0ca1c9317a419";
 var DEFAULT_RUNTIME_IMAGE_REPOSITORY = "ghcr.io/osolmaz/mlclaw";
 var PACKAGE_METADATA = readPackageMetadata();
 var PACKAGE_VERSION = packageString("version", "unknown");
 var OPENCLAW_VERSION = packageConfigString("openclawVersion", DEFAULT_OPENCLAW_VERSION);
 var OPENCLAW_BASE_IMAGE = `ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}`;
-var BROKERKIT_PLUGIN_VERSION = packageConfigString(
-  "brokerkitPluginVersion",
-  DEFAULT_BROKERKIT_PLUGIN_VERSION
-);
+var BROKERKIT_PLUGIN_VERSION = packageConfigString("brokerkitPluginVersion", DEFAULT_BROKERKIT_PLUGIN_VERSION);
 var BROKERKIT_VERSION = packageConfigString("brokerkitVersion", DEFAULT_BROKERKIT_VERSION);
 var RUNTIME_IMAGE_REPOSITORY = packageConfigString("runtimeImageRepository", DEFAULT_RUNTIME_IMAGE_REPOSITORY);
 var DEFAULT_RUNTIME_IMAGE_TAG = `${PACKAGE_VERSION}-openclaw-${OPENCLAW_VERSION}`;

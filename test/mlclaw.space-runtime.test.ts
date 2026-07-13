@@ -1428,7 +1428,7 @@ describe("ML Claw Space runtime", () => {
       renewal_transport: "direct",
     });
     expect(popover.headers.get("content-security-policy")).toContain("frame-ancestors 'self'");
-    expect(popover.headers.get("content-security-policy")).not.toContain("sandbox");
+    expect(popover.headers.get("content-security-policy")).toContain("sandbox allow-scripts");
     expect(popover.headers.get("x-frame-options")).toBe("SAMEORIGIN");
 
     const invalidEmbed = await fetch(`${base}?embed=other`, {

@@ -9984,7 +9984,7 @@ async function trustedBrokerKitUi(c, config2, delegatedBrokerKit) {
 }
 function trustedBrokerKitHeaders(mode, origin) {
   const asset = mode === "asset";
-  const sandbox = mode === "top-level" ? "sandbox allow-scripts; " : "";
+  const sandbox = mode === "top-level" || mode === "popover" ? "sandbox allow-scripts; " : "";
   const headers = new Headers({
     "cache-control": asset ? "public, max-age=31536000, immutable" : "no-store",
     "content-security-policy": `${sandbox}default-src 'self'; script-src 'self' ${origin}; style-src 'self' 'unsafe-inline' ${origin}; connect-src 'self' ${origin}; img-src 'self' data:; frame-ancestors ${mode === "top-level" ? "'none'" : "'self'"}`,
