@@ -582,9 +582,10 @@ async function trustedBrokerKitUi(
 
 function trustedBrokerKitHeaders(mode: "launcher" | "popover" | "top-level" | "asset", origin: string): Headers {
   const asset = mode === "asset";
+  const sandbox = mode === "top-level" || mode === "popover" ? "sandbox allow-scripts; " : "";
   const headers = new Headers({
     "cache-control": asset ? "public, max-age=31536000, immutable" : "no-store",
-    "content-security-policy": `sandbox allow-scripts; default-src 'self'; script-src 'self' ${origin}; style-src 'self' 'unsafe-inline' ${origin}; connect-src 'self' ${origin}; img-src 'self' data:; frame-ancestors ${mode === "top-level" ? "'none'" : "'self'"}`,
+    "content-security-policy": `${sandbox}default-src 'self'; script-src 'self' ${origin}; style-src 'self' 'unsafe-inline' ${origin}; connect-src 'self' ${origin}; img-src 'self' data:; frame-ancestors ${mode === "top-level" ? "'none'" : "'self'"}`,
     "cross-origin-resource-policy": asset ? "cross-origin" : "same-origin",
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
