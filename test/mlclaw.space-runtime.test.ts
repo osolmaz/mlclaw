@@ -310,9 +310,15 @@ describe("ML Claw Space runtime", () => {
     };
     const snapshot = await fetch(`${base}/snapshot`, { headers: authorizedHeaders });
     expect(snapshot.status).toBe(200);
-    const snapshotBody = (await snapshot.json()) as { requests: Array<{ handle: string; id: string }> };
+    const snapshotBody = (await snapshot.json()) as {
+      api_version: string;
+      cursor: string;
+      requests: Array<{ handle: string; request: { id: string } }>;
+    };
+    expect(snapshotBody.api_version).toBe("brokerkit.io/operator-ui/v1");
+    expect(snapshotBody.cursor).toMatch(/^[A-Za-z0-9_-]{22}\.[0-9a-z]+$/u);
     expect(snapshotBody.requests).toHaveLength(1);
-    expect(snapshotBody.requests[0]?.id).toBe("request-1");
+    expect(snapshotBody.requests[0]?.request.id).toBe("request-1");
     expect(snapshotBody.requests[0]?.handle).toMatch(/^[A-Za-z0-9_-]{24}$/u);
     const popoverHeaders = {
       origin: "null",
@@ -322,7 +328,25 @@ describe("ML Claw Space runtime", () => {
     expect(popoverSnapshot.status).toBe(200);
     const summary = await fetch(`${base}/summary`, { headers: { cookie: sessionCookie(config, "alice") } });
     expect(summary.status).toBe(200);
-    expect(await summary.json()).toEqual({ pending: 1, healthy: true });
+    expect(await summary.json()).toEqual({
+      api_version: "brokerkit.io/operator-ui/v1",
+      cursor: snapshotBody.cursor,
+      pending: 1,
+      healthy: true,
+    });
+    const expiredEvents = await fetch(`${base}/events?cursor=foreign.1&wait_seconds=25`, {
+      headers: authorizedHeaders,
+    });
+    expect(expiredEvents.status).toBe(410);
+    expect(await expiredEvents.json()).toEqual({ error: { code: "cursor_expired" } });
+    const invalidEvents = await fetch(`${base}/events?cursor=${snapshotBody.cursor}&wait_seconds=26`, {
+      headers: authorizedHeaders,
+    });
+    expect(invalidEvents.status).toBe(400);
+    const expiredSummaryEvents = await fetch(`${base}/summary/events?cursor=foreign.1&wait_seconds=25`, {
+      headers: { cookie: sessionCookie(config, "alice") },
+    });
+    expect(expiredSummaryEvents.status).toBe(410);
 
     const refreshes = await Promise.all(
       Array.from({ length: 11 }, () => fetch(`${base}/snapshot`, { headers: authorizedHeaders })),
@@ -385,10 +409,15 @@ describe("ML Claw Space runtime", () => {
       body: JSON.stringify({ expectedRevision: 1, durationSeconds: 300, maxUses: 1 }),
     });
     expect(legacyShape.status).toBe(400);
+    const removedReason = await fetch(requestUrl, {
+      method: "POST",
+      headers: { ...popoverHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ expectedRevision: 1, reason: "removed" }),
+    });
+    expect(removedReason.status).toBe(400);
 
     const decisionBody = JSON.stringify({
       expectedRevision: 1,
-      reason: "approved in the Gateway",
       constraints: { durationSeconds: 172_800, maxUses: 200 },
     });
     const conflict = await fetch(requestUrl, {
@@ -417,7 +446,6 @@ describe("ML Claw Space runtime", () => {
     expect(JSON.parse(brokerRequests.at(-1)?.body ?? "{}")).toMatchObject({
       expected_revision: 1,
       on_behalf_of: "mlclaw:alice",
-      decision_reason: "approved in the Gateway",
       constraints: { duration_seconds: 172_800, max_uses: 200 },
     });
   });
@@ -1332,7 +1360,10 @@ describe("ML Claw Space runtime", () => {
     expect(brandingScript).toContain('window.location.assign("/plugins/brokerkit/ui/")');
     expect(brandingScript).toContain("installApprovals");
     expect(brandingScript).toContain('fetch("/mlclaw/api/brokerkit/summary"');
-    expect(brandingScript).toContain("window.setInterval(refresh, 15000)");
+    expect(brandingScript).toContain('fetch("/mlclaw/api/brokerkit/summary/events?cursor="');
+    expect(brandingScript).toContain('frame.contentWindow.postMessage({ type: "brokerkit.operator-ui.invalidate"');
+    expect(brandingScript).toContain("window.setInterval(refresh, 300000)");
+    expect(brandingScript).not.toContain("window.setInterval(refresh, 15000)");
 
     const sw = await fetch(`http://127.0.0.1:${config.port}/sw.js`);
     expect(sw.status).toBe(200);

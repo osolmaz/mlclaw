@@ -40,7 +40,6 @@ export type BrokerApproval = {
   decided_at?: string;
   decided_by?: string;
   decided_on_behalf_of?: string;
-  decision_reason?: string;
   presentation: {
     risk: "unknown" | "low" | "medium" | "high" | "critical";
     title: string;
@@ -62,7 +61,6 @@ export type BrokerDecision = {
   expectedRevision: number;
   idempotencyKey: string;
   onBehalfOf: string;
-  reason?: string;
   durationSeconds?: number;
   maxUses?: number;
 };
@@ -97,7 +95,6 @@ const approvalSchema = z
     decided_at: z.string().datetime({ offset: true }).optional(),
     decided_by: z.string().max(200).optional(),
     decided_on_behalf_of: z.string().max(200).optional(),
-    decision_reason: z.string().max(2_000).optional(),
     presentation: z
       .object({
         risk: z.enum(["unknown", "low", "medium", "high", "critical"]),
@@ -232,7 +229,6 @@ export class BrokerOperatorClient {
           expected_revision: decision.expectedRevision,
           idempotency_key: decision.idempotencyKey,
           on_behalf_of: decision.onBehalfOf,
-          ...(decision.reason ? { decision_reason: decision.reason } : {}),
           ...(decision.durationSeconds || decision.maxUses
             ? {
                 constraints: {
