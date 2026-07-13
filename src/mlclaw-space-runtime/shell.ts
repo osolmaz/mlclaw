@@ -119,7 +119,7 @@ export const CONTROL_BRANDING_SCRIPT = `(function () {
         typeof data.nonce !== "string" ||
         !/^[a-f0-9]{32}$/.test(data.nonce)
       ) return;
-      window.location.assign("/plugins/brokerkit/ui/");
+      window.location.assign("/plugins/brokerkit/ui/#${BROKERKIT_DELEGATED_UI_BOOTSTRAP}");
     });
     var summaryCursor = "";
     var stopped = false;
