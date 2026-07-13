@@ -14838,7 +14838,7 @@ import path12 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 var DEFAULT_OPENCLAW_VERSION = "2026.7.1-beta.5";
 var DEFAULT_BROKERKIT_PLUGIN_VERSION = "0.1.0";
-var DEFAULT_BROKERKIT_VERSION = "9d4e87135080f5ed8d4f7c6d50632f41d9392e7e";
+var DEFAULT_BROKERKIT_VERSION = "08449781d180aafcf44f796def403bea4d29b13c";
 var DEFAULT_RUNTIME_IMAGE_REPOSITORY = "ghcr.io/osolmaz/mlclaw";
 var PACKAGE_METADATA = readPackageMetadata();
 var PACKAGE_VERSION = packageString("version", "unknown");

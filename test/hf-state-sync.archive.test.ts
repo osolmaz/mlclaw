@@ -49,7 +49,7 @@ async function buildFakeLiveDir(): Promise<string> {
   await fs.writeFile(path.join(state, "tmp/scratch.txt"), "scratch");
   await fs.writeFile(path.join(state, "gateway.log"), "log line");
   await fs.writeFile(path.join(live, "workspace/draft.md"), "user work");
-  await fs.writeFile(path.join(live, PROTECTED_STATE_DIR_NAME, "hf-broker/grants.json"), "protected grant state");
+  await fs.writeFile(path.join(live, PROTECTED_STATE_DIR_NAME, "hf-broker/state.db"), "protected broker state");
   await fs.writeFile(
     path.join(live, PROTECTED_STATE_DIR_NAME, "hf-broker/mirrors/dataset/example.git/HEAD"),
     "ref: refs/heads/main\n",
@@ -94,8 +94,8 @@ describe("staging", () => {
 
     await expect(stageLiveDir(live, staging)).resolves.toMatchObject({ kind: "staged" });
     await expect(
-      fs.readFile(path.join(staging, PROTECTED_STATE_DIR_NAME, "hf-broker/grants.json"), "utf8"),
-    ).resolves.toBe("protected grant state");
+      fs.readFile(path.join(staging, PROTECTED_STATE_DIR_NAME, "hf-broker/state.db"), "utf8"),
+    ).resolves.toBe("protected broker state");
   });
 });
 
@@ -123,8 +123,8 @@ describe("protected staging", () => {
     await extractTarZst(archive, extracted);
     await expect(fs.readFile(path.join(extracted, "workspace/draft.md"), "utf8")).resolves.toBe("user work");
     await expect(
-      fs.readFile(path.join(extracted, PROTECTED_STATE_DIR_NAME, "hf-broker/grants.json"), "utf8"),
-    ).resolves.toBe("protected grant state");
+      fs.readFile(path.join(extracted, PROTECTED_STATE_DIR_NAME, "hf-broker/state.db"), "utf8"),
+    ).resolves.toBe("protected broker state");
     await expect(fs.access(path.join(extracted, PROTECTED_STATE_DIR_NAME, "hf-broker/mirrors"))).rejects.toThrow();
     expect((await fs.stat(path.join(extracted, PROTECTED_STATE_DIR_NAME))).mode & 0o777).toBe(0o700);
   });

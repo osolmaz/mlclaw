@@ -80,7 +80,6 @@ start_hf_broker() {
   fi
 
   install -d -m 0700 -o hf-broker -g hf-broker "$HF_BROKER_STATE_DIR"
-  install -d -m 0700 -o hf-broker -g hf-broker "$HF_BROKER_STATE_DIR/grants"
   chown -R hf-broker:hf-broker "$HF_BROKER_STATE_DIR"
   chmod 0700 "$HF_BROKER_STATE_DIR"
 
