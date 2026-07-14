@@ -86,6 +86,25 @@ export const CONTROL_BRANDING_SCRIPT = `(function () {
     var close = document.querySelector("[data-mlclaw-approvals-close]");
     if (!shell || !button || !popover || !frame || button.getAttribute("data-ready") === "1") return;
     button.setAttribute("data-ready", "1");
+    var transportReady = installBrokerKitTransport();
+    function installBrokerKitTransport() {
+      if (!("serviceWorker" in navigator)) return Promise.resolve();
+      return navigator.serviceWorker.register("/sw.js", { scope: "/" })
+        .then(function () { return navigator.serviceWorker.ready; })
+        .then(function () {
+          if (navigator.serviceWorker.controller) return;
+          return new Promise(function (resolve) {
+            var timer = window.setTimeout(done, 5000);
+            function done() {
+              window.clearTimeout(timer);
+              navigator.serviceWorker.removeEventListener("controllerchange", done);
+              resolve();
+            }
+            navigator.serviceWorker.addEventListener("controllerchange", done, { once: true });
+          });
+        })
+        .catch(function () {});
+    }
     function invalidateFrame() {
       if (frame.contentWindow) {
         frame.contentWindow.postMessage({ type: "brokerkit.operator-ui.invalidate", version: 1 }, "*");
@@ -95,8 +114,10 @@ export const CONTROL_BRANDING_SCRIPT = `(function () {
       popover.hidden = !open;
       button.setAttribute("aria-expanded", open ? "true" : "false");
       if (!open) return;
-      if (!frame.getAttribute("src")) frame.setAttribute("src", frame.getAttribute("data-src"));
-      else invalidateFrame();
+      transportReady.then(function () {
+        if (!frame.getAttribute("src")) frame.setAttribute("src", frame.getAttribute("data-src"));
+        else invalidateFrame();
+      });
     }
     frame.addEventListener("load", function () { if (!popover.hidden) invalidateFrame(); });
     button.addEventListener("click", function () { setOpen(popover.hidden); });
@@ -215,7 +236,8 @@ export const CONTROL_BRANDING_SCRIPT = `(function () {
 })();
 `;
 
-export const SERVICE_WORKER_RESET_SCRIPT = `self.addEventListener("install", function () {
+export const SERVICE_WORKER_RESET_SCRIPT = `var brokerPrefix = "/mlclaw/api/brokerkit/";
+self.addEventListener("install", function () {
   self.skipWaiting();
 });
 self.addEventListener("activate", function (event) {
@@ -227,9 +249,32 @@ self.addEventListener("activate", function (event) {
     if (self.clients && clients.claim) {
       await clients.claim();
     }
-    if (self.registration && self.registration.unregister) {
-      await self.registration.unregister();
+  })());
+});
+self.addEventListener("fetch", function (event) {
+  var request = event.request;
+  var url = new URL(request.url);
+  if (
+    url.origin !== self.location.origin ||
+    !url.pathname.startsWith(brokerPrefix) ||
+    !request.headers.has("brokerkit-session") ||
+    request.headers.has("x-mlclaw-brokerkit-relay")
+  ) return;
+  event.respondWith((async function () {
+    var headers = new Headers(request.headers);
+    headers.delete("origin");
+    headers.set("x-mlclaw-brokerkit-relay", "1");
+    var init = {
+      method: request.method,
+      headers: headers,
+      credentials: "include",
+      cache: "no-store",
+      redirect: "error"
+    };
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      init.body = await request.clone().arrayBuffer();
     }
+    return fetch(request.url, init);
   })());
 });
 `;

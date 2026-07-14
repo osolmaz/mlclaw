@@ -165,16 +165,16 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
     }
   });
 
-  app.options("/mlclaw/api/brokerkit/*", (c) => delegatedPreflight(c));
+  app.options("/mlclaw/api/brokerkit/*", (c) => delegatedPreflight(c, config));
 
   app.post("/mlclaw/api/brokerkit/session", (c) => {
-    const identity = delegatedIdentity(c, delegatedBrokerKit);
+    const identity = delegatedIdentity(c, delegatedBrokerKit, config);
     if (!identity) return delegatedErrorResponse(c, "not_authorized", 401);
     return delegatedJson(c, delegatedBrokerKit.issueSession(identity.actor, identity.access));
   });
 
   app.get("/mlclaw/api/brokerkit/snapshot", async (c) => {
-    const identity = delegatedIdentity(c, delegatedBrokerKit);
+    const identity = delegatedIdentity(c, delegatedBrokerKit, config);
     if (!identity) return delegatedErrorResponse(c, "not_authorized", 401);
     if (!allowDelegatedSessionSnapshot(identity.sessionId) || !allowDelegatedActorSnapshot(identity.actor)) {
       return delegatedErrorResponse(c, "rate_limited", 429);
@@ -187,7 +187,7 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
   });
 
   app.get("/mlclaw/api/brokerkit/events", async (c) => {
-    const identity = delegatedIdentity(c, delegatedBrokerKit);
+    const identity = delegatedIdentity(c, delegatedBrokerKit, config);
     if (!identity) return delegatedErrorResponse(c, "not_authorized", 401);
     if (!allowDelegatedEvents(identity.sessionId)) return delegatedErrorResponse(c, "rate_limited", 429);
     const input = delegatedEventQuery(c.req.url);
@@ -200,7 +200,7 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
   });
 
   app.get("/mlclaw/api/brokerkit/requests/:handle", async (c) => {
-    const identity = delegatedIdentity(c, delegatedBrokerKit);
+    const identity = delegatedIdentity(c, delegatedBrokerKit, config);
     if (!identity) return delegatedErrorResponse(c, "not_authorized", 401);
     try {
       return delegatedJson(c, await delegatedBrokerKit.detail(c.req.param("handle")));
@@ -211,7 +211,7 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
 
   for (const action of ["approve", "deny", "revoke"] as const) {
     app.post(`/mlclaw/api/brokerkit/requests/:handle/${action}`, async (c) => {
-      const identity = delegatedIdentity(c, delegatedBrokerKit);
+      const identity = delegatedIdentity(c, delegatedBrokerKit, config);
       if (!identity || identity.access !== "decide") return delegatedErrorResponse(c, "not_authorized", 401);
       const body = await readBoundedJson(c, 16_384);
       if (!body || Object.keys(body).some((key) => !["expectedRevision", "constraints"].includes(key))) {
@@ -661,8 +661,11 @@ function optionalPositiveInteger(value: unknown, maximum: number): number | "inv
   return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= maximum ? parsed : "invalid";
 }
 
-function delegatedOriginAllowed(c: Context): boolean {
-  return c.req.header("origin") === "null";
+function delegatedOriginAllowed(c: Context, config: SpaceRuntimeConfig): boolean {
+  const origin = c.req.header("origin");
+  if (origin === "null") return true;
+  if (c.req.header("x-mlclaw-brokerkit-relay") !== "1") return false;
+  return !origin || origin === new URL(config.publicUrl).origin;
 }
 
 function delegatedEventQuery(urlValue: string): { cursor: string; waitSeconds: number } | undefined {
@@ -681,13 +684,17 @@ function delegatedEventQuery(urlValue: string): { cursor: string; waitSeconds: n
   return { cursor, waitSeconds: Number(wait) };
 }
 
-function delegatedIdentity(c: Context, delegated: DelegatedBrokerKit): DelegatedSessionIdentity | undefined {
-  if (!delegatedOriginAllowed(c)) return undefined;
+function delegatedIdentity(
+  c: Context,
+  delegated: DelegatedBrokerKit,
+  config: SpaceRuntimeConfig,
+): DelegatedSessionIdentity | undefined {
+  if (!delegatedOriginAllowed(c, config)) return undefined;
   return delegated.authorizeSession(c.req.header(BROKERKIT_SESSION_HEADER));
 }
 
-function delegatedPreflight(c: Context): Response {
-  if (!delegatedOriginAllowed(c)) return delegatedErrorResponse(c, "not_authorized", 403);
+function delegatedPreflight(c: Context, config: SpaceRuntimeConfig): Response {
+  if (!delegatedOriginAllowed(c, config)) return delegatedErrorResponse(c, "not_authorized", 403);
   delegatedHeaders(c);
   c.header("access-control-allow-headers", `${BROKERKIT_SESSION_HEADER}, content-type`);
   c.header("access-control-allow-methods", "GET, POST, OPTIONS");

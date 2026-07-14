@@ -357,11 +357,23 @@ describe("ML Claw Space runtime", () => {
     expect(snapshotBody.requests[0]?.request.id).toBe("request-1");
     expect(snapshotBody.requests[0]?.handle).toMatch(/^[A-Za-z0-9_-]{24}$/u);
     const popoverHeaders = {
-      origin: "null",
       "brokerkit-session": popoverSessionBody.token,
+      "x-mlclaw-brokerkit-relay": "1",
     };
     const popoverSnapshot = await fetch(`${base}/snapshot`, { headers: popoverHeaders });
     expect(popoverSnapshot.status).toBe(200);
+    const unmarkedRelay = await fetch(`${base}/snapshot`, {
+      headers: { "brokerkit-session": popoverSessionBody.token },
+    });
+    expect(unmarkedRelay.status).toBe(401);
+    const foreignRelay = await fetch(`${base}/snapshot`, {
+      headers: {
+        origin: "https://attacker.example",
+        "brokerkit-session": popoverSessionBody.token,
+        "x-mlclaw-brokerkit-relay": "1",
+      },
+    });
+    expect(foreignRelay.status).toBe(401);
     const summary = await fetch(`${base}/summary`, { headers: { cookie: sessionCookie(config, "alice") } });
     expect(summary.status).toBe(200);
     expect(await summary.json()).toEqual({
@@ -1410,6 +1422,7 @@ describe("ML Claw Space runtime", () => {
       basePath: "/mlclaw/api/brokerkit",
     });
     expect(brandingScript).toContain("installApprovals");
+    expect(brandingScript).toContain('serviceWorker.register("/sw.js", { scope: "/" })');
     expect(brandingScript).toContain('fetch("/mlclaw/api/brokerkit/summary"');
     expect(brandingScript).toContain('fetch("/mlclaw/api/brokerkit/summary/events?cursor="');
     expect(brandingScript).toContain('frame.contentWindow.postMessage({ type: "brokerkit.operator-ui.invalidate"');
@@ -1420,7 +1433,10 @@ describe("ML Claw Space runtime", () => {
     expect(sw.status).toBe(200);
     expect(sw.headers.get("content-type")).toContain("text/javascript");
     expect(sw.headers.get("cache-control")).toContain("no-store");
-    expect(await sw.text()).toContain("registration.unregister");
+    const serviceWorker = await sw.text();
+    expect(serviceWorker).toContain('request.headers.has("brokerkit-session")');
+    expect(serviceWorker).toContain('headers.set("x-mlclaw-brokerkit-relay", "1")');
+    expect(serviceWorker).not.toContain("registration.unregister");
   });
 
   it("serves the packaged BrokerKit UI from the trusted ML Claw boundary", async () => {
