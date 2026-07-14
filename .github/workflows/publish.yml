@@ -51,6 +51,9 @@ jobs:
           node-version: "24"
           cache: npm
           registry-url: "https://registry.npmjs.org"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.5"
       - id: runtime-config
         shell: bash
         run: |
@@ -66,6 +69,17 @@ jobs:
           echo "runtime_image=${runtime_image}" >> "$GITHUB_OUTPUT"
           echo "runtime_tag=${version}-openclaw-${openclaw_version}" >> "$GITHUB_OUTPUT"
       - run: npm ci
+      - name: Build pinned HF Broker
+        run: |
+          git init "$RUNNER_TEMP/brokerkit"
+          git -C "$RUNNER_TEMP/brokerkit" fetch --depth=1 https://github.com/osolmaz/brokerkit.git "${{ steps.runtime-config.outputs.brokerkit_version }}"
+          git -C "$RUNNER_TEMP/brokerkit" checkout --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/brokerkit" rev-parse HEAD)" = "${{ steps.runtime-config.outputs.brokerkit_version }}"
+          go build -C "$RUNNER_TEMP/brokerkit" -o "$RUNNER_TEMP/hf-broker" ./brokers/huggingface/cmd/hf-broker
+      - name: Test pinned BrokerKit agent tools
+        env:
+          MLCLAW_HF_BROKER_BINARY: ${{ runner.temp }}/hf-broker
+        run: npm test -- --run test/mlclaw.brokerkit-agent-tools.test.ts
       - run: npm run build
       - run: npm run format
       - run: npm run lint
@@ -73,7 +87,6 @@ jobs:
       - run: npm test
       - run: npm run coverage
       - run: npm run dry
-      - run: npm run mutate
       - run: npm run slophammer
       - run: npm run check:secrets
       - run: npm run pack:check

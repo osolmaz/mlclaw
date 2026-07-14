@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   BROKERKIT_PLUGIN_VERSION,
   BROKERKIT_VERSION,
+  DEFAULT_BROKERKIT_VERSION,
   DEFAULT_RUNTIME_IMAGE,
   OPENCLAW_BASE_IMAGE,
   OPENCLAW_VERSION,
@@ -16,6 +17,11 @@ describe("runtime image Dockerfile", () => {
     expect(dockerfile).toContain(`ARG OPENCLAW_VERSION=${OPENCLAW_VERSION}`);
     expect(dockerfile).toContain(`ARG BROKERKIT_PLUGIN_VERSION=${BROKERKIT_PLUGIN_VERSION}`);
     expect(dockerfile).toContain(`ARG BROKERKIT_VERSION=${BROKERKIT_VERSION}`);
+    expect(BROKERKIT_VERSION).toMatch(/^[0-9a-f]{40}$/u);
+    expect(DEFAULT_BROKERKIT_VERSION).toBe(BROKERKIT_VERSION);
+    expect(
+      dockerfile.match(/git -C \/src fetch --depth=1 https:\/\/github\.com\/osolmaz\/brokerkit\.git/g),
+    ).toHaveLength(2);
     expect(OPENCLAW_BASE_IMAGE).toBe(`ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}`);
     expect(dockerfile).toContain("ARG OPENCLAW_BASE_IMAGE=ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}");
     expect(dockerfile).toContain(`ARG MLCLAW_RUNTIME_IMAGE=${DEFAULT_RUNTIME_IMAGE}`);

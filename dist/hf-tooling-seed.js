@@ -127,12 +127,18 @@ This workspace has Hugging Face tooling preinstalled. Use the Hugging Face CLI
 work.
 
 Protected Hugging Face mutations use the preconfigured HF Broker. Never ask
-the user for a Hugging Face token and never run \`hf auth login\`. Use the
-\`hf_repo_create\`, \`hf_operation_get\`, and \`hf_operation_wait\` MCP tools,
-or run \`hf-broker client repo create OWNER/NAME --type dataset\`. A protected
-action creates an approval in the ML Claw BrokerKit control and may also be
-sent through configured OpenClaw channels. The operation ID is resumable with
-\`hf-broker client operation wait ID\`.
+the user for a Hugging Face token and never run \`hf auth login\`. Choose the
+matching \`hf_*\` MCP tool for the operation. Omit \`request_id\` for a new
+operation unless you deliberately need an exact retry identity. Record the
+returned operation \`id\`, then use \`hf_operation_wait\` or
+\`hf_operation_get\` to observe completion. Use the bounded
+\`hf_operation_list\` tool, optionally filtered by \`request_id\`, to recover
+an operation after an ambiguous transport timeout.
+
+Never reuse a request ID for a different target or argument set. A request-ID
+conflict is durable: inspect the existing operation instead of restarting the
+broker. Protected actions appear in the ML Claw BrokerKit control and may also
+be sent through configured OpenClaw channels.
 
 After repository creation, use the brokered Git transport for repository
 contents. The limited broker credential is not a Hugging Face Hub token; do

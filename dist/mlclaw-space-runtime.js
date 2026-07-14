@@ -8523,6 +8523,8 @@ function remainingUpstreamTimeout(deadline) {
 }
 
 // src/mlclaw-space-runtime/openclaw-config.ts
+var BROKER_MCP_CONNECTION_TIMEOUT_MS = 1e4;
+var BROKER_MCP_REQUEST_TIMEOUT_MS = 45e3;
 async function configureOpenClawGateway(config2) {
   const raw2 = await fs.readFile(config2.openclawConfigPath, "utf8");
   const openclawConfig = JSON.parse(raw2);
@@ -8565,13 +8567,15 @@ function configureBrokerMcpServer(openclawConfig, config2) {
   }
   const existing = objectValue2(servers["huggingface-broker"]);
   servers["huggingface-broker"] = {
-    ...existing,
     command: "/usr/local/bin/hf-broker",
     args: ["mcp"],
+    connectionTimeoutMs: BROKER_MCP_CONNECTION_TIMEOUT_MS,
+    requestTimeoutMs: BROKER_MCP_REQUEST_TIMEOUT_MS,
     env: {
       MLCLAW_HF_BROKER_URL: config2.brokerAgentUrl,
       MLCLAW_HF_BROKER_AGENT_SECRET_FILE: config2.brokerAgentSecretFile
     },
+    ...existing?.toolFilter && typeof existing.toolFilter === "object" ? { toolFilter: existing.toolFilter } : {},
     ...existing?.enabled === false ? { enabled: false } : { enabled: true }
   };
 }
