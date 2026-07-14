@@ -2038,7 +2038,8 @@ describe("ML Claw Space runtime", () => {
             MLCLAW_HF_BROKER_AGENT_SECRET_FILE: "/tmp/secret",
           },
           enabled: false,
-          toolFilter: { allow: ["hf_operation_get"] },
+          toolFilter: { include: ["hf_operation_get"] },
+          supportsParallelToolCalls: true,
         },
         custom: { command: "/usr/local/bin/custom", enabled: true },
       },
@@ -2058,7 +2059,8 @@ describe("ML Claw Space runtime", () => {
         MLCLAW_HF_BROKER_AGENT_SECRET_FILE: "/run/mlclaw-hf-broker/agent-secret",
       },
       enabled: false,
-      toolFilter: { allow: ["hf_operation_get"] },
+      toolFilter: { include: ["hf_operation_get"] },
+      supportsParallelToolCalls: true,
     });
     expect(rewritten.mcp.servers.custom).toEqual({ command: "/usr/local/bin/custom", enabled: true });
   });

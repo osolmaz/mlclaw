@@ -50,6 +50,7 @@ function configureBrokerMcpServer(openclawConfig: Record<string, unknown>, confi
   }
   const existing = objectValue(servers["huggingface-broker"]);
   servers["huggingface-broker"] = {
+    ...preservedBrokerMcpFields(existing),
     command: "/usr/local/bin/hf-broker",
     args: ["mcp"],
     connectionTimeoutMs: BROKER_MCP_CONNECTION_TIMEOUT_MS,
@@ -58,8 +59,16 @@ function configureBrokerMcpServer(openclawConfig: Record<string, unknown>, confi
       MLCLAW_HF_BROKER_URL: config.brokerAgentUrl,
       MLCLAW_HF_BROKER_AGENT_SECRET_FILE: config.brokerAgentSecretFile,
     },
-    ...(existing?.toolFilter && typeof existing.toolFilter === "object" ? { toolFilter: existing.toolFilter } : {}),
     ...(existing?.enabled === false ? { enabled: false } : { enabled: true }),
+  };
+}
+
+function preservedBrokerMcpFields(existing: Record<string, unknown> | undefined): Record<string, unknown> {
+  return {
+    ...(existing?.toolFilter && typeof existing.toolFilter === "object" ? { toolFilter: existing.toolFilter } : {}),
+    ...(typeof existing?.supportsParallelToolCalls === "boolean"
+      ? { supportsParallelToolCalls: existing.supportsParallelToolCalls }
+      : {}),
   };
 }
 

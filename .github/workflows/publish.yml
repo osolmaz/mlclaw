@@ -54,6 +54,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.5"
+          cache: false
       - id: runtime-config
         shell: bash
         run: |
@@ -87,6 +88,9 @@ jobs:
       - run: npm test
       - run: npm run coverage
       - run: npm run dry
+      - name: Mutation tests (opt-in)
+        if: ${{ vars.MLCLAW_RUN_MUTATION == '1' }}
+        run: npm run mutate
       - run: npm run slophammer
       - run: npm run check:secrets
       - run: npm run pack:check
