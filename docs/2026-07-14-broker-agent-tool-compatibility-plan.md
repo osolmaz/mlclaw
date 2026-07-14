@@ -2,7 +2,7 @@
 
 Date: 2026-07-14
 
-Status: ready to implement after the companion BrokerKit contract is reviewed
+Status: implemented; live `osolmaz/mlclaw-test` validation remains
 
 ## Objective
 
@@ -149,8 +149,8 @@ Update `src/mlclaw-space-runtime/openclaw-config.ts` so the managed
 to its command, arguments, and protected environment:
 
 - set `connectionTimeoutMs` to a documented bounded startup value;
-- set `requestTimeoutMs` above BrokerKit's maximum 25-second wait but well
-  below an approval lifetime;
+- set `requestTimeoutMs` above BrokerKit's maximum 25-second operation and
+  temporary-grant decision wait but well below an approval lifetime;
 - preserve an explicit user disablement;
 - do not preserve user overrides of the managed command, protected
   environment, or timeout contract; and
@@ -158,9 +158,10 @@ to its command, arguments, and protected environment:
   metadata.
 
 Use one exported constant for each timeout so source, tests, generated runtime
-bundle, and documentation cannot drift. A recommended request timeout is
-45 seconds, leaving room for transport overhead around a 25-second broker
-wait.
+bundle, and documentation cannot drift. The BrokerKit MCP server must cap both
+operation waits and temporary-grant decision waits at 25 seconds. A recommended
+request timeout is 45 seconds, leaving room for transport overhead around that
+bounded broker wait.
 
 Do not raise the MCP timeout to 15 minutes. Approval lifetime and one transport
 request deadline are different concepts.

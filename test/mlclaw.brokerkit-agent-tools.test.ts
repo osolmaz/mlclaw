@@ -32,6 +32,7 @@ describe.runIf(brokerBinary)("pinned BrokerKit agent tools", () => {
     expect(secretArguments).toHaveProperty("secret_name");
     expect(secretArguments).not.toHaveProperty("key");
     expect(byName.get("hf_operation_wait")?.inputSchema.properties.timeout_seconds).toMatchObject({ maximum: 25 });
+    expect(byName.get("hf_grant_wait")?.inputSchema.properties.wait_seconds).toMatchObject({ maximum: 25 });
   });
 
   it("submits, replays, conflicts, and recovers operations without transcript corruption", async () => {
