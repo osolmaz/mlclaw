@@ -31,6 +31,17 @@ describe("runtime image Dockerfile", () => {
     expect(dockerfile).toContain(
       "ENV MLCLAW_BROKERKIT_PLUGIN_PATH=/opt/openclaw-plugins/node_modules/openclaw-brokerkit",
     );
+    expect(dockerfile).toContain("/out/hf-broker policy render");
+    expect(dockerfile).toContain("--preset request-all-agent-operations");
+    expect(dockerfile).toContain("--client default");
+    expect(dockerfile).toContain("/out/hf-broker doctor policy");
+    expect(dockerfile).toContain("COPY --from=hf-broker-build /out/hf-broker.scope.json /app/hf-broker.scope.json");
+    expect(dockerfile).toContain(
+      "COPY --from=hf-broker-build /out/hf-broker.policy-profile.json /app/hf-broker.policy-profile.json",
+    );
+    expect(dockerfile).toContain(
+      "COPY --from=hf-broker-build /out/hf-broker.policy-manifest.json /app/hf-broker.policy-manifest.json",
+    );
     expect(dockerfile).not.toContain("ghcr.io/osolmaz/mlclaw-runtime");
     expect(DEFAULT_RUNTIME_IMAGE).toBe(`ghcr.io/osolmaz/mlclaw:${PACKAGE_VERSION}-openclaw-${OPENCLAW_VERSION}`);
     expect(dockerfile).toContain("ENV PORT=7860");

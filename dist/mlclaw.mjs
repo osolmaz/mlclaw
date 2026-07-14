@@ -14838,7 +14838,7 @@ import path12 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 var DEFAULT_OPENCLAW_VERSION = "2026.7.1-beta.5";
 var DEFAULT_BROKERKIT_PLUGIN_VERSION = "0.1.0";
-var DEFAULT_BROKERKIT_VERSION = "a651edd5ded200c5fb569fb1d76cd7cb418550f9";
+var DEFAULT_BROKERKIT_VERSION = "a2adf6e626bbd509605bb7c72a7f3a8b1c00f045";
 var DEFAULT_RUNTIME_IMAGE_REPOSITORY = "ghcr.io/osolmaz/mlclaw";
 var PACKAGE_METADATA = readPackageMetadata();
 var PACKAGE_VERSION = packageString("version", "unknown");
@@ -14952,7 +14952,6 @@ async function generateSpaceRepo(sourceDir, outDir, options = {}) {
       ["dist/hf-tooling-seed.js", "runtime/hf-tooling-seed.js"],
       ["dist/mlclaw-space-runtime.js", "runtime/mlclaw-space-runtime.js"],
       ["entrypoint.sh", "runtime/entrypoint.sh"],
-      ["hf-broker.scope.json", "runtime/hf-broker.scope.json"],
       ["openclaw.default.json", "runtime/openclaw.default.json"],
       ["scripts/configure-huggingface-model.mjs", "runtime/scripts/configure-huggingface-model.mjs"],
       ["scripts/configure-telegram.mjs", "runtime/scripts/configure-telegram.mjs"],
@@ -14986,7 +14985,17 @@ RUN git init /src \\
   && git -C /src checkout --detach FETCH_HEAD \\
   && test "$(git -C /src rev-parse HEAD)" = "$BROKERKIT_VERSION" \\
   && cd /src \\
-  && GOWORK=off go build -trimpath -o /out/hf-broker ./brokers/huggingface/cmd/hf-broker
+  && GOWORK=off go build -trimpath -o /out/hf-broker ./brokers/huggingface/cmd/hf-broker \\
+  && /out/hf-broker policy render \\
+    --preset request-all-agent-operations \\
+    --client default \\
+    --profile-out /out/hf-broker.policy-profile.json \\
+    --output /out/hf-broker.scope.json \\
+    --manifest-out /out/hf-broker.policy-manifest.json \\
+  && /out/hf-broker doctor policy \\
+    --profile /out/hf-broker.policy-profile.json \\
+    --scope /out/hf-broker.scope.json \\
+    --manifest /out/hf-broker.policy-manifest.json
 
 FROM node:24-bookworm-slim AS brokerkit-plugin-build
 ARG BROKERKIT_VERSION
@@ -15024,7 +15033,9 @@ COPY --chown=node:node runtime/hf-state-sync.js /app/hf-state-sync.js
 COPY --chown=node:node runtime/hf-tooling-seed.js /app/hf-tooling-seed.js
 COPY --chown=node:node runtime/mlclaw-space-runtime.js /app/mlclaw-space-runtime.js
 COPY --from=hf-broker-build /out/hf-broker /usr/local/bin/hf-broker
-COPY runtime/hf-broker.scope.json /app/hf-broker.scope.json
+COPY --from=hf-broker-build /out/hf-broker.scope.json /app/hf-broker.scope.json
+COPY --from=hf-broker-build /out/hf-broker.policy-profile.json /app/hf-broker.policy-profile.json
+COPY --from=hf-broker-build /out/hf-broker.policy-manifest.json /app/hf-broker.policy-manifest.json
 COPY --chown=node:node runtime/openclaw.default.json /app/openclaw.default.json
 COPY --chown=node:node runtime/entrypoint.sh /app/entrypoint.sh
 COPY --chown=node:node runtime/scripts/ /app/scripts/

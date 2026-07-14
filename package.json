@@ -1,10 +1,10 @@
 {
   "name": "mlclaw",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "license": "MIT",
   "config": {
     "openclawVersion": "2026.7.1-beta.5",
-    "brokerkitVersion": "a651edd5ded200c5fb569fb1d76cd7cb418550f9",
+    "brokerkitVersion": "a2adf6e626bbd509605bb7c72a7f3a8b1c00f045",
     "brokerkitPluginVersion": "0.1.0",
     "runtimeImageRepository": "ghcr.io/osolmaz/mlclaw"
   },
@@ -30,7 +30,6 @@
     "dist/mlclaw-space-runtime.js",
     "Dockerfile",
     "entrypoint.sh",
-    "hf-broker.scope.json",
     "mlclaw.ps1",
     "mlclaw.sh",
     "LICENSE",

@@ -75,7 +75,6 @@ describe("generated Space repository", () => {
       "assets/hf-tooling/skills/hf-cli/SKILL.md",
       "runtime/entrypoint.sh",
       "runtime/hf-state-sync.js",
-      "runtime/hf-broker.scope.json",
       "runtime/hf-tooling-seed.js",
       "runtime/mlclaw-space-runtime.js",
       "runtime/openclaw.default.json",
@@ -119,24 +118,20 @@ describe("generated Space repository", () => {
     expect(dockerfile).toContain(
       "ENV MLCLAW_BROKERKIT_PLUGIN_PATH=/opt/openclaw-plugins/node_modules/openclaw-brokerkit",
     );
-    expect(dockerfile).toContain("COPY runtime/hf-broker.scope.json /app/hf-broker.scope.json");
+    expect(dockerfile).toContain("/out/hf-broker policy render");
+    expect(dockerfile).toContain("--preset request-all-agent-operations");
+    expect(dockerfile).toContain("--client default");
+    expect(dockerfile).toContain("/out/hf-broker doctor policy");
+    expect(dockerfile).toContain("COPY --from=hf-broker-build /out/hf-broker.scope.json /app/hf-broker.scope.json");
+    expect(dockerfile).toContain(
+      "COPY --from=hf-broker-build /out/hf-broker.policy-profile.json /app/hf-broker.policy-profile.json",
+    );
+    expect(dockerfile).toContain(
+      "COPY --from=hf-broker-build /out/hf-broker.policy-manifest.json /app/hf-broker.policy-manifest.json",
+    );
     expect(dockerfile).toContain("base64 -d /app/assets/hf-logo.png.base64 > /app/assets/hf-logo.png");
     const encodedHfLogo = await fs.readFile(path.join(outDir, "assets/hf-logo.png.base64"), "utf8");
     expect([...Buffer.from(encodedHfLogo.trim(), "base64").subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
-    const brokerScope = JSON.parse(await fs.readFile(path.join(outDir, "runtime/hf-broker.scope.json"), "utf8")) as {
-      rules: Array<{
-        effect: string;
-        operations: string[];
-        grant_policy?: { mode?: string; default_max_uses?: number; max_uses?: number };
-      }>;
-    };
-    expect(brokerScope.rules.some((rule) => rule.operations.includes("inference.models.list"))).toBe(true);
-    expect(brokerScope.rules.some((rule) => rule.operations.includes("inference.chat.complete"))).toBe(true);
-    const deleteRule = brokerScope.rules.find((rule) => rule.operations.includes("repo.delete"));
-    expect(deleteRule).toMatchObject({
-      effect: "request",
-      grant_policy: { mode: "execution", default_max_uses: 1, max_uses: 1 },
-    });
     expect(dockerfile).toContain("COPY --chown=node:node runtime/hf-state-sync.js /app/hf-state-sync.js");
     expect(dockerfile).toContain("COPY --chown=node:node runtime/hf-tooling-seed.js /app/hf-tooling-seed.js");
     expect(dockerfile).toContain('"hf-discover==1.3.7"');
