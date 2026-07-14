@@ -2040,6 +2040,11 @@ describe("ML Claw Space runtime", () => {
           enabled: false,
           toolFilter: { include: ["hf_operation_get"] },
           supportsParallelToolCalls: true,
+          codex: {
+            agents: [" main ", "reviewer"],
+            defaultToolsApprovalMode: "prompt",
+            unexpected: "stale",
+          },
         },
         custom: { command: "/usr/local/bin/custom", enabled: true },
       },
@@ -2061,6 +2066,10 @@ describe("ML Claw Space runtime", () => {
       enabled: false,
       toolFilter: { include: ["hf_operation_get"] },
       supportsParallelToolCalls: true,
+      codex: {
+        agents: ["main", "reviewer"],
+        defaultToolsApprovalMode: "prompt",
+      },
     });
     expect(rewritten.mcp.servers.custom).toEqual({ command: "/usr/local/bin/custom", enabled: true });
   });

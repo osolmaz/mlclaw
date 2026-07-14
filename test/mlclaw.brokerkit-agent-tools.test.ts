@@ -12,7 +12,7 @@ afterEach(async () => {
 describe.runIf(brokerBinary)("pinned BrokerKit agent tools", () => {
   it("advertises bounded transcript-safe submission and recovery schemas", async () => {
     const response = await callMcp("http://127.0.0.1:1", "tools/list");
-    const tools = response.result.tools as McpTool[];
+    const tools = parseMcpTools(response.result.tools);
     const byName = new Map(tools.map((tool) => [tool.name, tool]));
 
     for (const name of ["hf_operation_get", "hf_operation_wait", "hf_operation_list"]) {
@@ -37,13 +37,13 @@ describe.runIf(brokerBinary)("pinned BrokerKit agent tools", () => {
   it("submits, replays, conflicts, and recovers operations without transcript corruption", async () => {
     const backend = await startAgentBackend();
     cleanups.push(backend.close);
-    const first = await submitRepo(backend.url, "alpha");
-    const second = await submitRepo(backend.url, "beta");
+    const first = operationResult(await submitRepo(backend.url, "alpha"));
+    const second = operationResult(await submitRepo(backend.url, "beta"));
     expect(first.id).not.toBe(second.id);
     expect(first.request_id).not.toBe(second.request_id);
 
-    const replayed = await submitRepo(backend.url, "gamma", "exact-retry");
-    const replay = await submitRepo(backend.url, "gamma", "exact-retry");
+    const replayed = operationResult(await submitRepo(backend.url, "gamma", "exact-retry"));
+    const replay = operationResult(await submitRepo(backend.url, "gamma", "exact-retry"));
     expect(replay).toEqual(replayed);
 
     const conflict = await submitRepo(backend.url, "different", "exact-retry", true);
@@ -53,26 +53,25 @@ describe.runIf(brokerBinary)("pinned BrokerKit agent tools", () => {
       request_id: first.request_id,
       limit: 1,
     });
-    expect(recovered.operations).toHaveLength(1);
-    expect(recovered.operations[0]).toMatchObject({ id: first.id, request_id: first.request_id });
+    const recoveredOperations = arrayField(recovered, "operations");
+    expect(recoveredOperations).toHaveLength(1);
+    expect(recoveredOperations[0]).toMatchObject({ id: first.id, request_id: first.request_id });
 
-    const transcript = JSON.parse(JSON.stringify({ role: "tool", content: [first, second, replayed, conflict] }));
-    expect(transcript.content.map((value: { request_id?: string }) => value.request_id).filter(Boolean)).toEqual([
-      first.request_id,
-      second.request_id,
-      replayed.request_id,
-    ]);
+    const transcript: unknown = JSON.parse(
+      JSON.stringify({ role: "tool", content: [first, second, replayed, conflict] }),
+    );
+    const transcriptContent = arrayField(jsonObject(transcript, "transcript"), "content");
+    expect(
+      transcriptContent
+        .map((value) => optionalStringField(jsonObject(value, "transcript content"), "request_id"))
+        .filter(Boolean),
+    ).toEqual([first.request_id, second.request_id, replayed.request_id]);
     expect(JSON.stringify(transcript)).not.toMatch(/\*\*\*|…|agent-secret|authorization/iu);
   });
 });
 
-async function submitRepo(
-  url: string,
-  name: string,
-  requestId?: string,
-  expectError = false,
-): Promise<Record<string, any>> {
-  const result = await toolResult(
+async function submitRepo(url: string, name: string, requestId?: string, expectError = false): Promise<JsonObject> {
+  return toolResult(
     url,
     "hf_repo_create",
     {
@@ -83,7 +82,6 @@ async function submitRepo(
     },
     expectError,
   );
-  return result;
 }
 
 async function toolResult(
@@ -91,13 +89,13 @@ async function toolResult(
   name: string,
   args: Record<string, unknown>,
   expectError = false,
-): Promise<Record<string, any>> {
+): Promise<JsonObject> {
   const response = await callMcp(url, "tools/call", { name, arguments: args });
   expect(response.result.isError).toBe(expectError);
-  return response.result.structuredContent as Record<string, any>;
+  return jsonObject(response.result.structuredContent, `${name} structured content`);
 }
 
-async function callMcp(url: string, method: string, params?: Record<string, unknown>): Promise<Record<string, any>> {
+async function callMcp(url: string, method: string, params?: Record<string, unknown>): Promise<McpResponse> {
   if (!brokerBinary) throw new Error("MLCLAW_HF_BROKER_BINARY is required");
   const child = spawn(brokerBinary, ["mcp"], {
     env: {
@@ -117,7 +115,9 @@ async function callMcp(url: string, method: string, params?: Record<string, unkn
     child.once("close", resolve);
   });
   if (exitCode !== 0) throw new Error(`hf-broker mcp exited ${String(exitCode)}: ${stderr}`);
-  return JSON.parse(stdout.trim()) as Record<string, any>;
+  const parsed: unknown = JSON.parse(stdout.trim());
+  const response = jsonObject(parsed, "MCP response");
+  return { result: jsonObject(response.result, "MCP result") };
 }
 
 async function startAgentBackend(): Promise<{
@@ -214,17 +214,81 @@ async function readBody(request: http.IncomingMessage): Promise<string> {
 }
 
 function schemaProperties(byName: Map<string, McpTool>, toolName: string, field: string): Record<string, unknown> {
-  const schema = byName.get(toolName)?.inputSchema.properties[field] as { properties?: Record<string, unknown> };
-  return schema?.properties ?? {};
+  const schema = objectValue(byName.get(toolName)?.inputSchema.properties[field]);
+  return objectValue(schema?.properties) ?? {};
+}
+
+function parseMcpTools(value: unknown): McpTool[] {
+  if (!Array.isArray(value)) throw new Error("MCP tools must be an array");
+  return value.map((candidate) => {
+    const tool = jsonObject(candidate, "MCP tool");
+    const inputSchema = jsonObject(tool.inputSchema, "MCP tool input schema");
+    const required = inputSchema.required;
+    if (required !== undefined && (!Array.isArray(required) || !required.every((field) => typeof field === "string"))) {
+      throw new Error("MCP tool required fields must be strings");
+    }
+    return {
+      name: stringField(tool, "name"),
+      inputSchema: {
+        properties: jsonObject(inputSchema.properties, "MCP tool properties"),
+        ...(required ? { required } : {}),
+      },
+    };
+  });
+}
+
+function jsonObject(value: unknown, label: string): JsonObject {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object`);
+  return value as JsonObject;
+}
+
+function objectValue(value: unknown): JsonObject | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : undefined;
+}
+
+function arrayField(value: JsonObject, field: string): unknown[] {
+  const result = value[field];
+  if (!Array.isArray(result)) throw new Error(`${field} must be an array`);
+  return result;
+}
+
+function stringField(value: JsonObject, field: string): string {
+  const result = value[field];
+  if (typeof result !== "string" || !result) throw new Error(`${field} must be a non-empty string`);
+  return result;
+}
+
+function optionalStringField(value: JsonObject, field: string): string | undefined {
+  const result = value[field];
+  return typeof result === "string" ? result : undefined;
+}
+
+function operationResult(value: JsonObject): AgentToolResult {
+  return {
+    ...value,
+    id: stringField(value, "id"),
+    request_id: stringField(value, "request_id"),
+  };
 }
 
 interface McpTool {
   name: string;
   inputSchema: {
-    properties: Record<string, any>;
+    properties: Record<string, unknown>;
     required?: string[];
   };
 }
+
+interface McpResponse {
+  result: JsonObject;
+}
+
+type JsonObject = Record<string, unknown>;
+
+type AgentToolResult = JsonObject & {
+  id: string;
+  request_id: string;
+};
 
 interface AgentSubmission {
   idempotency_key: string;

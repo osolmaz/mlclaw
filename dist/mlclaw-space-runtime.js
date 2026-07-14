@@ -8580,10 +8580,31 @@ function configureBrokerMcpServer(openclawConfig, config2) {
   };
 }
 function preservedBrokerMcpFields(existing) {
+  const codex = preservedBrokerCodexConfig(objectValue2(existing?.codex));
   return {
     ...existing?.toolFilter && typeof existing.toolFilter === "object" ? { toolFilter: existing.toolFilter } : {},
-    ...typeof existing?.supportsParallelToolCalls === "boolean" ? { supportsParallelToolCalls: existing.supportsParallelToolCalls } : {}
+    ...typeof existing?.supportsParallelToolCalls === "boolean" ? { supportsParallelToolCalls: existing.supportsParallelToolCalls } : {},
+    ...codex ? { codex } : {}
   };
+}
+function preservedBrokerCodexConfig(existing) {
+  const agents = brokerAgentScope(existing?.agents);
+  const defaultToolsApprovalMode = brokerApprovalMode(existing?.defaultToolsApprovalMode);
+  const nativeApprovalMode = brokerApprovalMode(existing?.default_tools_approval_mode);
+  const preserved = {
+    ...agents ? { agents } : {},
+    ...defaultToolsApprovalMode ? { defaultToolsApprovalMode } : {},
+    ...nativeApprovalMode ? { default_tools_approval_mode: nativeApprovalMode } : {}
+  };
+  return Object.keys(preserved).length > 0 ? preserved : void 0;
+}
+function brokerAgentScope(value) {
+  if (!Array.isArray(value)) return void 0;
+  const agents = value.filter((agent) => typeof agent === "string" && /^[a-z0-9][a-z0-9_-]{0,63}$/iu.test(agent.trim())).map((agent) => agent.trim());
+  return agents.length > 0 ? agents : void 0;
+}
+function brokerApprovalMode(value) {
+  return value === "auto" || value === "prompt" || value === "approve" ? value : void 0;
 }
 function configureBrokerKitPlugin(openclawConfig, config2) {
   const plugins = object(openclawConfig, "plugins");
