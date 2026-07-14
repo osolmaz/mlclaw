@@ -2,7 +2,7 @@
 
 Date: 2026-07-14
 
-Status: implemented; live `osolmaz/mlclaw-test` validation remains
+Status: complete
 
 ## Objective
 
@@ -309,6 +309,33 @@ Deploy only to `osolmaz/mlclaw-test` after both repositories are green.
 
 Delete or deny disposable pending requests and remove disposable Hub resources
 after verification.
+
+### Live validation result
+
+Completed on 2026-07-15 against `osolmaz/mlclaw-test` with MLClaw commit
+`9b50892092ef9dcbd9cf7a8122a8b7f6a7732166` and BrokerKit commit
+`f40b902e6c37544bc001f8ad39ca818263f608ff`.
+
+- A fresh private dataset request returned durable operation and request IDs,
+  appeared in the delegated approval UI without a refresh, was approved in the
+  top-level decision view, and completed successfully.
+- Operation get returned the terminal provider result. Exact request replay
+  returned the original operation, while conflicting request-ID reuse returned
+  `request_id_conflict` with the existing operation ID and state.
+- A second request remained pending across two 25-second operation waits and
+  was recoverable by request ID through operation list.
+- After a Space restart and bucket restore, both the terminal and pending
+  operation retained their exact IDs and states.
+- Space variable and secret operations preserved `variable_name` and
+  `secret_name`. A model-generated sealed value was unavailable on the next
+  model turn, confirming transcript replay redaction, while the synthetic
+  variable and secret names reached the Hub.
+- The approval inbox returned to zero pending requests. All disposable dataset
+  and Space repositories were deleted, including checks that malformed and
+  conflicting test targets were never created.
+- `mlclaw doctor osolmaz/mlclaw-test` reported the Space running with healthy
+  post-restore snapshots. Its only finding was the expected bundled-runtime
+  notice for this unreleased exact-commit validation deployment.
 
 ## Required Checks
 
