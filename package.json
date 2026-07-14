@@ -1,10 +1,10 @@
 {
   "name": "mlclaw",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "license": "MIT",
   "config": {
     "openclawVersion": "2026.7.1-beta.5",
-    "brokerkitVersion": "a2adf6e626bbd509605bb7c72a7f3a8b1c00f045",
+    "brokerkitVersion": "792a0b3be3753e7c8f957c2a69d91d4faa5fc46f",
     "brokerkitPluginVersion": "0.1.0",
     "runtimeImageRepository": "ghcr.io/osolmaz/mlclaw"
   },

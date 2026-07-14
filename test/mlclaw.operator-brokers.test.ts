@@ -30,7 +30,7 @@ function approval(id: string, status: string, revision: number) {
       title: "Update repository",
       facts: [{ label: "Repository", value: "osolmaz/example" }],
     },
-    allowed_actions: status === "pending" ? ["approve", "deny", "cancel"] : ["revoke"],
+    allowed_actions: status === "pending" ? ["approve", "deny"] : ["revoke"],
     approval_bounds: { max_duration_seconds: 300, max_uses: 1 },
   };
 }
@@ -113,6 +113,36 @@ describe("Brokerkit operator backends", () => {
     });
     await expect(client.get(" request/one ")).resolves.toMatchObject({ id: " request/one " });
     expect(requestedUrl).toBe("http://broker.example/api/operator/v1/requests/%20request%2Fone%20");
+  });
+
+  it("preserves unlimited use limits in Operator V1 requests and decisions", async () => {
+    let decisionBody: unknown;
+    const unlimited = {
+      ...approval("grant-1", "pending", 1),
+      requested_max_uses: null,
+      approval_bounds: { max_duration_seconds: 300, max_uses: null },
+    };
+    const client = new BrokerOperatorClient({
+      id: "hf-broker",
+      label: "Hugging Face",
+      baseUrl: "http://broker.example",
+      token: "operator-secret",
+      fetch: async (_input, init) => {
+        decisionBody = JSON.parse(String(init?.body));
+        return Response.json({ ...unlimited, status: "active", revision: 2 });
+      },
+    });
+
+    await expect(
+      client.decide("grant-1", "approve", {
+        expectedRevision: 1,
+        idempotencyKey: "decision-unlimited",
+        onBehalfOf: "mlclaw:alice",
+        durationSeconds: 300,
+        maxUses: null,
+      }),
+    ).resolves.toMatchObject({ requested_max_uses: null, approval_bounds: { max_uses: null } });
+    expect(decisionBody).toMatchObject({ constraints: { duration_seconds: 300, max_uses: null } });
   });
 
   it("forwards durable event cursors and maps only bounded safe errors", async () => {

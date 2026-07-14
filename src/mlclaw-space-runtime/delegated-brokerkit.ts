@@ -15,7 +15,7 @@ const MAX_PAGES_PER_SOURCE = 32;
 const MAX_HANDLES = 4_096;
 const SOURCE_DEADLINE_MS = 15_000;
 
-export type DelegatedAction = "approve" | "deny" | "cancel" | "revoke";
+export type DelegatedAction = "approve" | "deny" | "revoke";
 export type DelegatedAccess = "read" | "decide";
 
 export type DelegatedSourceHealth = OperatorBrokerSummary & {
@@ -110,12 +110,12 @@ export class DelegatedBrokerKit {
     };
   }
 
-  authorize(header: string | undefined): string | undefined {
-    return this.authorizeSession(header)?.actor;
+  authorize(token: string | undefined): string | undefined {
+    return this.authorizeSession(token)?.actor;
   }
 
-  authorizeSession(header: string | undefined): DelegatedSessionIdentity | undefined {
-    const encoded = authenticatedTokenPayload(header, (value) => this.sign(value));
+  authorizeSession(token: string | undefined): DelegatedSessionIdentity | undefined {
+    const encoded = authenticatedTokenPayload(token, (value) => this.sign(value));
     if (!encoded) return undefined;
     const payload = parseTokenPayload(encoded);
     return payload && tokenIsCurrent(payload, this.now())
@@ -214,7 +214,7 @@ export class DelegatedBrokerKit {
     action: DelegatedAction,
     expectedRevision: number,
     actor: string,
-    options: { durationSeconds?: number; maxUses?: number } = {},
+    options: { durationSeconds?: number; maxUses?: number | null } = {},
   ): Promise<DelegatedRequest> {
     const record = this.resolveHandle(handle);
     const source = this.registry.get(record.sourceId);
@@ -454,21 +454,21 @@ function decisionOptions(
   action: DelegatedAction,
   expectedRevision: number,
   actor: string,
-  options: { durationSeconds?: number; maxUses?: number },
+  options: { durationSeconds?: number; maxUses?: number | null },
 ): BrokerDecision {
   return {
     expectedRevision,
     idempotencyKey: decisionKey(record, action, actor),
     onBehalfOf: `mlclaw:${actor}`,
     ...(options.durationSeconds ? { durationSeconds: options.durationSeconds } : {}),
-    ...(options.maxUses ? { maxUses: options.maxUses } : {}),
+    ...(options.maxUses !== undefined ? { maxUses: options.maxUses } : {}),
   };
 }
 
 function decisionWithinBounds(
   action: DelegatedAction,
   request: BrokerApproval,
-  options: { durationSeconds?: number; maxUses?: number },
+  options: { durationSeconds?: number; maxUses?: number | null },
 ): boolean {
   if (options.durationSeconds === undefined && options.maxUses === undefined) return true;
   const bounds = request.approval_bounds;
@@ -477,9 +477,14 @@ function decisionWithinBounds(
     bounds &&
     options.durationSeconds !== undefined &&
     options.durationSeconds <= bounds.max_duration_seconds &&
-    options.maxUses !== undefined &&
-    options.maxUses <= bounds.max_uses,
+    useLimitWithinBounds(options.maxUses, bounds.max_uses),
   );
+}
+
+function useLimitWithinBounds(requested: number | null | undefined, maximum: number | null): boolean {
+  if (requested === undefined) return false;
+  if (requested === null) return maximum === null;
+  return maximum === null || requested <= maximum;
 }
 
 function assertDecisionAllowed(
@@ -487,7 +492,7 @@ function assertDecisionAllowed(
   record: HandleRecord,
   action: DelegatedAction,
   expectedRevision: number,
-  options: { durationSeconds?: number; maxUses?: number },
+  options: { durationSeconds?: number; maxUses?: number | null },
 ): void {
   if (request.revision !== record.revision || request.revision !== expectedRevision) {
     throw delegatedError("revision_stale");
@@ -497,10 +502,8 @@ function assertDecisionAllowed(
   }
 }
 
-function authenticatedTokenPayload(header: string | undefined, sign: (value: string) => string): string | undefined {
-  if (!header?.startsWith("Bearer ")) return undefined;
-  const token = header.slice("Bearer ".length);
-  if (token.length > 4_096) return undefined;
+function authenticatedTokenPayload(token: string | undefined, sign: (value: string) => string): string | undefined {
+  if (!token || token.length > 4_096 || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u.test(token)) return undefined;
   const [encoded, signature, extra] = token.split(".");
   return encoded && signature && extra === undefined && safeEqual(signature, sign(encoded)) ? encoded : undefined;
 }

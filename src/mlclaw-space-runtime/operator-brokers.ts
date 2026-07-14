@@ -33,7 +33,7 @@ export type BrokerApproval = {
   pending_expires_at?: string;
   active_expires_at?: string;
   requested_duration_seconds: number;
-  requested_max_uses: number;
+  requested_max_uses: number | null;
   granted_max_uses: number | null;
   used_count: number;
   request_reason?: string;
@@ -47,8 +47,8 @@ export type BrokerApproval = {
     facts?: BrokerDisplayField[];
   };
   presentation_unavailable?: boolean;
-  allowed_actions: Array<"approve" | "deny" | "cancel" | "revoke">;
-  approval_bounds?: { max_duration_seconds: number; max_uses: number };
+  allowed_actions: Array<"approve" | "deny" | "revoke">;
+  approval_bounds?: { max_duration_seconds: number; max_uses: number | null };
 };
 
 export type BrokerApprovalPage = {
@@ -62,7 +62,7 @@ export type BrokerDecision = {
   idempotencyKey: string;
   onBehalfOf: string;
   durationSeconds?: number;
-  maxUses?: number;
+  maxUses?: number | null;
 };
 
 export type BrokerOperatorClientOptions = OperatorBrokerConfig & {
@@ -88,7 +88,7 @@ const approvalSchema = z
     pending_expires_at: z.string().datetime({ offset: true }).optional(),
     active_expires_at: z.string().datetime({ offset: true }).optional(),
     requested_duration_seconds: z.number().int().positive().safe(),
-    requested_max_uses: z.number().int().positive().safe(),
+    requested_max_uses: z.number().int().positive().safe().nullable(),
     granted_max_uses: z.number().int().positive().safe().nullable(),
     used_count: z.number().int().nonnegative().safe(),
     request_reason: z.string().max(2_000).optional(),
@@ -104,11 +104,11 @@ const approvalSchema = z
       })
       .strict(),
     presentation_unavailable: z.boolean().optional(),
-    allowed_actions: z.array(z.enum(["approve", "deny", "cancel", "revoke"])).max(4),
+    allowed_actions: z.array(z.enum(["approve", "deny", "revoke"])).max(3),
     approval_bounds: z
       .object({
         max_duration_seconds: z.number().int().positive().safe(),
-        max_uses: z.number().int().positive().safe(),
+        max_uses: z.number().int().positive().safe().nullable(),
       })
       .strict()
       .optional(),
@@ -215,11 +215,7 @@ export class BrokerOperatorClient {
     );
   }
 
-  decide(
-    id: string,
-    action: "approve" | "deny" | "cancel" | "revoke",
-    decision: BrokerDecision,
-  ): Promise<BrokerApproval> {
+  decide(id: string, action: "approve" | "deny" | "revoke", decision: BrokerDecision): Promise<BrokerApproval> {
     return this.request<BrokerApproval>(
       `/api/operator/v1/requests/${approvalId(id)}/${action}`,
       {
@@ -229,11 +225,11 @@ export class BrokerOperatorClient {
           expected_revision: decision.expectedRevision,
           idempotency_key: decision.idempotencyKey,
           on_behalf_of: decision.onBehalfOf,
-          ...(decision.durationSeconds || decision.maxUses
+          ...(decision.durationSeconds !== undefined || decision.maxUses !== undefined
             ? {
                 constraints: {
-                  ...(decision.durationSeconds ? { duration_seconds: decision.durationSeconds } : {}),
-                  ...(decision.maxUses ? { max_uses: decision.maxUses } : {}),
+                  ...(decision.durationSeconds !== undefined ? { duration_seconds: decision.durationSeconds } : {}),
+                  ...(decision.maxUses !== undefined ? { max_uses: decision.maxUses } : {}),
                 },
               }
             : {}),

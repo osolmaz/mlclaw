@@ -44,6 +44,8 @@ import {
 } from "./session.js";
 import { CONTROL_BRANDING_SCRIPT, SERVICE_WORKER_RESET_SCRIPT } from "./shell.js";
 
+const BROKERKIT_SESSION_HEADER = "brokerkit-session";
+
 export type RuntimeControls = {
   openclawRunning(): boolean;
   openAiConfigured(): Promise<boolean>;
@@ -207,7 +209,7 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
     }
   });
 
-  for (const action of ["approve", "deny", "cancel", "revoke"] as const) {
+  for (const action of ["approve", "deny", "revoke"] as const) {
     app.post(`/mlclaw/api/brokerkit/requests/:handle/${action}`, async (c) => {
       const identity = delegatedIdentity(c, delegatedBrokerKit);
       if (!identity || identity.access !== "decide") return delegatedErrorResponse(c, "not_authorized", 401);
@@ -218,7 +220,7 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
       const constraints = recordValue(body.constraints);
       const expectedRevision = positiveJsonInteger(body.expectedRevision);
       const durationSeconds = optionalPositiveJsonInteger(constraints?.durationSeconds);
-      const maxUses = optionalPositiveJsonInteger(constraints?.maxUses);
+      const maxUses = optionalUseLimitJsonInteger(constraints?.maxUses);
       if (
         !expectedRevision ||
         (body.constraints !== undefined &&
@@ -237,7 +239,7 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
           c,
           await delegatedBrokerKit.decide(c.req.param("handle"), action, expectedRevision, identity.actor, {
             ...(typeof durationSeconds === "number" ? { durationSeconds } : {}),
-            ...(typeof maxUses === "number" ? { maxUses } : {}),
+            ...(typeof maxUses === "number" || maxUses === null ? { maxUses } : {}),
           }),
         );
       } catch (error) {
@@ -245,6 +247,8 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
       }
     });
   }
+
+  app.all("/mlclaw/api/brokerkit/*", (c) => delegatedErrorResponse(c, "not_found", 404));
 
   app.post("/mlclaw/api/integrations/huggingface/disconnect", async (c) => {
     const auth = requireAdmin(c, config);
@@ -679,13 +683,13 @@ function delegatedEventQuery(urlValue: string): { cursor: string; waitSeconds: n
 
 function delegatedIdentity(c: Context, delegated: DelegatedBrokerKit): DelegatedSessionIdentity | undefined {
   if (!delegatedOriginAllowed(c)) return undefined;
-  return delegated.authorizeSession(c.req.header("authorization"));
+  return delegated.authorizeSession(c.req.header(BROKERKIT_SESSION_HEADER));
 }
 
 function delegatedPreflight(c: Context): Response {
   if (!delegatedOriginAllowed(c)) return delegatedErrorResponse(c, "not_authorized", 403);
   delegatedHeaders(c);
-  c.header("access-control-allow-headers", "authorization, content-type");
+  c.header("access-control-allow-headers", `${BROKERKIT_SESSION_HEADER}, content-type`);
   c.header("access-control-allow-methods", "GET, POST, OPTIONS");
   c.header("access-control-max-age", "300");
   return c.body(null, 204);
@@ -722,13 +726,24 @@ function delegatedFailure(c: Context, error: unknown): Response {
     const status = error.status === 404 ? 404 : error.status === 409 ? 409 : 502;
     return delegatedErrorResponse(c, code, status);
   }
-  process.stderr.write(`[mlclaw] delegated BrokerKit request failed: ${formatError(error)}\n`);
+  process.stderr.write(
+    `[mlclaw] delegated BrokerKit request failed: route=${delegatedRouteLabel(c)} status=502 class=${safeErrorClass(error)}\n`,
+  );
   return delegatedErrorResponse(c, "source_unavailable", 502);
+}
+
+function delegatedRouteLabel(c: Context): string {
+  const pathLabel = c.req.path.replace(/\/requests\/[^/]+/u, "/requests/:handle");
+  return `${c.req.method}:${pathLabel}`;
+}
+
+function safeErrorClass(error: unknown): string {
+  const name = error instanceof Error ? error.name : typeof error;
+  return /^[A-Za-z][A-Za-z0-9]{0,79}$/u.test(name) ? name : "unknown";
 }
 
 function delegatedHeaders(c: Context): void {
   c.header("access-control-allow-origin", "null");
-  c.header("access-control-allow-credentials", "true");
   c.header("cache-control", "no-store");
   c.header("vary", "origin");
   c.header("x-content-type-options", "nosniff");
@@ -929,6 +944,11 @@ function positiveJsonInteger(value: unknown): number {
 function optionalPositiveJsonInteger(value: unknown): number | "invalid" | undefined {
   if (value === undefined) return undefined;
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : "invalid";
+}
+
+function optionalUseLimitJsonInteger(value: unknown): number | null | "invalid" | undefined {
+  if (value === null) return null;
+  return optionalPositiveJsonInteger(value);
 }
 
 function fixedWindowRateLimit(limit: number, windowMs: number): (key: string) => boolean {

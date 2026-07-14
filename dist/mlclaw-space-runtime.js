@@ -4698,7 +4698,7 @@ var approvalSchema = external_exports.object({
   pending_expires_at: external_exports.string().datetime({ offset: true }).optional(),
   active_expires_at: external_exports.string().datetime({ offset: true }).optional(),
   requested_duration_seconds: external_exports.number().int().positive().safe(),
-  requested_max_uses: external_exports.number().int().positive().safe(),
+  requested_max_uses: external_exports.number().int().positive().safe().nullable(),
   granted_max_uses: external_exports.number().int().positive().safe().nullable(),
   used_count: external_exports.number().int().nonnegative().safe(),
   request_reason: external_exports.string().max(2e3).optional(),
@@ -4712,10 +4712,10 @@ var approvalSchema = external_exports.object({
     facts: external_exports.array(displayFieldSchema).max(20).optional()
   }).strict(),
   presentation_unavailable: external_exports.boolean().optional(),
-  allowed_actions: external_exports.array(external_exports.enum(["approve", "deny", "cancel", "revoke"])).max(4),
+  allowed_actions: external_exports.array(external_exports.enum(["approve", "deny", "revoke"])).max(3),
   approval_bounds: external_exports.object({
     max_duration_seconds: external_exports.number().int().positive().safe(),
-    max_uses: external_exports.number().int().positive().safe()
+    max_uses: external_exports.number().int().positive().safe().nullable()
   }).strict().optional()
 }).strict();
 var approvalPageSchema = external_exports.object({
@@ -4808,10 +4808,10 @@ var BrokerOperatorClient = class {
           expected_revision: decision.expectedRevision,
           idempotency_key: decision.idempotencyKey,
           on_behalf_of: decision.onBehalfOf,
-          ...decision.durationSeconds || decision.maxUses ? {
+          ...decision.durationSeconds !== void 0 || decision.maxUses !== void 0 ? {
             constraints: {
-              ...decision.durationSeconds ? { duration_seconds: decision.durationSeconds } : {},
-              ...decision.maxUses ? { max_uses: decision.maxUses } : {}
+              ...decision.durationSeconds !== void 0 ? { duration_seconds: decision.durationSeconds } : {},
+              ...decision.maxUses !== void 0 ? { max_uses: decision.maxUses } : {}
             }
           } : {}
         })
@@ -7475,11 +7475,11 @@ var DelegatedBrokerKit = class {
       renewal_transport: "direct"
     };
   }
-  authorize(header) {
-    return this.authorizeSession(header)?.actor;
+  authorize(token) {
+    return this.authorizeSession(token)?.actor;
   }
-  authorizeSession(header) {
-    const encoded = authenticatedTokenPayload(header, (value) => this.sign(value));
+  authorizeSession(token) {
+    const encoded = authenticatedTokenPayload(token, (value) => this.sign(value));
     if (!encoded) return void 0;
     const payload = parseTokenPayload(encoded);
     return payload && tokenIsCurrent(payload, this.now()) ? { actor: payload.subject, sessionId: payload.nonce, access: payload.access } : void 0;
@@ -7750,15 +7750,20 @@ function decisionOptions(record, action, expectedRevision, actor, options) {
     idempotencyKey: decisionKey(record, action, actor),
     onBehalfOf: `mlclaw:${actor}`,
     ...options.durationSeconds ? { durationSeconds: options.durationSeconds } : {},
-    ...options.maxUses ? { maxUses: options.maxUses } : {}
+    ...options.maxUses !== void 0 ? { maxUses: options.maxUses } : {}
   };
 }
 function decisionWithinBounds(action, request, options) {
   if (options.durationSeconds === void 0 && options.maxUses === void 0) return true;
   const bounds = request.approval_bounds;
   return Boolean(
-    action === "approve" && bounds && options.durationSeconds !== void 0 && options.durationSeconds <= bounds.max_duration_seconds && options.maxUses !== void 0 && options.maxUses <= bounds.max_uses
+    action === "approve" && bounds && options.durationSeconds !== void 0 && options.durationSeconds <= bounds.max_duration_seconds && useLimitWithinBounds(options.maxUses, bounds.max_uses)
   );
+}
+function useLimitWithinBounds(requested, maximum) {
+  if (requested === void 0) return false;
+  if (requested === null) return maximum === null;
+  return maximum === null || requested <= maximum;
 }
 function assertDecisionAllowed(request, record, action, expectedRevision, options) {
   if (request.revision !== record.revision || request.revision !== expectedRevision) {
@@ -7768,10 +7773,8 @@ function assertDecisionAllowed(request, record, action, expectedRevision, option
     throw delegatedError("action_not_allowed");
   }
 }
-function authenticatedTokenPayload(header, sign3) {
-  if (!header?.startsWith("Bearer ")) return void 0;
-  const token = header.slice("Bearer ".length);
-  if (token.length > 4096) return void 0;
+function authenticatedTokenPayload(token, sign3) {
+  if (!token || token.length > 4096 || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u.test(token)) return void 0;
   const [encoded, signature, extra] = token.split(".");
   return encoded && signature && extra === void 0 && safeEqual(signature, sign3(encoded)) ? encoded : void 0;
 }
@@ -9510,6 +9513,7 @@ function escapeHtml2(value) {
 }
 
 // src/mlclaw-space-runtime/app.ts
+var BROKERKIT_SESSION_HEADER = "brokerkit-session";
 function createSpaceRuntimeApp(config2, controls) {
   const app = new Hono2();
   const operatorBrokers = new OperatorBrokerRegistry(config2.operatorBrokers);
@@ -9649,7 +9653,7 @@ function createSpaceRuntimeApp(config2, controls) {
       return delegatedFailure(c, error);
     }
   });
-  for (const action of ["approve", "deny", "cancel", "revoke"]) {
+  for (const action of ["approve", "deny", "revoke"]) {
     app.post(`/mlclaw/api/brokerkit/requests/:handle/${action}`, async (c) => {
       const identity = delegatedIdentity(c, delegatedBrokerKit);
       if (!identity || identity.access !== "decide") return delegatedErrorResponse(c, "not_authorized", 401);
@@ -9660,7 +9664,7 @@ function createSpaceRuntimeApp(config2, controls) {
       const constraints = recordValue(body.constraints);
       const expectedRevision = positiveJsonInteger(body.expectedRevision);
       const durationSeconds = optionalPositiveJsonInteger(constraints?.durationSeconds);
-      const maxUses = optionalPositiveJsonInteger(constraints?.maxUses);
+      const maxUses = optionalUseLimitJsonInteger(constraints?.maxUses);
       if (!expectedRevision || body.constraints !== void 0 && (!constraints || Object.keys(constraints).some((key) => !["durationSeconds", "maxUses"].includes(key)) || durationSeconds === void 0 || maxUses === void 0) || durationSeconds === "invalid" || maxUses === "invalid" || action !== "approve" && (durationSeconds !== void 0 || maxUses !== void 0)) {
         return delegatedErrorResponse(c, "invalid_input", 400);
       }
@@ -9669,7 +9673,7 @@ function createSpaceRuntimeApp(config2, controls) {
           c,
           await delegatedBrokerKit.decide(c.req.param("handle"), action, expectedRevision, identity.actor, {
             ...typeof durationSeconds === "number" ? { durationSeconds } : {},
-            ...typeof maxUses === "number" ? { maxUses } : {}
+            ...typeof maxUses === "number" || maxUses === null ? { maxUses } : {}
           })
         );
       } catch (error) {
@@ -9677,6 +9681,7 @@ function createSpaceRuntimeApp(config2, controls) {
       }
     });
   }
+  app.all("/mlclaw/api/brokerkit/*", (c) => delegatedErrorResponse(c, "not_found", 404));
   app.post("/mlclaw/api/integrations/huggingface/disconnect", async (c) => {
     const auth = requireAdmin(c, config2);
     if (auth instanceof Response) {
@@ -10052,12 +10057,12 @@ function delegatedEventQuery(urlValue) {
 }
 function delegatedIdentity(c, delegated) {
   if (!delegatedOriginAllowed(c)) return void 0;
-  return delegated.authorizeSession(c.req.header("authorization"));
+  return delegated.authorizeSession(c.req.header(BROKERKIT_SESSION_HEADER));
 }
 function delegatedPreflight(c) {
   if (!delegatedOriginAllowed(c)) return delegatedErrorResponse(c, "not_authorized", 403);
   delegatedHeaders(c);
-  c.header("access-control-allow-headers", "authorization, content-type");
+  c.header("access-control-allow-headers", `${BROKERKIT_SESSION_HEADER}, content-type`);
   c.header("access-control-allow-methods", "GET, POST, OPTIONS");
   c.header("access-control-max-age", "300");
   return c.body(null, 204);
@@ -10080,13 +10085,22 @@ function delegatedFailure(c, error) {
     const status = error.status === 404 ? 404 : error.status === 409 ? 409 : 502;
     return delegatedErrorResponse(c, code, status);
   }
-  process.stderr.write(`[mlclaw] delegated BrokerKit request failed: ${formatError(error)}
-`);
+  process.stderr.write(
+    `[mlclaw] delegated BrokerKit request failed: route=${delegatedRouteLabel(c)} status=502 class=${safeErrorClass(error)}
+`
+  );
   return delegatedErrorResponse(c, "source_unavailable", 502);
+}
+function delegatedRouteLabel(c) {
+  const pathLabel = c.req.path.replace(/\/requests\/[^/]+/u, "/requests/:handle");
+  return `${c.req.method}:${pathLabel}`;
+}
+function safeErrorClass(error) {
+  const name = error instanceof Error ? error.name : typeof error;
+  return /^[A-Za-z][A-Za-z0-9]{0,79}$/u.test(name) ? name : "unknown";
 }
 function delegatedHeaders(c) {
   c.header("access-control-allow-origin", "null");
-  c.header("access-control-allow-credentials", "true");
   c.header("cache-control", "no-store");
   c.header("vary", "origin");
   c.header("x-content-type-options", "nosniff");
@@ -10262,6 +10276,10 @@ function positiveJsonInteger(value) {
 function optionalPositiveJsonInteger(value) {
   if (value === void 0) return void 0;
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : "invalid";
+}
+function optionalUseLimitJsonInteger(value) {
+  if (value === null) return null;
+  return optionalPositiveJsonInteger(value);
 }
 function fixedWindowRateLimit(limit, windowMs) {
   const windows = /* @__PURE__ */ new Map();

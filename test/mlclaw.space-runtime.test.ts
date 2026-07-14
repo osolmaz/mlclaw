@@ -39,7 +39,7 @@ function brokerApproval(
       title: "Update repository",
       facts: [{ label: "Repository", value: "osolmaz/example" }],
     },
-    allowed_actions: status === "pending" ? ["approve", "deny", "cancel"] : ["revoke"],
+    allowed_actions: status === "pending" ? ["approve", "deny"] : ["revoke"],
     approval_bounds: approvalBounds,
   };
 }
@@ -246,8 +246,12 @@ describe("ML Claw Space runtime", () => {
       () => closeServer(server),
       () => runtime.stop(),
     );
-    const base = `http://127.0.0.1:${config.port}/mlclaw/api/brokerkit`;
-    const ui = `http://127.0.0.1:${config.port}/plugins/brokerkit/ui/`;
+    const hostEdgePort = await freePort();
+    const hostEdge = identityAwareHostEdge(config.port);
+    await listen(hostEdge, hostEdgePort);
+    cleanups.push(() => closeServer(hostEdge));
+    const base = `http://127.0.0.1:${hostEdgePort}/mlclaw/api/brokerkit`;
+    const ui = `http://127.0.0.1:${hostEdgePort}/plugins/brokerkit/ui/`;
     const iframeHeaders = { "sec-fetch-dest": "iframe" };
     const anonymous = await fetch(ui, { headers: iframeHeaders });
     const member = await fetch(ui, {
@@ -307,12 +311,39 @@ describe("ML Claw Space runtime", () => {
       headers: { origin: "null", cookie: sessionCookie(config, "alice") },
     });
     expect(cookieOnly.status).toBe(401);
+    const delegatedAuthorization = await fetch(`${base}/snapshot`, {
+      headers: { origin: "null", authorization: `Bearer ${sessionBody.token}` },
+    });
+    expect(delegatedAuthorization.status).toBe(404);
+    const prefixedSession = await fetch(`${base}/snapshot`, {
+      headers: { origin: "null", "brokerkit-session": `Bearer ${sessionBody.token}` },
+    });
+    expect(prefixedSession.status).toBe(401);
+    const combinedSession = await fetch(`${base}/snapshot`, {
+      headers: { origin: "null", "brokerkit-session": `${sessionBody.token}, ${sessionBody.token}` },
+    });
+    expect(combinedSession.status).toBe(401);
+    const preflight = await fetch(`${base}/snapshot`, {
+      method: "OPTIONS",
+      headers: {
+        origin: "null",
+        "access-control-request-method": "GET",
+        "access-control-request-headers": "brokerkit-session, content-type",
+      },
+    });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get("access-control-allow-origin")).toBe("null");
+    expect(preflight.headers.get("access-control-allow-headers")).toBe("brokerkit-session, content-type");
+    expect(preflight.headers.get("access-control-allow-methods")).toBe("GET, POST, OPTIONS");
+    expect(preflight.headers.get("access-control-allow-credentials")).toBeNull();
     const authorizedHeaders = {
       origin: "null",
-      authorization: `Bearer ${sessionBody.token}`,
+      authorization: "Bearer simulated-host-credential",
+      "brokerkit-session": sessionBody.token,
     };
     const snapshot = await fetch(`${base}/snapshot`, { headers: authorizedHeaders });
     expect(snapshot.status).toBe(200);
+    expect(snapshot.headers.get("access-control-allow-credentials")).toBeNull();
     const snapshotBody = (await snapshot.json()) as {
       api_version: string;
       cursor: string;
@@ -325,7 +356,7 @@ describe("ML Claw Space runtime", () => {
     expect(snapshotBody.requests[0]?.handle).toMatch(/^[A-Za-z0-9_-]{24}$/u);
     const popoverHeaders = {
       origin: "null",
-      authorization: `Bearer ${popoverSessionBody.token}`,
+      "brokerkit-session": popoverSessionBody.token,
     };
     const popoverSnapshot = await fetch(`${base}/snapshot`, { headers: popoverHeaders });
     expect(popoverSnapshot.status).toBe(200);
@@ -372,7 +403,7 @@ describe("ML Claw Space runtime", () => {
       token: string;
     };
     const independentTab = await fetch(`${base}/snapshot`, {
-      headers: { origin: "null", authorization: `Bearer ${anotherSessionBody.token}` },
+      headers: { origin: "null", "brokerkit-session": anotherSessionBody.token },
     });
     expect(independentTab.status).toBe(200);
     for (const requestCount of [12, 12, 12, 10]) {
@@ -387,19 +418,25 @@ describe("ML Claw Space runtime", () => {
       const responses = await Promise.all(
         Array.from({ length: requestCount }, () =>
           fetch(`${base}/snapshot`, {
-            headers: { origin: "null", authorization: `Bearer ${actorBody.token}` },
+            headers: { origin: "null", "brokerkit-session": actorBody.token },
           }),
         ),
       );
       expect(responses.every((response) => response.status === 200)).toBe(true);
     }
     const actorLimited = await fetch(`${base}/snapshot`, {
-      headers: { origin: "null", authorization: `Bearer ${renewedSessionBody.token}` },
+      headers: { origin: "null", "brokerkit-session": renewedSessionBody.token },
     });
     expect(actorLimited.status).toBe(429);
     brokerRequests.length = 0;
 
     const requestUrl = `${base}/requests/${snapshotBody.requests[0]?.handle}/approve`;
+    const removedCancel = await fetch(`${base}/requests/${snapshotBody.requests[0]?.handle}/cancel`, {
+      method: "POST",
+      headers: { ...popoverHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ expectedRevision: 1 }),
+    });
+    expect(removedCancel.status).toBe(404);
     const oversized = await fetch(requestUrl, {
       method: "POST",
       headers: { ...popoverHeaders, "content-type": "application/json" },
@@ -1430,11 +1467,28 @@ describe("ML Claw Space runtime", () => {
     expect(popoverHtml).toContain('name="brokerkit-delegated-session"');
     expect(popoverHtml).not.toContain("brokerkit-delegated-top-level");
     const popoverSession = popoverHtml.match(/name="brokerkit-delegated-session" content="([A-Za-z0-9_-]+)"/u)?.[1];
-    expect(JSON.parse(Buffer.from(popoverSession ?? "", "base64url").toString("utf8"))).toMatchObject({
+    const popoverSessionBody = JSON.parse(Buffer.from(popoverSession ?? "", "base64url").toString("utf8")) as {
+      access: string;
+      token: string;
+    };
+    expect(popoverSessionBody).toMatchObject({
       api_version: "brokerkit.io/delegated-web/v1",
       access: "read",
       renewal_transport: "direct",
     });
+    const readOnlyDecision = await fetch(
+      `http://127.0.0.1:${config.port}/mlclaw/api/brokerkit/requests/opaque/approve`,
+      {
+        method: "POST",
+        headers: {
+          origin: "null",
+          "content-type": "application/json",
+          "brokerkit-session": popoverSessionBody.token,
+        },
+        body: JSON.stringify({ expectedRevision: 1 }),
+      },
+    );
+    expect(readOnlyDecision.status).toBe(401);
     expect(popover.headers.get("content-security-policy")).toContain("frame-ancestors 'self'");
     expect(popover.headers.get("content-security-policy")).toContain("sandbox allow-scripts");
     expect(popover.headers.get("x-frame-options")).toBe("SAMEORIGIN");
@@ -2240,6 +2294,34 @@ async function listen(server: http.Server, port: number, host = "127.0.0.1"): Pr
 async function closeServer(server: http.Server): Promise<void> {
   await new Promise<void>((resolve) => {
     server.close(() => resolve());
+  });
+}
+
+function identityAwareHostEdge(upstreamPort: number): http.Server {
+  return http.createServer((request, response) => {
+    if (request.headers.authorization?.startsWith("Bearer eyJ")) {
+      response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+      response.end("not found\n");
+      return;
+    }
+    const upstream = http.request(
+      {
+        hostname: "127.0.0.1",
+        port: upstreamPort,
+        path: request.url,
+        method: request.method,
+        headers: request.headers,
+      },
+      (upstreamResponse) => {
+        response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
+        upstreamResponse.pipe(response);
+      },
+    );
+    upstream.on("error", () => {
+      if (!response.headersSent) response.writeHead(502);
+      response.end();
+    });
+    request.pipe(upstream);
   });
 }
 

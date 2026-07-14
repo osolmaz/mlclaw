@@ -101,7 +101,7 @@ its HTTP listener. It does not reload either file during requests. A restart is
 required after changing broker entries or rotating tokens.
 
 The backend discovers and validates each broker's BrokerKit Operator V1 API,
-then exposes only fixed list, detail, approve, deny, cancel, and revoke
+then exposes only fixed list, detail, approve, deny, and revoke
 operations to the packaged OpenClaw plugin UI. Browser actions address
 short-lived opaque handles; canonical broker and request IDs are display and
 audit fields and are never accepted for routing. The browser receives a
@@ -112,13 +112,20 @@ The OpenClaw plugin registers the Gateway tab, but ML Claw intercepts the fixed
 UI path and serves the immutable packaged assets from its trusted HTTP boundary.
 An authenticated administrator can inspect and decide requests directly in the
 Gateway popover. The iframe has an opaque CSP-sandboxed origin and a short-lived
-delegated decision session. It renews that session using its current bearer
-token and never sends ML Claw cookies to the delegated API. The OpenClaw process
+delegated decision session. It renews that session using its current delegated
+session token and never sends ML Claw cookies to the delegated API. The OpenClaw process
 cannot read broker credentials or delegated decision tokens. Because OpenClaw
 controls the surrounding page, deployments that require protection from a
 compromised Gateway frontend should leave
 `MLCLAW_BROKERKIT_POPOVER_DECISIONS` unset. Set it to `true` only when the
 deployment explicitly accepts that tradeoff; the default popover is read-only.
+
+The sandbox sends the raw delegated token only in `BrokerKit-Session`. ML Claw
+does not accept it from `Authorization`, cookies, URLs, or request bodies. This
+keeps standard authorization available to an identity-aware hosting edge and
+avoids collisions with host credentials. Delegated requests require the opaque
+`Origin: null`, permit only `brokerkit-session` and `content-type` during CORS
+preflight, and do not enable credentialed CORS.
 
 The delegated browser API returns a complete
 `brokerkit.io/operator-ui/v1` snapshot with an opaque revision cursor. Request

@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { DelegatedBrokerKit } from "../src/mlclaw-space-runtime/delegated-brokerkit.js";
 import { OperatorBrokerRegistry } from "../src/mlclaw-space-runtime/operator-brokers.js";
@@ -21,7 +22,7 @@ function request(id: string, revision = 1, status = "pending") {
       title: "Update repository",
       facts: [{ label: "Repository", value: "osolmaz/example" }],
     },
-    allowed_actions: status === "pending" ? ["approve", "deny", "cancel"] : ["revoke"],
+    allowed_actions: status === "pending" ? ["approve", "deny"] : ["revoke"],
     approval_bounds: { max_duration_seconds: 300, max_uses: 1 },
   };
 }
@@ -39,20 +40,38 @@ function registry(fetchImpl: typeof fetch): OperatorBrokerRegistry {
 describe("DelegatedBrokerKit", () => {
   it("issues short-lived audience-bound tokens and rejects tampering and expiry", () => {
     let now = new Date("2026-07-12T00:00:00Z");
-    const delegated = new DelegatedBrokerKit(new OperatorBrokerRegistry([]), "s".repeat(48), () => now);
+    const secret = "s".repeat(48);
+    const delegated = new DelegatedBrokerKit(new OperatorBrokerRegistry([]), secret, () => now);
     const session = delegated.issueSession("alice", "decide");
     expect(session.api_version).toBe("brokerkit.io/delegated-web/v1");
     expect(session.access).toBe("decide");
     expect(session.renewal_transport).toBe("direct");
-    expect(delegated.authorize(`Bearer ${session.token}`)).toBe("alice");
-    expect(delegated.authorizeSession(`Bearer ${session.token}`)).toEqual({
+    expect(delegated.authorize(session.token)).toBe("alice");
+    expect(delegated.authorizeSession(session.token)).toEqual({
       actor: "alice",
       sessionId: expect.stringMatching(/^[A-Za-z0-9_-]{22}$/u),
       access: "decide",
     });
-    expect(delegated.authorize(`Bearer ${session.token}x`)).toBeUndefined();
-    now = new Date("2026-07-12T00:05:00Z");
     expect(delegated.authorize(`Bearer ${session.token}`)).toBeUndefined();
+    expect(delegated.authorize(`${session.token}, ${session.token}`)).toBeUndefined();
+    expect(delegated.authorize(` ${session.token}`)).toBeUndefined();
+    expect(delegated.authorize(`${session.token}x`)).toBeUndefined();
+    expect(delegated.authorize("x".repeat(4_097))).toBeUndefined();
+    expect(
+      delegated.authorize(
+        signedSessionToken(secret, {
+          version: 1,
+          audience: "another-service",
+          subject: "alice",
+          issuedAt: Math.floor(now.getTime() / 1_000),
+          expiresAt: Math.floor(now.getTime() / 1_000) + 60,
+          nonce: "nonce",
+          access: "decide",
+        }),
+      ),
+    ).toBeUndefined();
+    now = new Date("2026-07-12T00:05:00Z");
+    expect(delegated.authorize(session.token)).toBeUndefined();
   });
 
   it("isolates source failures and assigns distinct opaque handles", async () => {
@@ -399,3 +418,10 @@ describe("DelegatedBrokerKit", () => {
     ]);
   });
 });
+
+function signedSessionToken(secret: string, payload: Record<string, unknown>): string {
+  const key = createHmac("sha256", secret).update("mlclaw/brokerkit-delegated-web/v1", "utf8").digest();
+  const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  const signature = createHmac("sha256", key).update(encoded, "utf8").digest("base64url");
+  return `${encoded}.${signature}`;
+}
