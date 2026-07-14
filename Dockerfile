@@ -2,7 +2,7 @@ ARG OPENCLAW_VERSION=2026.7.1-beta.5
 ARG OPENCLAW_BASE_IMAGE=ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}
 ARG BROKERKIT_PLUGIN_VERSION=0.1.0
 ARG BROKERKIT_VERSION=a2adf6e626bbd509605bb7c72a7f3a8b1c00f045
-ARG MLCLAW_RUNTIME_IMAGE=ghcr.io/osolmaz/mlclaw:0.3.1-openclaw-2026.7.1-beta.5
+ARG MLCLAW_RUNTIME_IMAGE=ghcr.io/osolmaz/mlclaw:0.3.2-preset.0-openclaw-2026.7.1-beta.5
 
 FROM golang:1.26.5-bookworm AS hf-broker-build
 ARG BROKERKIT_VERSION
