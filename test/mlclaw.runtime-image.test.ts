@@ -21,7 +21,7 @@ describe("runtime image Dockerfile", () => {
     expect(DEFAULT_BROKERKIT_VERSION).toBe(BROKERKIT_VERSION);
     expect(
       dockerfile.match(/git -C \/src fetch --depth=1 https:\/\/github\.com\/osolmaz\/brokerkit\.git/g),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
     expect(OPENCLAW_BASE_IMAGE).toBe(`ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}`);
     expect(dockerfile).toContain("ARG OPENCLAW_BASE_IMAGE=ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}");
     expect(dockerfile).toContain(`ARG MLCLAW_RUNTIME_IMAGE=${DEFAULT_RUNTIME_IMAGE}`);
@@ -32,9 +32,8 @@ describe("runtime image Dockerfile", () => {
     expect(dockerfile).toContain(
       'test "$(git -C /src rev-parse "refs/tags/$BROKERKIT_VERSION^{commit}")" = "$(git -C /src rev-parse HEAD)"',
     );
-    expect(dockerfile).toContain(
-      "COPY --from=brokerkit-plugin-build /out/openclaw-brokerkit-${BROKERKIT_PLUGIN_VERSION}.tgz",
-    );
+    expect(dockerfile).toContain(`"openclaw-brokerkit@\${BROKERKIT_PLUGIN_VERSION}"`);
+    expect(dockerfile).not.toContain("brokerkit-plugin-build");
     expect(dockerfile).toContain("/opt/openclaw-plugins/node_modules/openclaw-brokerkit/openclaw.plugin.json");
     expect(dockerfile).toContain(
       "ENV MLCLAW_BROKERKIT_PLUGIN_PATH=/opt/openclaw-plugins/node_modules/openclaw-brokerkit",

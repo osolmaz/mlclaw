@@ -113,9 +113,8 @@ describe("generated Space repository", () => {
     );
     expect(dockerfile).toContain("GOWORK=off go build -trimpath -o /out/hf-broker ./brokers/huggingface/cmd/hf-broker");
     expect(dockerfile).not.toContain("github.com/osolmaz/hf-broker.git");
-    expect(dockerfile).toContain(
-      "COPY --from=brokerkit-plugin-build /out/openclaw-brokerkit-${BROKERKIT_PLUGIN_VERSION}.tgz",
-    );
+    expect(dockerfile).toContain(`"openclaw-brokerkit@\${BROKERKIT_PLUGIN_VERSION}"`);
+    expect(dockerfile).not.toContain("brokerkit-plugin-build");
     expect(dockerfile).toContain("/opt/openclaw-plugins/node_modules/openclaw-brokerkit/openclaw.plugin.json");
     expect(dockerfile).toContain(
       "ENV MLCLAW_BROKERKIT_PLUGIN_PATH=/opt/openclaw-plugins/node_modules/openclaw-brokerkit",

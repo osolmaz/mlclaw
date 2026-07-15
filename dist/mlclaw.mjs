@@ -14997,12 +14997,6 @@ RUN git init /src \\
     --scope /out/hf-broker.scope.json \\
     --manifest /out/hf-broker.policy-manifest.json
 
-FROM node:24-bookworm-slim AS brokerkit-plugin-build
-ARG BROKERKIT_VERSION
-RUN apt-get update   && apt-get install -y --no-install-recommends ca-certificates git   && rm -rf /var/lib/apt/lists/*   && git init /src   && git -C /src fetch --depth=1 https://github.com/osolmaz/brokerkit.git "refs/tags/$BROKERKIT_VERSION:refs/tags/$BROKERKIT_VERSION"   && git -C /src checkout --detach "$BROKERKIT_VERSION"   && test "$(git -C /src rev-parse "refs/tags/$BROKERKIT_VERSION^{commit}")" = "$(git -C /src rev-parse HEAD)"
-WORKDIR /src
-RUN corepack enable   && pnpm install --frozen-lockfile   && pnpm --filter openclaw-brokerkit build   && pnpm --filter openclaw-brokerkit pack --pack-destination /out
-
 FROM ${OPENCLAW_BASE_IMAGE}
 
 LABEL org.opencontainers.image.source="https://github.com/osolmaz/mlclaw"
@@ -15026,8 +15020,7 @@ RUN python3 -m pip install --break-system-packages --no-cache-dir \\
   "uv==0.11.28" \\
   "hf-discover==1.3.7"
 ARG BROKERKIT_PLUGIN_VERSION
-COPY --from=brokerkit-plugin-build /out/openclaw-brokerkit-\${BROKERKIT_PLUGIN_VERSION}.tgz /tmp/openclaw-brokerkit.tgz
-RUN npm install --omit=dev --omit=peer --no-audit --no-fund --prefix /opt/openclaw-plugins   /tmp/openclaw-brokerkit.tgz   && rm /tmp/openclaw-brokerkit.tgz   && test -f /opt/openclaw-plugins/node_modules/openclaw-brokerkit/openclaw.plugin.json
+RUN npm install --omit=dev --omit=peer --no-audit --no-fund --prefix /opt/openclaw-plugins   "openclaw-brokerkit@\${BROKERKIT_PLUGIN_VERSION}"   && test -f /opt/openclaw-plugins/node_modules/openclaw-brokerkit/openclaw.plugin.json
 
 COPY --chown=node:node runtime/hf-state-sync.js /app/hf-state-sync.js
 COPY --chown=node:node runtime/hf-tooling-seed.js /app/hf-tooling-seed.js

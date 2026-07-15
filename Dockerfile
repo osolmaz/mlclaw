@@ -2,7 +2,7 @@ ARG OPENCLAW_VERSION=2026.7.1
 ARG OPENCLAW_BASE_IMAGE=ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}
 ARG BROKERKIT_PLUGIN_VERSION=0.2.1
 ARG BROKERKIT_VERSION=hf-broker/v0.1.0
-ARG MLCLAW_RUNTIME_IMAGE=ghcr.io/osolmaz/mlclaw:0.3.4-openclaw-2026.7.1
+ARG MLCLAW_RUNTIME_IMAGE=ghcr.io/osolmaz/mlclaw:0.3.5-openclaw-2026.7.1
 
 FROM golang:1.26.5-bookworm AS hf-broker-build
 ARG BROKERKIT_VERSION
@@ -22,21 +22,6 @@ RUN git init /src \
     --profile /out/hf-broker.policy-profile.json \
     --scope /out/hf-broker.scope.json \
     --manifest /out/hf-broker.policy-manifest.json
-
-FROM node:24-bookworm-slim AS brokerkit-plugin-build
-ARG BROKERKIT_VERSION
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates git \
-  && rm -rf /var/lib/apt/lists/* \
-  && git init /src \
-  && git -C /src fetch --depth=1 https://github.com/osolmaz/brokerkit.git "refs/tags/$BROKERKIT_VERSION:refs/tags/$BROKERKIT_VERSION" \
-  && git -C /src checkout --detach "$BROKERKIT_VERSION" \
-  && test "$(git -C /src rev-parse "refs/tags/$BROKERKIT_VERSION^{commit}")" = "$(git -C /src rev-parse HEAD)"
-WORKDIR /src
-RUN corepack enable \
-  && pnpm install --frozen-lockfile \
-  && pnpm --filter openclaw-brokerkit build \
-  && pnpm --filter openclaw-brokerkit pack --pack-destination /out
 
 # Stage 1: build the state-sync bundle so the runtime image needs no dev deps.
 FROM node:24-bookworm-slim AS sync-build
@@ -69,10 +54,8 @@ RUN python3 -m pip install --break-system-packages --no-cache-dir \
   "uv==0.11.28" \
   "hf-discover==1.3.7"
 ARG BROKERKIT_PLUGIN_VERSION
-COPY --from=brokerkit-plugin-build /out/openclaw-brokerkit-${BROKERKIT_PLUGIN_VERSION}.tgz /tmp/openclaw-brokerkit.tgz
 RUN npm install --omit=dev --omit=peer --no-audit --no-fund --prefix /opt/openclaw-plugins \
-  /tmp/openclaw-brokerkit.tgz \
-  && rm /tmp/openclaw-brokerkit.tgz \
+  "openclaw-brokerkit@${BROKERKIT_PLUGIN_VERSION}" \
   && test -f /opt/openclaw-plugins/node_modules/openclaw-brokerkit/openclaw.plugin.json
 
 COPY --from=sync-build /build/dist/hf-state-sync.js /app/hf-state-sync.js
