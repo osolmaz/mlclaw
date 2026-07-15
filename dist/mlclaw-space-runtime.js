@@ -8573,11 +8573,18 @@ function configureBrokerMcpServer(openclawConfig, config2) {
     connectionTimeoutMs: BROKER_MCP_CONNECTION_TIMEOUT_MS,
     requestTimeoutMs: BROKER_MCP_REQUEST_TIMEOUT_MS,
     env: {
-      MLCLAW_HF_BROKER_URL: config2.brokerAgentUrl,
-      MLCLAW_HF_BROKER_AGENT_SECRET_FILE: config2.brokerAgentSecretFile
+      HF_BROKER_AGENT_ENDPOINT: brokerAgentEndpoint(config2.brokerAgentUrl),
+      HF_BROKER_SHARED_SECRET_FILE: config2.brokerAgentSecretFile
     },
     ...existing?.enabled === false ? { enabled: false } : { enabled: true }
   };
+}
+function brokerAgentEndpoint(agentUrl) {
+  const parsed = new URL(agentUrl);
+  if (parsed.protocol !== "http:" || !parsed.port || parsed.username || parsed.password) {
+    throw new Error("HF Broker agent URL must be an unauthenticated HTTP URL with an explicit port");
+  }
+  return `tcp://${parsed.host}`;
 }
 function preservedBrokerMcpFields(existing) {
   const codex = preservedBrokerCodexConfig(objectValue2(existing?.codex));

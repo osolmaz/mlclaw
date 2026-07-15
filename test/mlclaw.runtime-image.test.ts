@@ -106,6 +106,10 @@ describe("runtime image Dockerfile", () => {
     expect(entrypoint).toContain('chown "$OPENCLAW_IDENTITY" "$agent_secret_file"');
     expect(entrypoint).toContain('install -d -m 0711 -o root -g hf-broker "$HF_BROKER_RUN_DIR"');
     expect(entrypoint).toContain('export MLCLAW_PROTECTED_STATE_DIR="$PROTECTED_STATE_DIR"');
+    expect(entrypoint).toContain("HF_BROKER_AGENT_ENDPOINT=tcp://127.0.0.1:7863");
+    expect(entrypoint).toContain("HF_BROKER_OPERATOR_ENDPOINT=tcp://127.0.0.1:7864");
+    expect(entrypoint).not.toContain("HF_BROKER_BIND_ADDR=");
+    expect(entrypoint).not.toContain("HF_BROKER_OPERATOR_BIND_ADDR=");
     expect(entrypoint).toContain('env MLCLAW_STATE_HF_TOKEN="$STATE_HF_TOKEN" timeout');
     expect(entrypoint).toContain('export MLCLAW_STATE_HF_TOKEN="$STATE_HF_TOKEN"');
     expect(entrypoint).toContain("! -name .mlclaw-protected");

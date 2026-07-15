@@ -2009,8 +2009,8 @@ describe("ML Claw Space runtime", () => {
       connectionTimeoutMs: BROKER_MCP_CONNECTION_TIMEOUT_MS,
       requestTimeoutMs: BROKER_MCP_REQUEST_TIMEOUT_MS,
       env: {
-        MLCLAW_HF_BROKER_URL: "http://127.0.0.1:7863/",
-        MLCLAW_HF_BROKER_AGENT_SECRET_FILE: "/run/mlclaw-hf-broker/agent-secret",
+        HF_BROKER_AGENT_ENDPOINT: "tcp://127.0.0.1:7863",
+        HF_BROKER_SHARED_SECRET_FILE: "/run/mlclaw-hf-broker/agent-secret",
       },
       enabled: true,
     });
@@ -2060,8 +2060,8 @@ describe("ML Claw Space runtime", () => {
       connectionTimeoutMs: BROKER_MCP_CONNECTION_TIMEOUT_MS,
       requestTimeoutMs: BROKER_MCP_REQUEST_TIMEOUT_MS,
       env: {
-        MLCLAW_HF_BROKER_URL: "http://127.0.0.1:7863/",
-        MLCLAW_HF_BROKER_AGENT_SECRET_FILE: "/run/mlclaw-hf-broker/agent-secret",
+        HF_BROKER_AGENT_ENDPOINT: "tcp://127.0.0.1:7863",
+        HF_BROKER_SHARED_SECRET_FILE: "/run/mlclaw-hf-broker/agent-secret",
       },
       enabled: false,
       toolFilter: { include: ["hf_operation_get"] },

@@ -101,7 +101,7 @@ async function callMcp(url: string, method: string, params?: Record<string, unkn
   const child = spawn(brokerBinary, ["mcp"], {
     env: {
       ...process.env,
-      HF_BROKER_URL: url,
+      HF_BROKER_AGENT_ENDPOINT: `tcp://${new URL(url).host}`,
       HF_BROKER_SHARED_SECRET: "agent-secret-agent-secret-agent-secret-1234",
     },
     stdio: ["pipe", "pipe", "pipe"],

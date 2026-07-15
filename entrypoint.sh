@@ -93,10 +93,8 @@ start_hf_broker() {
   HF_BROKER_HF_TOKEN_FILE="$HF_BROKER_RUN_DIR/hf-token" \
   HF_BROKER_SECRETS_FILE="$HF_BROKER_RUN_DIR/agent-secrets.conf" \
   HF_BROKER_OPERATOR_SECRETS_FILE="$HF_BROKER_RUN_DIR/operator-secrets.conf" \
-  HF_BROKER_BIND_ADDR=127.0.0.1 \
-  HF_BROKER_PORT=7863 \
-  HF_BROKER_OPERATOR_BIND_ADDR=127.0.0.1 \
-  HF_BROKER_OPERATOR_PORT=7864 \
+  HF_BROKER_AGENT_ENDPOINT=tcp://127.0.0.1:7863 \
+  HF_BROKER_OPERATOR_ENDPOINT=tcp://127.0.0.1:7864 \
   HF_BROKER_SCOPE_FILE=/app/hf-broker.scope.json \
   HF_BROKER_STATE_DIR="$HF_BROKER_STATE_DIR" \
   gosu hf-broker:hf-broker /usr/local/bin/hf-broker &
