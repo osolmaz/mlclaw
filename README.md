@@ -40,8 +40,12 @@ irm https://raw.githubusercontent.com/osolmaz/mlclaw/main/mlclaw.ps1 | iex
 ```
 
 You need a Hugging Face account and a token available through `HF_TOKEN`,
-`HF_TOKEN_PATH`, `$HF_HOME/token`, or `hf auth login`. You never paste that
-token into someone else's app; the bootstrapper runs locally.
+`HF_TOKEN_PATH`, `$HF_HOME/token`, or `hf auth login`. If an interactive
+bootstrap cannot find a token, it offers to install the official Hugging Face
+CLI, asks whether you need to create an account, opens the appropriate browser
+flow, and resumes after sign-in. Non-interactive runs never install software and
+still require a token up front. You never paste that token into someone else's
+app; the bootstrapper runs locally.
 
 ML Claw places the active Hugging Face token behind an in-container HF Broker.
 The broker owns the real token; OpenClaw receives only a separate agent

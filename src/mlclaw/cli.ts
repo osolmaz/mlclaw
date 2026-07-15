@@ -8,7 +8,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { Command, CommanderError, InvalidArgumentError, Option } from "commander";
 import { cancel, confirm, intro, isCancel, note, outro, password, text } from "@clack/prompts";
 import { findSkillsRoot, handleSkillflag } from "skillflag";
-import { readToken } from "./auth.js";
+import { ensureHfToken, readToken } from "./auth.js";
 import { CliDockerRunner, containerNameFor, type DockerRunner, volumeNameFor } from "./docker.js";
 import { parseGatewayLocation, type GatewayLocation } from "./gateway-location.js";
 import { pushTemplateToSpace } from "./git.js";
@@ -39,6 +39,7 @@ import {
 import { namesFor, slugifyAgentName } from "./naming.js";
 import { bundledSpaceRuntimeRef, DEFAULT_RUNTIME_IMAGE, resolveRuntimeImage, resolveSpaceRuntimeImage } from "./runtime-image.js";
 import { getTelegramBot, type TelegramBot } from "./telegram.js";
+import { createSystemHfCli, type HfCliRuntime } from "./hf-cli.js";
 
 export const DEFAULT_MODEL = DEFAULT_ROUTER_MODEL;
 export const DEFAULT_HARDWARE = "cpu-basic";
@@ -179,6 +180,7 @@ type CliRuntime = {
   stdout?: Pick<typeof console, "log">;
   stderr?: Pick<typeof console, "error">;
   readToken?: typeof readToken;
+  hfCli?: HfCliRuntime;
   hubFactory?: (token: string) => HubApi;
   pushTemplateToSpace?: typeof pushTemplateToSpace;
   getTelegramBot?: (token: string, apiRoot?: string) => Promise<TelegramBot>;
@@ -216,6 +218,7 @@ function createRuntime(overrides: CliRuntime = {}): Required<CliRuntime> {
     stdout: overrides.stdout ?? console,
     stderr: overrides.stderr ?? console,
     readToken: overrides.readToken ?? readToken,
+    hfCli: overrides.hfCli ?? createSystemHfCli(overrides.env ?? process.env),
     hubFactory: overrides.hubFactory ?? ((token) => new HubApi({ token })),
     pushTemplateToSpace: overrides.pushTemplateToSpace ?? pushTemplateToSpace,
     getTelegramBot: overrides.getTelegramBot ?? getTelegramBot,
@@ -418,7 +421,15 @@ export async function main(argv = process.argv.slice(2), runtimeOverrides: CliRu
 async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>): Promise<void> {
   runtime.prompt.intro("ML Claw bootstrap");
   const requestedGatewayLocation = opts.gateway ? parseGatewayLocation(opts.gateway) : undefined;
-  const hfToken = await runtime.readToken(runtime.env);
+  const hfToken = await ensureHfToken({
+    readToken: async () => await runtime.readToken(runtime.env),
+    hfCli: runtime.hfCli,
+    prompt: {
+      isInteractive: runtime.prompt.isInteractive,
+      note: runtime.prompt.note,
+      confirm: async (message, initialValue) => await promptConfirm(message, initialValue, runtime),
+    },
+  });
   const hub = runtime.hubFactory(hfToken);
   const me = await hub.whoami();
   const owner = opts.owner ?? me.name;

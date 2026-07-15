@@ -1202,8 +1202,8 @@ var require_command = __commonJS({
   "node_modules/commander/lib/command.js"(exports) {
     var EventEmitter = __require("node:events").EventEmitter;
     var childProcess = __require("node:child_process");
-    var path15 = __require("node:path");
-    var fs15 = __require("node:fs");
+    var path16 = __require("node:path");
+    var fs16 = __require("node:fs");
     var process5 = __require("node:process");
     var { Argument: Argument2, humanReadableArgName } = require_argument();
     var { CommanderError: CommanderError2 } = require_error();
@@ -2197,7 +2197,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
        * @param {string} subcommandName
        */
       _checkForMissingExecutable(executableFile, executableDir, subcommandName) {
-        if (fs15.existsSync(executableFile)) return;
+        if (fs16.existsSync(executableFile)) return;
         const executableDirMessage = executableDir ? `searched for local subcommand relative to directory '${executableDir}'` : "no directory for search for local subcommand, use .executableDir() to supply a custom directory";
         const executableMissing = `'${executableFile}' does not exist
  - if '${subcommandName}' is not meant to be an executable command, remove description parameter from '.command()' and use '.description()' instead
@@ -2215,11 +2215,11 @@ Expecting one of '${allowedValues.join("', '")}'`);
         let launchWithNode = false;
         const sourceExt = [".js", ".ts", ".tsx", ".mjs", ".cjs"];
         function findFile(baseDir, baseName) {
-          const localBin = path15.resolve(baseDir, baseName);
-          if (fs15.existsSync(localBin)) return localBin;
-          if (sourceExt.includes(path15.extname(baseName))) return void 0;
+          const localBin = path16.resolve(baseDir, baseName);
+          if (fs16.existsSync(localBin)) return localBin;
+          if (sourceExt.includes(path16.extname(baseName))) return void 0;
           const foundExt = sourceExt.find(
-            (ext) => fs15.existsSync(`${localBin}${ext}`)
+            (ext) => fs16.existsSync(`${localBin}${ext}`)
           );
           if (foundExt) return `${localBin}${foundExt}`;
           return void 0;
@@ -2231,21 +2231,21 @@ Expecting one of '${allowedValues.join("', '")}'`);
         if (this._scriptPath) {
           let resolvedScriptPath;
           try {
-            resolvedScriptPath = fs15.realpathSync(this._scriptPath);
+            resolvedScriptPath = fs16.realpathSync(this._scriptPath);
           } catch {
             resolvedScriptPath = this._scriptPath;
           }
-          executableDir = path15.resolve(
-            path15.dirname(resolvedScriptPath),
+          executableDir = path16.resolve(
+            path16.dirname(resolvedScriptPath),
             executableDir
           );
         }
         if (executableDir) {
           let localFile = findFile(executableDir, executableFile);
           if (!localFile && !subcommand._executableFile && this._scriptPath) {
-            const legacyName = path15.basename(
+            const legacyName = path16.basename(
               this._scriptPath,
-              path15.extname(this._scriptPath)
+              path16.extname(this._scriptPath)
             );
             if (legacyName !== this._name) {
               localFile = findFile(
@@ -2256,7 +2256,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
           }
           executableFile = localFile || executableFile;
         }
-        launchWithNode = sourceExt.includes(path15.extname(executableFile));
+        launchWithNode = sourceExt.includes(path16.extname(executableFile));
         let proc;
         if (process5.platform !== "win32") {
           if (launchWithNode) {
@@ -3171,7 +3171,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
        * @return {Command}
        */
       nameFromFilename(filename) {
-        this._name = path15.basename(filename, path15.extname(filename));
+        this._name = path16.basename(filename, path16.extname(filename));
         return this;
       }
       /**
@@ -3185,9 +3185,9 @@ Expecting one of '${allowedValues.join("', '")}'`);
        * @param {string} [path]
        * @return {(string|null|Command)}
        */
-      executableDir(path16) {
-        if (path16 === void 0) return this._executableDir;
-        this._executableDir = path16;
+      executableDir(path17) {
+        if (path17 === void 0) return this._executableDir;
+        this._executableDir = path17;
         return this;
       }
       /**
@@ -8952,7 +8952,7 @@ var init_cli = __esm({
 });
 
 // src/mlclaw/cli.ts
-import fs14 from "node:fs/promises";
+import fs15 from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import process4 from "node:process";
 import { randomBytes } from "node:crypto";
@@ -9587,9 +9587,103 @@ async function handleSkillflag(argv, opts) {
 }
 
 // src/mlclaw/auth.ts
-import fs10 from "node:fs/promises";
+import fs11 from "node:fs/promises";
+import os4 from "node:os";
+import path12 from "node:path";
+
+// src/mlclaw/hf-cli.ts
+import { spawn } from "node:child_process";
+import fs10, { constants as fsConstants } from "node:fs/promises";
 import os3 from "node:os";
 import path11 from "node:path";
+var HF_CLI_INSTALL_URL = "https://hf.co/cli/install.sh";
+var HF_ACCOUNT_CREATE_URL = "https://huggingface.co/join";
+var HF_CLI_INSTALL_COMMAND = `curl -LsSf ${HF_CLI_INSTALL_URL} | bash`;
+function createSystemHfCli(env = process.env) {
+  return {
+    findExecutable: async () => await findHfExecutable(env),
+    install: async () => await installHfCli(env),
+    login: async (executable) => await runInherited(executable, ["auth", "login"], env),
+    openUrl: async (url) => await openUrl(url, env)
+  };
+}
+async function findHfExecutable(env) {
+  const fromPath = await hfCommandPath(env);
+  if (fromPath) {
+    return fromPath;
+  }
+  const home = env.HOME || os3.homedir();
+  const candidates = [
+    env.HF_CLI_BIN_DIR && path11.join(env.HF_CLI_BIN_DIR, "hf"),
+    path11.join(home, ".local", "bin", "hf")
+  ].filter((candidate) => Boolean(candidate));
+  for (const candidate of candidates) {
+    try {
+      await fs10.access(candidate, fsConstants.X_OK);
+      return candidate;
+    } catch {
+    }
+  }
+  return void 0;
+}
+async function hfCommandPath(env) {
+  return await new Promise((resolve) => {
+    const child = spawn("sh", ["-c", "command -v hf"], {
+      env,
+      stdio: ["ignore", "pipe", "ignore"]
+    });
+    let output = "";
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk) => {
+      output += chunk;
+    });
+    child.once("error", () => resolve(void 0));
+    child.once("close", (code) => resolve(code === 0 ? output.trim() || void 0 : void 0));
+  });
+}
+async function installHfCli(env) {
+  if (process.platform !== "darwin" && process.platform !== "linux") {
+    throw new Error(`automatic Hugging Face CLI installation is not supported on ${process.platform}`);
+  }
+  const response = await fetch(HF_CLI_INSTALL_URL, { redirect: "follow" });
+  if (!response.ok) {
+    throw new Error(`failed to download the Hugging Face CLI installer: HTTP ${response.status}`);
+  }
+  const temporaryDirectory = await fs10.mkdtemp(path11.join(os3.tmpdir(), "mlclaw-hf-cli-"));
+  const installerPath = path11.join(temporaryDirectory, "install.sh");
+  try {
+    await fs10.writeFile(installerPath, await response.text(), { mode: 448 });
+    await runInherited("bash", [installerPath], env);
+  } finally {
+    await fs10.rm(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+async function runInherited(command, args, env) {
+  await new Promise((resolve, reject) => {
+    const child = spawn(command, args, { env, stdio: "inherit" });
+    child.once("error", reject);
+    child.once("close", (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`${command} exited ${signal ? `after signal ${signal}` : `with status ${code ?? "unknown"}`}`));
+    });
+  });
+}
+async function openUrl(url, env) {
+  const command = process.platform === "darwin" ? "open" : process.platform === "linux" ? "xdg-open" : void 0;
+  if (!command) {
+    return false;
+  }
+  return await new Promise((resolve) => {
+    const child = spawn(command, [url], { env, stdio: "ignore" });
+    child.once("error", () => resolve(false));
+    child.once("close", (code) => resolve(code === 0));
+  });
+}
+
+// src/mlclaw/auth.ts
 async function readToken(env = process.env) {
   const fromEnv = env.HF_TOKEN?.trim();
   if (fromEnv) {
@@ -9597,13 +9691,13 @@ async function readToken(env = process.env) {
   }
   const candidates = [
     env.HF_TOKEN_PATH,
-    env.HF_HOME && path11.join(env.HF_HOME, "token"),
-    path11.join(os3.homedir(), ".cache", "huggingface", "token"),
-    path11.join(os3.homedir(), ".huggingface", "token")
+    env.HF_HOME && path12.join(env.HF_HOME, "token"),
+    path12.join(os4.homedir(), ".cache", "huggingface", "token"),
+    path12.join(os4.homedir(), ".huggingface", "token")
   ].filter((value) => Boolean(value));
   for (const candidate of candidates) {
     try {
-      const token = (await fs10.readFile(candidate, "utf8")).trim();
+      const token = (await fs11.readFile(candidate, "utf8")).trim();
       if (token) {
         return token;
       }
@@ -9611,6 +9705,62 @@ async function readToken(env = process.env) {
     }
   }
   throw new Error("HF token not found. Set HF_TOKEN or run `hf auth login` once.");
+}
+async function ensureHfToken(params) {
+  let missingTokenError;
+  try {
+    return await params.readToken();
+  } catch (error) {
+    missingTokenError = error;
+  }
+  if (!params.prompt.isInteractive()) {
+    throw missingTokenError;
+  }
+  let executable = await params.hfCli.findExecutable();
+  if (!executable) {
+    params.prompt.note(
+      `ML Claw uses the official Hugging Face CLI to sign you in.
+
+Manual install command:
+${HF_CLI_INSTALL_COMMAND}`,
+      "Hugging Face CLI required"
+    );
+    const install = await params.prompt.confirm("Install the Hugging Face CLI now?", true);
+    if (!install) {
+      throw new Error(`Hugging Face CLI installation was declined. Install it with: ${HF_CLI_INSTALL_COMMAND}`);
+    }
+    await params.hfCli.install();
+    executable = await params.hfCli.findExecutable();
+    if (!executable) {
+      throw new Error(
+        `Hugging Face CLI was installed but could not be found. Open a new terminal or run: ${HF_CLI_INSTALL_COMMAND}`
+      );
+    }
+  }
+  const hasAccount = await params.prompt.confirm("Do you already have a Hugging Face account?", true);
+  if (!hasAccount) {
+    const opened = await params.hfCli.openUrl(HF_ACCOUNT_CREATE_URL);
+    params.prompt.note(
+      `${opened ? "A browser was opened for account creation." : "Create your account in a browser."}
+
+${HF_ACCOUNT_CREATE_URL}`,
+      "Create a Hugging Face account"
+    );
+    const accountCreated = await params.prompt.confirm("Have you created your Hugging Face account?", false);
+    if (!accountCreated) {
+      throw new Error(`Create a Hugging Face account at ${HF_ACCOUNT_CREATE_URL}, then run ML Claw again`);
+    }
+  }
+  params.prompt.note(
+    "Complete Hugging Face sign-in in the browser. ML Claw will resume automatically afterward.",
+    "Hugging Face sign-in"
+  );
+  await params.hfCli.login(executable);
+  try {
+    return await params.readToken();
+  } catch {
+    throw new Error("Hugging Face sign-in completed, but no local token was found. Run `hf auth login` and try again.");
+  }
 }
 
 // src/mlclaw/docker.ts
@@ -9756,9 +9906,9 @@ function parseGatewayLocation(value) {
 
 // src/mlclaw/git.ts
 import { execFile as execFile2 } from "node:child_process";
-import fs12 from "node:fs/promises";
-import os4 from "node:os";
-import path13 from "node:path";
+import fs13 from "node:fs/promises";
+import os5 from "node:os";
+import path14 from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 import { promisify as promisify2 } from "node:util";
 
@@ -13582,10 +13732,10 @@ var CurrentXorbInfo = class {
       hash: computeXorbHash(xorbChunksCleaned),
       chunks: xorbChunksCleaned,
       id: this.id,
-      files: Object.entries(this.fileProcessedBytes).map(([path15, processedBytes]) => ({
-        path: path15,
-        progress: processedBytes / this.fileSize[path15],
-        lastSentProgress: ((this.fileUploadedBytes[path15] ?? 0) + (processedBytes - (this.fileUploadedBytes[path15] ?? 0)) * PROCESSING_PROGRESS_RATIO) / this.fileSize[path15]
+      files: Object.entries(this.fileProcessedBytes).map(([path16, processedBytes]) => ({
+        path: path16,
+        progress: processedBytes / this.fileSize[path16],
+        lastSentProgress: ((this.fileUploadedBytes[path16] ?? 0) + (processedBytes - (this.fileUploadedBytes[path16] ?? 0)) * PROCESSING_PROGRESS_RATIO) / this.fileSize[path16]
       }))
     };
   }
@@ -14458,7 +14608,7 @@ var BucketClient = class {
     if (paths.length === 0) {
       return;
     }
-    await this.batch(paths.map((path15) => ({ type: "deleteFile", path: path15 })));
+    await this.batch(paths.map((path16) => ({ type: "deleteFile", path: path16 })));
   }
   async batch(operations) {
     const body = `${operations.map((op) => JSON.stringify(op)).join("\n")}
@@ -14474,8 +14624,8 @@ var BucketClient = class {
    * any other failure (including bucket/auth errors), so a missing object is
    * never conflated with an unreachable bucket.
    */
-  async downloadFile(path15) {
-    const url = `${this.hubUrl}/buckets/${this.bucket}/resolve/${encodeURIComponent(path15)}`;
+  async downloadFile(path16) {
+    const url = `${this.hubUrl}/buckets/${this.bucket}/resolve/${encodeURIComponent(path16)}`;
     const response = await this.fetchWithRetry(url);
     if (response.status === 404) {
       await this.assertBucketAccessible();
@@ -14759,9 +14909,9 @@ var HubApi = class {
           encoding: "base64"
         }
       })),
-      ...(params.deletePaths ?? []).map((path15) => ({
+      ...(params.deletePaths ?? []).map((path16) => ({
         key: "deletedFile",
-        value: { path: path15 }
+        value: { path: path16 }
       }))
     ].map((entry) => JSON.stringify(entry)).join("\n");
     await this.request(`/api/spaces/${repoId}/commit/${encodeURIComponent(params.branch ?? "main")}`, {
@@ -14833,8 +14983,8 @@ function sseDataToText(raw) {
 }
 
 // src/mlclaw/runtime-image.ts
-import fs11 from "node:fs";
-import path12 from "node:path";
+import fs12 from "node:fs";
+import path13 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 var DEFAULT_OPENCLAW_VERSION = "2026.7.1";
 var DEFAULT_BROKERKIT_PLUGIN_VERSION = "0.2.1";
@@ -14873,17 +15023,17 @@ function packageConfigString(key, fallback) {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 function readPackageMetadata() {
-  let dir = path12.dirname(fileURLToPath2(import.meta.url));
+  let dir = path13.dirname(fileURLToPath2(import.meta.url));
   while (true) {
-    const candidate = path12.join(dir, "package.json");
+    const candidate = path13.join(dir, "package.json");
     try {
-      return JSON.parse(fs11.readFileSync(candidate, "utf8"));
+      return JSON.parse(fs12.readFileSync(candidate, "utf8"));
     } catch (err) {
       if (!isMissingFileError(err)) {
         throw err;
       }
     }
-    const parent = path12.dirname(dir);
+    const parent = path13.dirname(dir);
     if (parent === dir) {
       throw new Error("could not find package.json while resolving default runtime image");
     }
@@ -14897,12 +15047,12 @@ function isMissingFileError(err) {
 // src/mlclaw/git.ts
 var execFileAsync2 = promisify2(execFile2);
 async function pushTemplateToSpace(params) {
-  const tempRoot = await fs12.mkdtemp(path13.join(os4.tmpdir(), "mlclaw-space-"));
+  const tempRoot = await fs13.mkdtemp(path14.join(os5.tmpdir(), "mlclaw-space-"));
   try {
     const sourceDir = params.sourceDir ?? process.env.MLCLAW_SOURCE_DIR ?? await findPackagedSourceRoot();
     const templateRev = await currentTemplateRev(sourceDir);
-    const outDir = path13.join(tempRoot, "space");
-    await fs12.mkdir(outDir, { recursive: true });
+    const outDir = path14.join(tempRoot, "space");
+    await fs13.mkdir(outDir, { recursive: true });
     await generateSpaceRepo(sourceDir, outDir, {
       ...params.runtimeImage ? { runtimeImage: params.runtimeImage } : {}
     });
@@ -14920,7 +15070,7 @@ async function pushTemplateToSpace(params) {
     });
     return { templateRev };
   } finally {
-    await fs12.rm(tempRoot, { recursive: true, force: true });
+    await fs13.rm(tempRoot, { recursive: true, force: true });
   }
 }
 async function currentTemplateRev(sourceDir) {
@@ -14933,7 +15083,7 @@ async function currentTemplateRev(sourceDir) {
     }
   } catch {
   }
-  const pkg = JSON.parse(await fs12.readFile(path13.join(sourceDir, "package.json"), "utf8"));
+  const pkg = JSON.parse(await fs13.readFile(path14.join(sourceDir, "package.json"), "utf8"));
   return `npm:${pkg.name ?? "mlclaw"}@${pkg.version ?? "unknown"}`;
 }
 async function generateSpaceRepo(sourceDir, outDir, options = {}) {
@@ -14959,13 +15109,13 @@ async function generateSpaceRepo(sourceDir, outDir, options = {}) {
     );
   }
   for (const [from, to] of copies) {
-    await copyExisting(path13.join(sourceDir, from), path13.join(outDir, to));
+    await copyExisting(path14.join(sourceDir, from), path14.join(outDir, to));
   }
-  const hfLogoPng = await fs12.readFile(path13.join(sourceDir, "assets/hf-logo.png"));
-  await fs12.writeFile(path13.join(outDir, "assets/hf-logo.png.base64"), `${hfLogoPng.toString("base64")}
+  const hfLogoPng = await fs13.readFile(path14.join(sourceDir, "assets/hf-logo.png"));
+  await fs13.writeFile(path14.join(outDir, "assets/hf-logo.png.base64"), `${hfLogoPng.toString("base64")}
 `, "utf8");
-  await fs12.writeFile(
-    path13.join(outDir, "Dockerfile"),
+  await fs13.writeFile(
+    path14.join(outDir, "Dockerfile"),
     options.runtimeImage ? imageDockerfile(options.runtimeImage) : bundledDockerfile(),
     "utf8"
   );
@@ -15053,13 +15203,13 @@ CMD ["/app/entrypoint.sh"]
 `;
 }
 async function findPackagedSourceRoot() {
-  const start = path13.dirname(fileURLToPath3(import.meta.url));
+  const start = path14.dirname(fileURLToPath3(import.meta.url));
   let dir = start;
   while (true) {
     if (await hasPackagedSourceFiles(dir)) {
       return dir;
     }
-    const parent = path13.dirname(dir);
+    const parent = path14.dirname(dir);
     if (parent === dir) {
       throw new Error("Could not find packaged ML Claw source files. Reinstall the mlclaw npm package.");
     }
@@ -15076,20 +15226,20 @@ async function hasPackagedSourceFiles(dir) {
     "src/hf-bucket-client/client.ts"
   ];
   try {
-    await Promise.all(required.map((file) => fs12.access(path13.join(dir, file))));
+    await Promise.all(required.map((file) => fs13.access(path14.join(dir, file))));
     return true;
   } catch {
     return false;
   }
 }
 async function copyExisting(from, to) {
-  const stat = await fs12.stat(from);
-  await fs12.mkdir(path13.dirname(to), { recursive: true });
+  const stat = await fs13.stat(from);
+  await fs13.mkdir(path14.dirname(to), { recursive: true });
   if (stat.isDirectory()) {
-    await fs12.cp(from, to, { recursive: true });
+    await fs13.cp(from, to, { recursive: true });
   } else {
-    await fs12.copyFile(from, to);
-    await fs12.chmod(to, stat.mode);
+    await fs13.copyFile(from, to);
+    await fs13.chmod(to, stat.mode);
   }
 }
 async function readFilesForCommit(root) {
@@ -15097,24 +15247,24 @@ async function readFilesForCommit(root) {
   for (const relativePath of await listFiles(root)) {
     files.push({
       path: relativePath,
-      content: await fs12.readFile(path13.join(root, relativePath))
+      content: await fs13.readFile(path14.join(root, relativePath))
     });
   }
   return files;
 }
 async function listFiles(root, dir = "") {
-  const absoluteDir = path13.join(root, dir);
-  const entries = await fs12.readdir(absoluteDir, { withFileTypes: true });
+  const absoluteDir = path14.join(root, dir);
+  const entries = await fs13.readdir(absoluteDir, { withFileTypes: true });
   const files = [];
   for (const entry of entries) {
-    const relativePath = path13.posix.join(dir.split(path13.sep).join(path13.posix.sep), entry.name);
-    const absolutePath = path13.join(root, relativePath);
+    const relativePath = path14.posix.join(dir.split(path14.sep).join(path14.posix.sep), entry.name);
+    const absolutePath = path14.join(root, relativePath);
     if (entry.isDirectory()) {
       files.push(...await listFiles(root, relativePath));
     } else if (entry.isFile()) {
       files.push(relativePath);
     } else {
-      const stat = await fs12.stat(absolutePath);
+      const stat = await fs13.stat(absolutePath);
       if (stat.isFile()) {
         files.push(relativePath);
       }
@@ -15186,9 +15336,9 @@ var DEFAULT_MODEL_PROVIDER = "fireworks-ai";
 var DEFAULT_MODEL = `huggingface/${DEFAULT_MODEL_ID}:${DEFAULT_MODEL_PROVIDER}`;
 
 // src/mlclaw/local-config.ts
-import fs13 from "node:fs/promises";
-import os5 from "node:os";
-import path14 from "node:path";
+import fs14 from "node:fs/promises";
+import os6 from "node:os";
+import path15 from "node:path";
 function defaultConfigRoot(env = process.env) {
   const explicit = env.MLCLAW_CONFIG_HOME?.trim();
   if (explicit) {
@@ -15196,32 +15346,32 @@ function defaultConfigRoot(env = process.env) {
   }
   const xdg = env.XDG_CONFIG_HOME?.trim();
   if (xdg) {
-    return path14.join(xdg, "mlclaw");
+    return path15.join(xdg, "mlclaw");
   }
-  return path14.join(os5.homedir(), ".config", "mlclaw");
+  return path15.join(os6.homedir(), ".config", "mlclaw");
 }
 function localConfigPaths(root) {
   return {
     root,
-    deploymentsDir: path14.join(root, "deployments"),
-    secretsDir: path14.join(root, "secrets")
+    deploymentsDir: path15.join(root, "deployments"),
+    secretsDir: path15.join(root, "secrets")
   };
 }
 function manifestPath(root, agent) {
-  return path14.join(localConfigPaths(root).deploymentsDir, `${agent}.json`);
+  return path15.join(localConfigPaths(root).deploymentsDir, `${agent}.json`);
 }
 function secretEnvPath(root, agent) {
-  return path14.join(localConfigPaths(root).secretsDir, `${agent}.env`);
+  return path15.join(localConfigPaths(root).secretsDir, `${agent}.env`);
 }
 async function writeManifest(root, manifest) {
   const file = manifestPath(root, manifest.agent);
-  await fs13.mkdir(path14.dirname(file), { recursive: true });
-  await fs13.writeFile(file, `${JSON.stringify(manifest, null, 2)}
+  await fs14.mkdir(path15.dirname(file), { recursive: true });
+  await fs14.writeFile(file, `${JSON.stringify(manifest, null, 2)}
 `, "utf8");
 }
 async function readManifest(root, agent) {
   const file = manifestPath(root, agent);
-  const parsed = JSON.parse(await fs13.readFile(file, "utf8"));
+  const parsed = JSON.parse(await fs14.readFile(file, "utf8"));
   if (parsed.version !== 1) {
     throw new Error(`unsupported deployment manifest version in ${file}`);
   }
@@ -15229,7 +15379,7 @@ async function readManifest(root, agent) {
 }
 async function manifestExists(root, agent) {
   try {
-    await fs13.access(manifestPath(root, agent));
+    await fs14.access(manifestPath(root, agent));
     return true;
   } catch {
     return false;
@@ -15241,12 +15391,12 @@ function renderSecretEnv(values) {
 }
 async function writeSecretEnv(root, agent, values) {
   const file = secretEnvPath(root, agent);
-  await fs13.mkdir(path14.dirname(file), { recursive: true, mode: 448 });
-  await fs13.writeFile(file, renderSecretEnv(values), { encoding: "utf8", mode: 384 });
-  await fs13.chmod(file, 384);
+  await fs14.mkdir(path15.dirname(file), { recursive: true, mode: 448 });
+  await fs14.writeFile(file, renderSecretEnv(values), { encoding: "utf8", mode: 384 });
+  await fs14.chmod(file, 384);
 }
 async function readSecretEnv(root, agent) {
-  return parseSecretEnv(await fs13.readFile(secretEnvPath(root, agent), "utf8"));
+  return parseSecretEnv(await fs14.readFile(secretEnvPath(root, agent), "utf8"));
 }
 function parseSecretEnv(raw) {
   const out = {};
@@ -15357,6 +15507,7 @@ function createRuntime(overrides = {}) {
     stdout: overrides.stdout ?? console,
     stderr: overrides.stderr ?? console,
     readToken: overrides.readToken ?? readToken,
+    hfCli: overrides.hfCli ?? createSystemHfCli(overrides.env ?? process4.env),
     hubFactory: overrides.hubFactory ?? ((token) => new HubApi({ token })),
     pushTemplateToSpace: overrides.pushTemplateToSpace ?? pushTemplateToSpace,
     getTelegramBot: overrides.getTelegramBot ?? getTelegramBot,
@@ -15435,7 +15586,15 @@ async function main(argv = process4.argv.slice(2), runtimeOverrides = {}) {
 async function bootstrap(opts, runtime) {
   runtime.prompt.intro("ML Claw bootstrap");
   const requestedGatewayLocation = opts.gateway ? parseGatewayLocation(opts.gateway) : void 0;
-  const hfToken = await runtime.readToken(runtime.env);
+  const hfToken = await ensureHfToken({
+    readToken: async () => await runtime.readToken(runtime.env),
+    hfCli: runtime.hfCli,
+    prompt: {
+      isInteractive: runtime.prompt.isInteractive,
+      note: runtime.prompt.note,
+      confirm: async (message, initialValue) => await promptConfirm(message, initialValue, runtime)
+    }
+  });
   const hub = runtime.hubFactory(hfToken);
   const me2 = await hub.whoami();
   const owner = opts.owner ?? me2.name;
@@ -16972,7 +17131,7 @@ async function readOptionalTelegramToken(opts, runtime) {
     return direct;
   }
   if (opts.telegramTokenFile) {
-    const raw = await fs14.readFile(opts.telegramTokenFile, "utf8");
+    const raw = await fs15.readFile(opts.telegramTokenFile, "utf8");
     const match = raw.match(/(?:^|\n)\s*TELEGRAM_BOT_TOKEN\s*=\s*['"]?([^'"\n]+)['"]?/);
     return (match?.[1] ?? raw.trim()).trim();
   }
@@ -16994,7 +17153,7 @@ async function readOptionalRouterTokenFile(file) {
   if (!file) {
     return void 0;
   }
-  const raw = await fs14.readFile(file, "utf8");
+  const raw = await fs15.readFile(file, "utf8");
   const parsed = parseSecretEnv(raw);
   return nonEmpty(parsed.MLCLAW_ROUTER_TOKEN) ?? nonEmpty(parsed.HF_ROUTER_TOKEN) ?? nonEmpty(raw);
 }
