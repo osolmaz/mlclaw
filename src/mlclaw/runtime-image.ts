@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const DEFAULT_OPENCLAW_VERSION = "2026.7.1-beta.5";
+const DEFAULT_OPENCLAW_VERSION = "2026.7.1";
 const DEFAULT_BROKERKIT_PLUGIN_VERSION = "0.1.0";
 export const DEFAULT_BROKERKIT_VERSION = "9d66b0ad6b7fc04eb56744bdfe5c0bbcc9fc08c6";
 const DEFAULT_RUNTIME_IMAGE_REPOSITORY = "ghcr.io/osolmaz/mlclaw";

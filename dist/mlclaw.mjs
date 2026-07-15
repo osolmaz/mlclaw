@@ -14836,7 +14836,7 @@ function sseDataToText(raw) {
 import fs11 from "node:fs";
 import path12 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
-var DEFAULT_OPENCLAW_VERSION = "2026.7.1-beta.5";
+var DEFAULT_OPENCLAW_VERSION = "2026.7.1";
 var DEFAULT_BROKERKIT_PLUGIN_VERSION = "0.1.0";
 var DEFAULT_BROKERKIT_VERSION = "9d66b0ad6b7fc04eb56744bdfe5c0bbcc9fc08c6";
 var DEFAULT_RUNTIME_IMAGE_REPOSITORY = "ghcr.io/osolmaz/mlclaw";
