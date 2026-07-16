@@ -40,10 +40,14 @@ export type ContainerRunParams = {
   volumeName: string;
   volumeMountPath: string;
   liveDir: string;
+  publishedPorts: PublishedPort[];
+  context?: string;
+};
+
+export type PublishedPort = {
   hostAddress: string;
   hostPort: number;
   containerPort: number;
-  context?: string;
 };
 
 export type ContainerInspect = {
@@ -113,6 +117,7 @@ export class CliDockerRunner implements ContainerRunner {
   }
 
   async run(params: ContainerRunParams): Promise<void> {
+    const ports = renderPublishedPorts(params.publishedPorts);
     await docker(
       withContext(params.context, [
         "run",
@@ -125,8 +130,7 @@ export class CliDockerRunner implements ContainerRunner {
         params.envFile,
         "-e",
         `OPENCLAW_LIVE_DIR=${params.liveDir}`,
-        "-p",
-        `${params.hostAddress}:${params.hostPort}:${params.containerPort}`,
+        ...ports,
         "-v",
         `${params.volumeName}:${params.volumeMountPath}`,
         params.image,
@@ -244,6 +248,7 @@ export class CliPodmanRunner implements ContainerRunner {
   }
 
   async run(params: ContainerRunParams): Promise<void> {
+    const ports = renderPublishedPorts(params.publishedPorts);
     await podman(
       withPodmanConnection(params.context, [
         "run",
@@ -256,8 +261,7 @@ export class CliPodmanRunner implements ContainerRunner {
         params.envFile,
         "-e",
         `OPENCLAW_LIVE_DIR=${params.liveDir}`,
-        "-p",
-        `${params.hostAddress}:${params.hostPort}:${params.containerPort}`,
+        ...ports,
         "-v",
         `${params.volumeName}:${params.volumeMountPath}`,
         params.image,
@@ -322,6 +326,20 @@ export class CliPodmanRunner implements ContainerRunner {
       throw err;
     }
   }
+}
+
+export function renderPublishedPorts(ports: PublishedPort[]): string[] {
+  if (ports.length === 0) throw new Error("at least one published port is required");
+  const seen = new Set<string>();
+  return ports.flatMap((port) => {
+    if (port.hostAddress === "0.0.0.0" || port.hostAddress === "::") {
+      throw new Error("wildcard container port publishing is not allowed");
+    }
+    const key = `${port.hostAddress}:${port.hostPort}:${port.containerPort}`;
+    if (seen.has(key)) throw new Error(`duplicate published port: ${key}`);
+    seen.add(key);
+    return ["-p", key];
+  });
 }
 
 export function containerNameFor(agent: string): string {

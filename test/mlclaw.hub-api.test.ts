@@ -2,6 +2,90 @@ import { describe, expect, it } from "vitest";
 import { HubApi } from "../src/mlclaw/hub-api.js";
 
 describe("HubApi Space commits", () => {
+  it("uses parent-commit compare-and-swap for deployment control", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const parent = "a".repeat(40);
+    const next = "b".repeat(40);
+    const hub = new HubApi({
+      token: "hf_test_token",
+      fetch: async (url, init) => {
+        const request = { url: String(url), init: init ?? {} };
+        requests.push(request);
+        if (request.url.endsWith("/api/whoami-v2")) return Response.json({ name: "alice" });
+        if (request.url.endsWith("/api/repos/create")) return Response.json({});
+        if (request.url.endsWith("/commit/main")) return Response.json({ commitOid: next });
+        if (request.url.includes("/api/models/")) return Response.json({ sha: parent });
+        if (request.url.includes("/resolve/")) return new Response("missing", { status: 404 });
+        throw new Error(`unexpected request ${request.url}`);
+      },
+    });
+
+    const store = await hub.deploymentControlStore("alice", "11111111-1111-5111-a111-111111111111");
+    await expect(store.read()).resolves.toEqual({ value: null, revision: parent });
+    await expect(store.compareAndSwap(parent, { fencingToken: "token" })).resolves.toBe(next);
+
+    const commit = requests.find((request) => request.url.endsWith("/commit/main"));
+    const lines = String(commit?.init.body)
+      .split("\n")
+      .map((line) => JSON.parse(line)) as Array<{ key: string; value: Record<string, unknown> }>;
+    expect(lines[0]?.value.parentCommit).toBe(parent);
+  });
+
+  it("uses one owner-scoped store for first deployment claims", async () => {
+    const requests: string[] = [];
+    const parent = "a".repeat(40);
+    const hub = new HubApi({
+      token: "hf_test_token",
+      fetch: async (url) => {
+        const value = String(url);
+        requests.push(value);
+        if (value.endsWith("/api/whoami-v2")) return Response.json({ name: "alice" });
+        if (value.endsWith("/api/repos/create")) return Response.json({});
+        if (value.includes("/api/models/")) return Response.json({ sha: parent });
+        if (value.includes("/resolve/")) return new Response("missing", { status: 404 });
+        throw new Error(`unexpected request ${value}`);
+      },
+    });
+
+    const store = await hub.deploymentClaimStore("alice");
+    await expect(store.read()).resolves.toEqual({ value: null, revision: parent });
+    expect(requests.some((url) => url.includes("/api/models/alice/mlclaw-control-claims"))).toBe(true);
+  });
+
+  it("lists owned buckets across Hub pagination", async () => {
+    const requests: string[] = [];
+    const hub = new HubApi({
+      token: "hf_test_token",
+      fetch: async (url) => {
+        const value = String(url);
+        requests.push(value);
+        return value.endsWith("page=2")
+          ? new Response(JSON.stringify([{ id: "alice/second" }]), { status: 200 })
+          : new Response(JSON.stringify([{ id: "alice/first" }]), {
+              status: 200,
+              headers: { Link: '<https://huggingface.co/api/buckets/me?page=2>; rel="next"' },
+            });
+      },
+    });
+
+    await expect(hub.listBuckets()).resolves.toEqual(["alice/first", "alice/second"]);
+    expect(requests).toEqual(["https://huggingface.co/api/buckets/me", "https://huggingface.co/api/buckets/me?page=2"]);
+  });
+
+  it("lists buckets from an explicit organization namespace", async () => {
+    const requests: string[] = [];
+    const hub = new HubApi({
+      token: "hf_test_token",
+      fetch: async (url) => {
+        requests.push(String(url));
+        return Response.json([{ id: "research-org/shared-state" }]);
+      },
+    });
+
+    await expect(hub.listBuckets("research-org")).resolves.toEqual(["research-org/shared-state"]);
+    expect(requests).toEqual(["https://huggingface.co/api/buckets/research-org"]);
+  });
+
   it("creates Docker Spaces as private by default", async () => {
     const requests: Array<{ url: string; init: RequestInit }> = [];
     const hub = new HubApi({
@@ -59,6 +143,42 @@ describe("HubApi Space commits", () => {
       sdk: "docker",
       private: false,
     });
+  });
+
+  it("reads and updates Space visibility through the settings API", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const hub = new HubApi({
+      token: "hf_test_token",
+      fetch: async (url, init) => {
+        const request = { url: String(url), init: init ?? {} };
+        requests.push(request);
+        if (request.url.endsWith("/api/spaces/alice/research")) {
+          return Response.json({ private: false });
+        }
+        return Response.json({});
+      },
+    });
+
+    await expect(hub.getSpaceVisibility("alice/research")).resolves.toBe("public");
+    await hub.updateSpaceVisibility("alice/research", "private");
+
+    expect(requests).toEqual([
+      {
+        url: "https://huggingface.co/api/spaces/alice/research",
+        init: expect.objectContaining({ headers: { Authorization: "Bearer hf_test_token" } }),
+      },
+      {
+        url: "https://huggingface.co/api/spaces/alice/research/settings",
+        init: expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({ visibility: "private" }),
+          headers: {
+            Authorization: "Bearer hf_test_token",
+            "Content-Type": "application/json",
+          },
+        }),
+      },
+    ]);
   });
 
   it("uploads files and deletes stale paths through the commit API", async () => {
@@ -183,21 +303,24 @@ describe("HubApi Space commits", () => {
           });
         }
         if (textUrl.endsWith("/api/spaces/alice/research")) {
-          return new Response(JSON.stringify({
-            runtime: {
-              volumes: [
-                {
-                  type: "bucket",
-                  source: "alice/research-data",
-                  mountPath: "/data/mlclaw-state",
-                  readOnly: false,
-                },
-              ],
+          return new Response(
+            JSON.stringify({
+              runtime: {
+                volumes: [
+                  {
+                    type: "bucket",
+                    source: "alice/research-data",
+                    mountPath: "/data/mlclaw-state",
+                    readOnly: false,
+                  },
+                ],
+              },
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
             },
-          }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
+          );
         }
         return new Response("not found", { status: 404 });
       },

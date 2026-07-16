@@ -42,7 +42,7 @@ Example manifest shape:
   "localGateway": {
     "engine": "docker",
     "dockerContext": "desktop-linux",
-    "dockerEndpoint": "unix:///Users/onur/.docker/run/docker.sock"
+    "dockerEndpoint": "unix:///Users/alice/.docker/run/docker.sock"
   }
 }
 ```
@@ -76,7 +76,7 @@ Status should show the pinned local engine clearly:
 Agent: research
 Gateway: local
 Docker: desktop-linux
-Endpoint: unix:///Users/onur/.docker/run/docker.sock
+Endpoint: unix:///Users/alice/.docker/run/docker.sock
 Bucket: osolmaz/research-data
 Container: running
 ```
@@ -153,7 +153,7 @@ Rules:
 The Docker adapter should accept an optional context on every operation:
 
 ```ts
-docker(["--context", context, "ps"])
+docker(["--context", context, "ps"]);
 ```
 
 Context handling should be centralized so commands do not hand-roll Docker

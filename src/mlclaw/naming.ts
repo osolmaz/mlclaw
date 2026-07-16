@@ -1,3 +1,12 @@
+export const AGENT_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+export function assertAgentName(value: string): string {
+  if (!AGENT_NAME_PATTERN.test(value)) {
+    throw new Error(`invalid agent name: ${value}`);
+  }
+  return value;
+}
+
 export function slugifyAgentName(raw: string): string {
   const cleaned = raw
     .trim()
@@ -10,7 +19,7 @@ export function slugifyAgentName(raw: string): string {
   if (!cleaned) {
     throw new Error(`cannot derive an agent name from ${raw}`);
   }
-  return cleaned;
+  return assertAgentName(cleaned);
 }
 
 export function namesFor(owner: string, agentName: string): { space: string; bucket: string } {
@@ -19,4 +28,3 @@ export function namesFor(owner: string, agentName: string): { space: string; buc
     bucket: `${owner}/${agentName}-data`,
   };
 }
-

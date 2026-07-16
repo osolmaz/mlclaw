@@ -1,6 +1,6 @@
 # Bootstrap Reconciliation and Tailnet Access Implementation Plan
 
-Status: planned
+Status: implemented (2026-07-16)
 
 ## Objective
 
@@ -172,7 +172,6 @@ Use a reserved control prefix separate from snapshot state:
 ```text
 .mlclaw/deployment.json
 .mlclaw/desired-state.json
-.mlclaw/control-lease.json
 .mlclaw/operations/<operation-id>.json
 .mlclaw/tombstone.json
 ```
@@ -184,9 +183,10 @@ Use a reserved control prefix separate from snapshot state:
   "schemaVersion": 1,
   "deploymentId": "019f6b91-7a61-7ae0-b402-cc2b19fa2345",
   "agent": "mlclaw",
-  "owner": "dutifulbob",
-  "bucket": "dutifulbob/mlclaw-data",
+  "owner": "example-user",
+  "bucket": "example-user/mlclaw-data",
   "statePrefix": "openclaw-state",
+  "credentialKeySha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   "createdAt": "2026-07-16T00:00:00.000Z"
 }
 ```
@@ -207,7 +207,7 @@ Use a reserved control prefix separate from snapshot state:
   "model": "huggingface/zai-org/GLM-5.2:fireworks-ai",
   "runtimeImage": "ghcr.io/osolmaz/mlclaw:0.3.8-openclaw-2026.7.1",
   "space": {
-    "repo": "dutifulbob/mlclaw",
+    "repo": "example-user/mlclaw",
     "visibility": "private"
   }
 }
@@ -342,24 +342,27 @@ recreate the old container and bindings if the new startup fails.
 
 ### Storage concurrency contract
 
-Before implementing remote locking, verify whether HF Buckets expose conditional
-writes or stable object versions usable for compare-and-swap.
+HF Bucket object writes do not expose the compare-and-swap contract required for
+strict lease acquisition. Each deployment therefore has a generated private
+model repository named `mlclaw-control-<deployment-id>`. Its
+`control-lease.json` is updated through Hub commits with `parentCommit`, making
+acquisition, renewal, and release atomic against the repository head.
 
-Preferred contract:
+The control contract is:
 
 - acquire with conditional create or update;
 - include deployment ID, operation ID, holder ID, fencing token, generation,
   acquired time, and expiry;
 - renew before half the lease duration;
-- require the fencing token for each canonical state mutation;
+- require the current repository revision and fencing token before every
+  canonical or external mutation;
 - fail closed when lease ownership cannot be verified.
 
-If conditional writes are unavailable, use generation checks, a random fencing
-token, verify-after-write, and lease revalidation before every external
-mutation. Also refuse concurrent reconciliation while another non-expired
-control lease or incompatible live runtime lease exists. Document the weaker
-storage guarantee explicitly and do not claim strict distributed mutual
-exclusion.
+Desired state is committed to the bucket only after the corresponding apply
+succeeds. Failed applies therefore remain retryable. Remote recovery records a
+SHA-256 fingerprint of the credential-encryption key, requires the existing key
+to be restored through `MLCLAW_CREDENTIAL_KEY`, and rejects a mismatched key;
+it never rotates the key silently.
 
 Local locking should use atomic exclusive file creation, record process and host
 identity, and have explicit stale-lock recovery. A PID alone is insufficient.

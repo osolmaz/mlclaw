@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_MODEL, LOCAL_LIVE_DIR, LOCAL_VOLUME_MOUNT_PATH, main } from "../src/mlclaw/cli.js";
+import { newOperation, updateOperation } from "../src/mlclaw/deployment-state.js";
 import { DEFAULT_RUNTIME_IMAGE } from "../src/mlclaw/runtime-image.js";
 import {
   readManifest,
@@ -20,6 +21,7 @@ import type {
   TailscaleServeMapping,
   TailscaleServeState,
 } from "../src/mlclaw/tailscale.js";
+import { TailscaleApprovalRequiredError } from "../src/mlclaw/tailscale.js";
 
 type PromptAnswer = string | boolean;
 
@@ -52,7 +54,10 @@ function createFakeHub(
     spaceRuntime?: SpaceRuntime;
     existingBuckets?: string[];
     existingSpaces?: string[];
+    spaceVisibilities?: Record<string, "private" | "public">;
     createDockerSpaceError?: Error;
+    failFirstTombstoneUpload?: boolean;
+    onDeploymentClaimAcquired?: (bucketObjects: Map<string, string>) => void;
   } = {},
 ) {
   const calls: Array<{ name: string; args: unknown[] }> = [];
@@ -60,10 +65,24 @@ function createFakeHub(
   const secrets = new Map<string, { key: string }>();
   const volumes: SpaceVolume[] = [];
   const bucketObjects = new Map<string, string>();
+  let controlValue: unknown | null = null;
+  let controlRevision = 0;
+  let tombstoneUploadFailed = false;
   const existingBuckets = new Set(opts.existingBuckets ?? []);
   const existingSpaces = new Set(opts.existingSpaces ?? []);
+  const spaceVisibilities = new Map(
+    [...existingSpaces].map((repoId) => [repoId, opts.spaceVisibilities?.[repoId] ?? "private"] as const),
+  );
   const bucketClient = {
     async uploadFiles(files: Array<{ path: string; content: Blob }>) {
+      if (
+        opts.failFirstTombstoneUpload &&
+        !tombstoneUploadFailed &&
+        files.some((file) => file.path === ".mlclaw/tombstone.json")
+      ) {
+        tombstoneUploadFailed = true;
+        throw new Error("simulated tombstone upload failure");
+      }
       calls.push({ name: "bucket.uploadFiles", args: [files.map((file) => file.path)] });
       for (const file of files) {
         const text = await file.content.text();
@@ -115,6 +134,9 @@ function createFakeHub(
   const hub = {
     calls,
     bucketObjects,
+    existingSpaces,
+    variables,
+    volumes,
     bucket(bucket: string) {
       calls.push({ name: "bucket", args: [bucket] });
       return bucketClient;
@@ -132,15 +154,38 @@ function createFakeHub(
       if (opts.createDockerSpaceError) {
         throw opts.createDockerSpaceError;
       }
-      existingSpaces.add(String(args[0]));
+      const repoId = String(args[0]);
+      existingSpaces.add(repoId);
+      const options = args[1] as { private?: boolean } | undefined;
+      spaceVisibilities.set(repoId, options?.private === false ? "public" : "private");
     },
     async bucketExists(bucket: string) {
       calls.push({ name: "bucketExists", args: [bucket] });
       return existingBuckets.has(bucket);
     },
+    async listBuckets(namespace?: string) {
+      calls.push({ name: "listBuckets", args: namespace ? [namespace] : [] });
+      return [...existingBuckets];
+    },
+    async deploymentControlStore(owner: string, deploymentId: string) {
+      calls.push({ name: "deploymentControlStore", args: [owner, deploymentId] });
+      return controlStore("deploymentControlStore");
+    },
+    async deploymentClaimStore(owner: string) {
+      calls.push({ name: "deploymentClaimStore", args: [owner] });
+      return controlStore("deploymentClaimStore");
+    },
     async spaceExists(repoId: string) {
       calls.push({ name: "spaceExists", args: [repoId] });
       return existingSpaces.has(repoId);
+    },
+    async getSpaceVisibility(repoId: string) {
+      calls.push({ name: "getSpaceVisibility", args: [repoId] });
+      return spaceVisibilities.get(repoId) ?? "private";
+    },
+    async updateSpaceVisibility(repoId: string, visibility: "private" | "public") {
+      calls.push({ name: "updateSpaceVisibility", args: [repoId, visibility] });
+      spaceVisibilities.set(repoId, visibility);
     },
     async addSpaceVariable(repoId: string, key: string, value: string) {
       calls.push({ name: "addSpaceVariable", args: [repoId, key, value] });
@@ -229,6 +274,27 @@ function createFakeHub(
       };
     },
   };
+
+  function controlStore(kind: "deploymentControlStore" | "deploymentClaimStore") {
+    return {
+      async read() {
+        calls.push({ name: "control.read", args: [] });
+        return { value: controlValue, revision: String(controlRevision) };
+      },
+      async compareAndSwap(expectedRevision: string, value: unknown | null) {
+        calls.push({ name: "control.compareAndSwap", args: [expectedRevision, value] });
+        if (expectedRevision !== String(controlRevision))
+          throw new Error("deployment control lease changed concurrently");
+        const wasUnclaimed = controlValue === null;
+        controlValue = value;
+        controlRevision += 1;
+        if (kind === "deploymentClaimStore" && wasUnclaimed && value !== null) {
+          opts.onDeploymentClaimAcquired?.(bucketObjects);
+        }
+        return String(controlRevision);
+      },
+    };
+  }
   return hub as typeof hub & HubApi;
 }
 
@@ -301,10 +367,10 @@ function createFakeTailscale(): TailscaleRunner & {
     },
     async ensureMapping(mapping) {
       this.calls.push({ name: "ensureMapping", mapping });
-      const result = this.state === "owned" ? "unchanged" : "created";
-      this.state = "owned";
       const error = this.ensureErrors.shift();
       if (error) throw error;
+      const result = this.state === "owned" ? "unchanged" : "created";
+      this.state = "owned";
       return result;
     },
     async removeMapping(mapping) {
@@ -439,9 +505,7 @@ describe("mlclaw CLI", () => {
           image: DEFAULT_RUNTIME_IMAGE,
           volumeMountPath: LOCAL_VOLUME_MOUNT_PATH,
           liveDir: LOCAL_LIVE_DIR,
-          hostAddress: "127.0.0.1",
-          hostPort: 7860,
-          containerPort: 7860,
+          publishedPorts: [{ hostAddress: "127.0.0.1", hostPort: 7860, containerPort: 7860 }],
         }),
       ],
     });
@@ -452,13 +516,44 @@ describe("mlclaw CLI", () => {
       MLCLAW_RUNTIME_ID: manifest.localRuntimeId,
       OPENCLAW_MODEL: DEFAULT_MODEL,
     });
+    expect(hub.calls).toContainEqual({ name: "deploymentClaimStore", args: ["alice"] });
+  });
+
+  it("stops a first bootstrap when another controller claims the bucket identity", async () => {
+    const hub = createFakeHub({
+      existingBuckets: ["alice/research-data"],
+      onDeploymentClaimAcquired: (objects) => {
+        objects.set(
+          ".mlclaw/deployment.json",
+          JSON.stringify({
+            schemaVersion: 1,
+            deploymentId: "33333333-3333-5333-a333-333333333333",
+            agent: "research",
+            owner: "alice",
+            bucket: "alice/research-data",
+            statePrefix: "openclaw-state",
+            credentialKeySha256: "a".repeat(64),
+            createdAt: "2026-07-16T00:00:00.000Z",
+          }),
+        );
+      },
+    });
+    const errors: string[] = [];
+    const runtime = await createRuntime(hub, createPrompt([]).prompt, errors);
+
+    await expect(main(["bootstrap", "--name", "research", "--gateway", "space", "--yes"], runtime)).resolves.toBe(1);
+
+    expect(errors.join("\n")).toContain("different canonical deployment identity");
+    expect(hub.calls).toContainEqual({ name: "deploymentClaimStore", args: ["alice"] });
+    expect(hub.calls.some((call) => call.name === "createDockerSpace")).toBe(false);
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(false);
   });
 
   it("exposes a local gateway through an explicitly approved Tailscale Serve mapping", async () => {
     const hub = createFakeHub();
     const { prompt, notes } = createPrompt([]);
     const runtime = await createRuntime(hub, prompt);
-    runtime.tailscaleRunner.discovery = { ready: true, dnsName: "isengard.example.ts.net" };
+    runtime.tailscaleRunner.discovery = { ready: true, ipv4: "100.100.100.100", dnsName: "gateway.example.ts.net" };
 
     await expect(
       main(
@@ -469,7 +564,7 @@ describe("mlclaw CLI", () => {
           "research",
           "--gateway-token",
           "gateway-token",
-          "--tailscale",
+          "--tailscale=serve",
           "--tailscale-port",
           "17860",
           "--no-pull",
@@ -482,31 +577,31 @@ describe("mlclaw CLI", () => {
     expect(manifest.networkAccess).toEqual({
       provider: "tailscale-serve",
       enabled: true,
-      dnsName: "isengard.example.ts.net",
+      dnsName: "gateway.example.ts.net",
       httpsPort: 17860,
       target: "http://127.0.0.1:7860",
-      accessOrigin: "https://isengard.example.ts.net:17860",
+      accessOrigin: "https://gateway.example.ts.net:17860",
     });
     await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
-      MLCLAW_ACCESS_ORIGINS: "http://127.0.0.1:7860,https://isengard.example.ts.net:17860",
+      MLCLAW_ACCESS_ORIGINS: "http://127.0.0.1:7860,https://gateway.example.ts.net:17860",
     });
     expect(runtime.tailscaleRunner.calls).toContainEqual({
       name: "ensureMapping",
       mapping: {
-        dnsName: "isengard.example.ts.net",
+        dnsName: "gateway.example.ts.net",
         httpsPort: 17860,
         target: "http://127.0.0.1:7860",
       },
     });
     expect(notes.find((item) => item.title === "HERE IS YOUR ML CLAW")?.message).toContain(
-      "https://isengard.example.ts.net:17860/mlclaw/local-login#",
+      "https://gateway.example.ts.net:17860/mlclaw/local-login#",
     );
 
     await expect(main(["gateway", "stop", "research"], runtime)).resolves.toBe(0);
     expect(runtime.tailscaleRunner.calls).toContainEqual({
       name: "removeMapping",
       mapping: {
-        dnsName: "isengard.example.ts.net",
+        dnsName: "gateway.example.ts.net",
         httpsPort: 17860,
         target: "http://127.0.0.1:7860",
       },
@@ -517,32 +612,330 @@ describe("mlclaw CLI", () => {
     expect(runtime.tailscaleRunner.calls.some((call) => call.name === "ensureMapping")).toBe(true);
     expect(runtime.tailscaleRunner.state).toBe("owned");
 
-    await expect(main(["gateway", "start", "research", "--no-tailscale", "--no-pull"], runtime)).resolves.toBe(0);
-    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
-      networkAccess: { enabled: false },
-    });
+    await expect(main(["gateway", "start", "research", "--tailscale=off", "--no-pull"], runtime)).resolves.toBe(0);
+    await expect(readManifest(runtime.configRoot, "research")).resolves.not.toHaveProperty("networkAccess");
     await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
       MLCLAW_ACCESS_ORIGINS: "http://127.0.0.1:7860",
     });
     expect(runtime.tailscaleRunner.state).toBe("free");
   });
 
-  it("offers Tailscale access interactively but never enables it implicitly for automation", async () => {
+  it("publishes direct tailnet access only on loopback and the exact Tailscale address", async () => {
     const hub = createFakeHub();
-    const interactive = createPrompt([true]);
-    const interactiveRuntime = await createRuntime(hub, interactive.prompt);
-    interactiveRuntime.tailscaleRunner.discovery = { ready: true, dnsName: "isengard.example.ts.net" };
+    const { prompt } = createPrompt([]);
+    const runtime = await createRuntime(hub, prompt);
+    runtime.tailscaleRunner.discovery = {
+      ready: true,
+      ipv4: "100.100.100.100",
+      dnsName: "gateway.example.ts.net",
+    };
 
     await expect(
-      main(["--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--no-pull"], interactiveRuntime),
+      main(
+        [
+          "--gateway",
+          "local",
+          "--name",
+          "research",
+          "--gateway-token",
+          "gateway-token",
+          "--tailscale=direct",
+          "--tailscale-port",
+          "17860",
+          "--no-pull",
+        ],
+        runtime,
+      ),
+    ).resolves.toBe(0);
+
+    expect(runtime.dockerRunner.calls.find((call) => call.name === "run")?.args[0]).toMatchObject({
+      publishedPorts: [
+        { hostAddress: "127.0.0.1", hostPort: 7860, containerPort: 7860 },
+        { hostAddress: "100.100.100.100", hostPort: 17860, containerPort: 7860 },
+      ],
+    });
+    expect(runtime.tailscaleRunner.calls.some((call) => call.name === "ensureMapping")).toBe(false);
+    await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
+      MLCLAW_ACCESS_ORIGINS: "http://127.0.0.1:7860,http://100.100.100.100:17860",
+    });
+
+    await expect(main(["gateway", "stop", "research"], runtime)).resolves.toBe(0);
+    runtime.dockerRunner.calls.length = 0;
+    runtime.tailscaleRunner.discovery = {
+      ready: true,
+      ipv4: "100.100.100.101",
+      dnsName: "gateway.example.ts.net",
+    };
+    await expect(main(["gateway", "start", "research", "--no-pull"], runtime)).resolves.toBe(0);
+    expect(runtime.dockerRunner.calls.find((call) => call.name === "run")?.args[0]).toMatchObject({
+      publishedPorts: expect.arrayContaining([
+        { hostAddress: "100.100.100.101", hostPort: 17860, containerPort: 7860 },
+      ]),
+    });
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      networkAccess: { provider: "tailscale-direct", ipv4: "100.100.100.101" },
+    });
+  });
+
+  it("selects the only local deployment when bootstrap is rerun without a name", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([]);
+    const stderr: string[] = [];
+    const runtime = await createRuntime(hub, prompt, stderr);
+    await expect(
+      main(["--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--no-pull"], runtime),
+    ).resolves.toBe(0);
+
+    expect(await main(["--gateway", "local", "--no-pull"], runtime), stderr.join("\n")).toBe(0);
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      agent: "research",
+      desiredGeneration: 1,
+    });
+    expect(hub.bucketObjects.has(".mlclaw/deployment.json")).toBe(true);
+    expect(hub.bucketObjects.get(".mlclaw/desired-state.json")).not.toContain("hf_test_token");
+  });
+
+  it("preserves Telegram configuration on an automatic bootstrap rerun", async () => {
+    const hub = createFakeHub();
+    const runtime = await createRuntime(hub, createPrompt([]).prompt);
+    await expect(
+      main(
+        [
+          "bootstrap",
+          "--gateway",
+          "local",
+          "--name",
+          "research",
+          "--telegram-token",
+          "telegram-token",
+          "--telegram-user-id",
+          "1234567890",
+          "--telegram-proxy",
+          "http://proxy.example",
+          "--telegram-api-root",
+          "https://telegram.example",
+          "--no-pull",
+        ],
+        runtime,
+      ),
+    ).resolves.toBe(0);
+
+    await expect(main(["bootstrap", "--gateway", "local", "--no-pull"], runtime)).resolves.toBe(0);
+    await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
+      TELEGRAM_BOT_TOKEN: "telegram-token",
+      TELEGRAM_ALLOWED_USERS: "1234567890",
+      TELEGRAM_PROXY: "http://proxy.example",
+      TELEGRAM_API_ROOT: "https://telegram.example",
+    });
+  });
+
+  it("preserves an organization owner when selecting its only local deployment", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([]);
+    const runtime = await createRuntime(hub, prompt);
+    await expect(
+      main(
+        [
+          "--gateway",
+          "local",
+          "--owner",
+          "research-org",
+          "--name",
+          "research",
+          "--gateway-token",
+          "gateway-token",
+          "--no-pull",
+        ],
+        runtime,
+      ),
+    ).resolves.toBe(0);
+
+    await expect(main(["--gateway", "local", "--no-pull"], runtime)).resolves.toBe(0);
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      owner: "research-org",
+      bucket: "research-org/research-data",
+      space: "research-org/research",
+    });
+  });
+
+  it("does not auto-select a local deployment from a different explicit owner", async () => {
+    const hub = createFakeHub();
+    const runtime = await createRuntime(hub, createPrompt(["new-agent"]).prompt);
+    await writeManifest(runtime.configRoot, {
+      version: 2,
+      deploymentId: "11111111-1111-5111-a111-111111111111",
+      desiredGeneration: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-existing",
+      gatewayLocation: "local",
+      model: DEFAULT_MODEL,
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      createdAt: "2026-07-16T00:00:00.000Z",
+      updatedAt: "2026-07-16T00:00:00.000Z",
+    });
+
+    await expect(
+      main(
+        ["bootstrap", "--owner", "research-org", "--gateway", "local", "--gateway-token", "gateway-token", "--no-pull"],
+        runtime,
+      ),
+    ).resolves.toBe(0);
+
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      owner: "alice",
+      bucket: "alice/research-data",
+    });
+    await expect(readManifest(runtime.configRoot, "new-agent")).resolves.toMatchObject({
+      owner: "research-org",
+      bucket: "research-org/new-agent-data",
+    });
+    expect(hub.calls).toContainEqual({ name: "listBuckets", args: ["research-org"] });
+  });
+
+  it("recovers the only trusted remote deployment when local state is absent", async () => {
+    const hub = createFakeHub({ existingBuckets: ["alice/research-data"] });
+    hub.bucketObjects.set(
+      ".mlclaw/deployment.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        deploymentId: "33333333-3333-5333-a333-333333333333",
+        agent: "research",
+        owner: "alice",
+        bucket: "alice/research-data",
+        statePrefix: "custom-state-prefix",
+        credentialKeySha256: "c9357e9e93a12c0d388d115eb3a62a5e4683807b1526e83716fcaafac2761539",
+        createdAt: "2026-07-16T00:00:00.000Z",
+      }),
+    );
+    hub.bucketObjects.set(
+      ".mlclaw/desired-state.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        deploymentId: "33333333-3333-5333-a333-333333333333",
+        generation: 2,
+        updatedAt: "2026-07-16T00:10:00.000Z",
+        gateway: { location: "local", port: 7860, tailscaleMode: "direct" },
+        model: DEFAULT_MODEL,
+        runtimeImage: DEFAULT_RUNTIME_IMAGE,
+        space: {
+          repo: "alice/research",
+          visibility: "public",
+          hardware: "cpu-upgrade",
+          sleepTime: -1,
+        },
+      }),
+    );
+    const { prompt } = createPrompt([true]);
+    const runtime = await createRuntime(hub, prompt);
+    Object.assign(runtime.env, { MLCLAW_CREDENTIAL_KEY: "restored-test-credential-key" });
+    runtime.dockerRunner.contexts.clear();
+    runtime.tailscaleRunner.discovery = {
+      ready: true,
+      ipv4: "100.100.100.100",
+      dnsName: "gateway.example.ts.net",
+    };
+
+    await expect(main(["--gateway", "local", "--no-pull"], runtime)).resolves.toBe(0);
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      deploymentId: "33333333-3333-5333-a333-333333333333",
+      desiredGeneration: 2,
+      bucket: "alice/research-data",
+      localGateway: { engine: "podman", podmanConnection: "local" },
+      tailscaleMode: "direct",
+      spaceVisibility: "public",
+      spaceHardware: "cpu-upgrade",
+      spaceSleepTime: -1,
+      networkAccess: { provider: "tailscale-direct", ipv4: "100.100.100.100" },
+    });
+    await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
+      OPENCLAW_HF_STATE_PREFIX: "custom-state-prefix",
+    });
+    expect(runtime.podmanRunner.calls.some((call) => call.name === "run")).toBe(true);
+  });
+
+  it("refuses remote recovery without the existing credential key", async () => {
+    const hub = createFakeHub({ existingBuckets: ["alice/research-data"] });
+    hub.bucketObjects.set(
+      ".mlclaw/deployment.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        deploymentId: "44444444-4444-5444-a444-444444444444",
+        agent: "research",
+        owner: "alice",
+        bucket: "alice/research-data",
+        statePrefix: "openclaw-state",
+        credentialKeySha256: "a".repeat(64),
+        createdAt: "2026-07-16T00:00:00.000Z",
+      }),
+    );
+    hub.bucketObjects.set(
+      ".mlclaw/desired-state.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        deploymentId: "44444444-4444-5444-a444-444444444444",
+        generation: 1,
+        updatedAt: "2026-07-16T00:10:00.000Z",
+        gateway: { location: "local", port: 7860, tailscaleMode: "off" },
+        model: DEFAULT_MODEL,
+        runtimeImage: DEFAULT_RUNTIME_IMAGE,
+        space: { repo: "alice/research", visibility: "private" },
+      }),
+    );
+    const errors: string[] = [];
+    const runtime = await createRuntime(hub, createPrompt([true]).prompt, errors);
+
+    await expect(main(["--gateway", "local", "--no-pull"], runtime)).resolves.toBe(1);
+    expect(errors.join("\n")).toContain("requires its existing MLCLAW_CREDENTIAL_KEY");
+  });
+
+  it("rejects a mismatched credential key through non-bootstrap reconciliation", async () => {
+    const hub = createFakeHub();
+    const errors: string[] = [];
+    const runtime = await createRuntime(hub, createPrompt([]).prompt, errors);
+    await expect(main(["bootstrap", "--gateway", "local", "--name", "research", "--no-pull"], runtime)).resolves.toBe(
+      0,
+    );
+    await writeSecretEnv(runtime.configRoot, "research", {
+      ...(await readSecretEnv(runtime.configRoot, "research")),
+      MLCLAW_CREDENTIAL_KEY: "replacement-key",
+    });
+    runtime.dockerRunner.calls.length = 0;
+
+    await expect(main(["gateway", "start", "research", "--no-pull"], runtime)).resolves.toBe(1);
+    expect(errors.join("\n")).toContain("does not match the canonical deployment identity");
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(false);
+  });
+
+  it("offers Tailscale access interactively but never enables it implicitly for automation", async () => {
+    const hub = createFakeHub();
+    const interactive = createPrompt([true, "direct"]);
+    const interactiveRuntime = await createRuntime(hub, interactive.prompt);
+    interactiveRuntime.tailscaleRunner.discovery = {
+      ready: true,
+      ipv4: "100.100.100.100",
+      dnsName: "gateway.example.ts.net",
+    };
+
+    await expect(
+      main(
+        ["--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--no-pull"],
+        interactiveRuntime,
+      ),
     ).resolves.toBe(0);
     await expect(readManifest(interactiveRuntime.configRoot, "research")).resolves.toMatchObject({
-      networkAccess: { enabled: true },
+      networkAccess: { provider: "tailscale-direct", enabled: true, ipv4: "100.100.100.100" },
     });
 
     const automated = createPrompt([], false);
     const automatedRuntime = await createRuntime(createFakeHub(), automated.prompt);
-    automatedRuntime.tailscaleRunner.discovery = { ready: true, dnsName: "isengard.example.ts.net" };
+    automatedRuntime.tailscaleRunner.discovery = {
+      ready: true,
+      ipv4: "100.100.100.100",
+      dnsName: "gateway.example.ts.net",
+    };
     await expect(
       main(
         ["--gateway", "local", "--name", "automated", "--gateway-token", "gateway-token", "--yes", "--no-pull"],
@@ -558,7 +951,7 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([]);
     const stderr: string[] = [];
     const runtime = await createRuntime(hub, prompt, stderr);
-    runtime.tailscaleRunner.discovery = { ready: true, dnsName: "isengard.example.ts.net" };
+    runtime.tailscaleRunner.discovery = { ready: true, ipv4: "100.100.100.100", dnsName: "gateway.example.ts.net" };
     runtime.tailscaleRunner.state = "conflict";
 
     await expect(
@@ -570,7 +963,7 @@ describe("mlclaw CLI", () => {
           "research",
           "--gateway-token",
           "gateway-token",
-          "--tailscale",
+          "--tailscale=serve",
           "--no-pull",
         ],
         runtime,
@@ -588,7 +981,7 @@ describe("mlclaw CLI", () => {
     const stderr: string[] = [];
     const runtime = await createRuntime(hub, prompt, stderr);
     runtime.dockerRunner.contexts.set("remote", "ssh://deploy@example.com");
-    runtime.tailscaleRunner.discovery = { ready: true, dnsName: "isengard.example.ts.net" };
+    runtime.tailscaleRunner.discovery = { ready: true, ipv4: "100.100.100.100", dnsName: "gateway.example.ts.net" };
 
     await expect(
       main(
@@ -601,7 +994,7 @@ describe("mlclaw CLI", () => {
           "gateway-token",
           "--docker-context",
           "remote",
-          "--tailscale",
+          "--tailscale=serve",
           "--no-pull",
         ],
         runtime,
@@ -617,12 +1010,21 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([]);
     const stderr: string[] = [];
     const runtime = await createRuntime(hub, prompt, stderr);
-    runtime.tailscaleRunner.discovery = { ready: true, dnsName: "isengard.example.ts.net" };
+    runtime.tailscaleRunner.discovery = { ready: true, ipv4: "100.100.100.100", dnsName: "gateway.example.ts.net" };
     runtime.tailscaleRunner.ensureErrors.push(new Error("enable Serve in the Tailscale admin console"));
 
     await expect(
       main(
-        ["--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--tailscale", "--no-pull"],
+        [
+          "--gateway",
+          "local",
+          "--name",
+          "research",
+          "--gateway-token",
+          "gateway-token",
+          "--tailscale=serve",
+          "--no-pull",
+        ],
         runtime,
       ),
     ).resolves.toBe(1);
@@ -634,6 +1036,72 @@ describe("mlclaw CLI", () => {
     expect(runtime.dockerRunner.calls.some((call) => call.name === "rmVolume")).toBe(true);
     expect(runtime.tailscaleRunner.calls.map((call) => call.name)).toContain("removeMapping");
     expect(runtime.tailscaleRunner.state).toBe("free");
+  });
+
+  it("keeps a healthy loopback gateway while Tailscale Serve approval is pending", async () => {
+    const hub = createFakeHub();
+    const { prompt, notes } = createPrompt([]);
+    const output: string[] = [];
+    const runtime = {
+      ...(await createRuntime(hub, prompt)),
+      stdout: { log: (message: unknown) => output.push(String(message)) },
+    };
+    runtime.tailscaleRunner.discovery = {
+      ready: true,
+      ipv4: "100.100.100.100",
+      dnsName: "gateway.example.ts.net",
+    };
+    runtime.tailscaleRunner.ensureErrors.push(
+      new TailscaleApprovalRequiredError(
+        "https://login.tailscale.com/f/serve?node=example",
+        "Tailscale Serve requires administrator approval",
+      ),
+    );
+
+    await expect(
+      main(
+        [
+          "--gateway",
+          "local",
+          "--name",
+          "research",
+          "--gateway-token",
+          "gateway-token",
+          "--tailscale=serve",
+          "--no-pull",
+        ],
+        runtime,
+      ),
+    ).resolves.toBe(0);
+
+    expect(runtime.dockerRunner.inspectValue?.running).toBe(true);
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      networkAccess: { provider: "tailscale-serve", pendingApproval: true },
+    });
+    await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
+      MLCLAW_ACCESS_ORIGINS: "http://127.0.0.1:7860",
+    });
+    expect(output.some((line) => line.startsWith("Tailnet URL:"))).toBe(false);
+    expect(notes).toContainEqual(
+      expect.objectContaining({
+        title: "TAILSCALE SERVE APPROVAL REQUIRED",
+        message: "https://login.tailscale.com/f/serve?node=example",
+      }),
+    );
+    expect([...hub.bucketObjects.values()].some((value) => value.includes('"state": "waiting_for_approval"'))).toBe(
+      true,
+    );
+
+    output.length = 0;
+    await expect(main(["gateway", "status", "research"], runtime)).resolves.toBe(0);
+    expect(output).toContain("Tailscale Serve: pending administrator approval");
+    expect(output.some((line) => line.startsWith("Tailnet URL:"))).toBe(false);
+
+    await expect(
+      main(["--gateway", "local", "--name", "research", "--tailscale=serve", "--no-pull"], runtime),
+    ).resolves.toBe(0);
+    expect([...hub.bucketObjects.keys()].filter((key) => key.startsWith(".mlclaw/operations/"))).toHaveLength(1);
+    expect([...hub.bucketObjects.values()].some((value) => value.includes('"state": "completed"'))).toBe(true);
   });
 
   it("publishes a requested local gateway port on loopback", async () => {
@@ -661,9 +1129,7 @@ describe("mlclaw CLI", () => {
       name: "run",
       args: [
         expect.objectContaining({
-          hostAddress: "127.0.0.1",
-          hostPort: 17860,
-          containerPort: 7860,
+          publishedPorts: [{ hostAddress: "127.0.0.1", hostPort: 17860, containerPort: 7860 }],
         }),
       ],
     });
@@ -697,7 +1163,7 @@ describe("mlclaw CLI", () => {
     expect(
       runtime.dockerRunner.calls
         .filter((call) => call.name === "run")
-        .map((call) => (call.args[0] as ContainerRunParams).hostPort),
+        .map((call) => (call.args[0] as ContainerRunParams).publishedPorts[0]?.hostPort),
     ).toEqual([17860, 7860]);
     await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({ localPort: 7860 });
     await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
@@ -985,13 +1451,15 @@ describe("mlclaw CLI", () => {
     });
   });
 
-  it("requires confirmation before bootstrap changes a pinned bucket", async () => {
+  it("routes bootstrap bucket changes through state adoption", async () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt([], false);
     const stderr: string[] = [];
     const runtime = await createRuntime(hub, prompt, stderr);
     const original: DeploymentManifest = {
-      version: 1,
+      version: 2,
+      deploymentId: "11111111-1111-5111-a111-111111111111",
+      desiredGeneration: 1,
       agent: "research",
       owner: "alice",
       bucket: "alice/archive-data",
@@ -1024,12 +1492,13 @@ describe("mlclaw CLI", () => {
     );
 
     expect(code).toBe(1);
-    expect(stderr.join("\n")).toContain("bootstrap confirmation required. Pass --yes to continue non-interactively.");
+    expect(stderr.join("\n")).toContain("bootstrap cannot move state");
+    expect(stderr.join("\n")).toContain("mlclaw state adopt research --bucket alice/new-data");
     await expect(readManifest(runtime.configRoot, "research")).resolves.toEqual(original);
     expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(false);
   });
 
-  it("refreshes a running local gateway without changing its runtime id", async () => {
+  it("verifies a no-op bootstrap without restarting the running local gateway", async () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt([]);
     const runtime = await createRuntime(hub, prompt);
@@ -1058,17 +1527,131 @@ describe("mlclaw CLI", () => {
 
     const refreshed = await readManifest(runtime.configRoot, "research");
     expect(refreshed.localRuntimeId).toBe(original.localRuntimeId);
-    expect(runtime.dockerRunner.calls.map((call) => call.name)).toEqual([
-      "inspect",
-      "pull",
-      "stop",
-      "rm",
-      "run",
-      "inspect",
-    ]);
+    expect(runtime.dockerRunner.calls.map((call) => call.name)).toEqual(["inspect"]);
     await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
       MLCLAW_RUNTIME_ID: original.localRuntimeId,
     });
+  });
+
+  it("recreates a local gateway when its running image drifts from desired state", async () => {
+    const hub = createFakeHub();
+    const runtime = await createRuntime(hub, createPrompt([]).prompt);
+    await expect(main(["bootstrap", "--gateway", "local", "--name", "research", "--no-pull"], runtime)).resolves.toBe(
+      0,
+    );
+    runtime.dockerRunner.inspectValue = {
+      exists: true,
+      running: true,
+      status: "running",
+      image: "registry.example/mlclaw:drifted",
+    };
+    runtime.dockerRunner.calls.length = 0;
+
+    await expect(main(["bootstrap", "--name", "research", "--no-pull"], runtime)).resolves.toBe(0);
+
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "rm")).toBe(true);
+    expect(runtime.dockerRunner.calls).toContainEqual({
+      name: "run",
+      args: [expect.objectContaining({ image: DEFAULT_RUNTIME_IMAGE })],
+    });
+  });
+
+  it("resumes an interrupted target generation without applying a new generation", async () => {
+    const hub = createFakeHub();
+    const runtime = await createRuntime(hub, createPrompt([]).prompt);
+    await expect(main(["bootstrap", "--gateway", "local", "--name", "research", "--no-pull"], runtime)).resolves.toBe(
+      0,
+    );
+    const current = await readManifest(runtime.configRoot, "research");
+    const interrupted: DeploymentManifest = {
+      ...current,
+      desiredGeneration: current.desiredGeneration + 1,
+      model: "test-provider/interrupted-model",
+      updatedAt: "2026-07-16T00:01:00.000Z",
+    };
+    await writeManifest(runtime.configRoot, interrupted);
+    const operation = newOperation(interrupted, new Date("2026-07-16T00:01:00.000Z"));
+    await updateOperation(
+      runtime.configRoot,
+      hub.bucket(interrupted.bucket),
+      operation,
+      "applying",
+      new Date("2026-07-16T00:01:00.000Z"),
+    );
+
+    await expect(main(["bootstrap", "--name", "research", "--gateway", "local", "--no-pull"], runtime)).resolves.toBe(
+      0,
+    );
+    expect(JSON.parse(hub.bucketObjects.get(".mlclaw/desired-state.json") ?? "null")).toMatchObject({
+      generation: interrupted.desiredGeneration,
+      model: "test-provider/interrupted-model",
+    });
+    expect([...hub.bucketObjects.keys()].filter((key) => key.startsWith(".mlclaw/operations/"))).toHaveLength(2);
+  });
+
+  it("fails closed when canonical desired state is newer than the local cache", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([]);
+    const stderr: string[] = [];
+    const runtime = await createRuntime(hub, prompt, stderr);
+    await expect(
+      main(["--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--no-pull"], runtime),
+    ).resolves.toBe(0);
+    const desired = JSON.parse(hub.bucketObjects.get(".mlclaw/desired-state.json") ?? "null") as Record<
+      string,
+      unknown
+    >;
+    hub.bucketObjects.set(
+      ".mlclaw/desired-state.json",
+      JSON.stringify({ ...desired, generation: 5, model: "huggingface/example/newer-model:provider" }),
+    );
+    runtime.dockerRunner.calls.length = 0;
+
+    await expect(main(["gateway", "stop", "research"], runtime)).resolves.toBe(1);
+    expect(stderr.join("\n")).toContain("canonical desired state generation 5 is newer");
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "stop")).toBe(false);
+  });
+
+  it("refuses to reconcile a deployment through its tombstoned bucket", async () => {
+    const hub = createFakeHub();
+    const errors: string[] = [];
+    const runtime = await createRuntime(hub, createPrompt([]).prompt, errors);
+    await expect(main(["bootstrap", "--gateway", "local", "--name", "research", "--no-pull"], runtime)).resolves.toBe(
+      0,
+    );
+    const manifest = await readManifest(runtime.configRoot, "research");
+    hub.bucketObjects.set(
+      ".mlclaw/tombstone.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        deploymentId: manifest.deploymentId,
+        movedTo: "alice/research-archive-data",
+        tombstonedAt: "2026-07-16T00:00:00.000Z",
+      }),
+    );
+    runtime.dockerRunner.calls.length = 0;
+
+    await expect(main(["gateway", "stop", "research"], runtime)).resolves.toBe(1);
+
+    expect(errors.join("\n")).toContain("was moved to alice/research-archive-data and cannot be reconciled");
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "stop")).toBe(false);
+  });
+
+  it("refuses to reconcile a bucket through a different owner identity", async () => {
+    const hub = createFakeHub();
+    const errors: string[] = [];
+    const runtime = await createRuntime(hub, createPrompt([]).prompt, errors);
+    await expect(main(["bootstrap", "--gateway", "local", "--name", "research", "--no-pull"], runtime)).resolves.toBe(
+      0,
+    );
+    runtime.dockerRunner.calls.length = 0;
+
+    await expect(
+      main(["bootstrap", "--gateway", "local", "--name", "research", "--owner", "research-org", "--no-pull"], runtime),
+    ).resolves.toBe(1);
+
+    expect(errors.join("\n")).toContain("different canonical deployment identity");
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(false);
   });
 
   it("does not rewrite local config when bootstrap is blocked by a live Space lease", async () => {
@@ -1089,7 +1672,9 @@ describe("mlclaw CLI", () => {
     const stderr: string[] = [];
     const runtime = await createRuntime(hub, prompt, stderr);
     const original: DeploymentManifest = {
-      version: 1,
+      version: 2,
+      deploymentId: "22222222-2222-5222-a222-222222222222",
+      desiredGeneration: 1,
       agent: "research",
       owner: "alice",
       bucket: "alice/research-data",
@@ -1354,6 +1939,16 @@ describe("mlclaw CLI", () => {
     expect(hub.calls.some((call) => call.name === "addSpaceSecret" && call.args[1] === "TELEGRAM_BOT_TOKEN")).toBe(
       false,
     );
+    for (const [index, call] of hub.calls.entries()) {
+      if (
+        call.name === "addSpaceVariable" ||
+        call.name === "addSpaceSecret" ||
+        call.name === "deleteSpaceSecret" ||
+        call.name === "setSpaceVolumes"
+      ) {
+        expect(hub.calls[index - 1]?.name).toBe("control.read");
+      }
+    }
   });
 
   it("offers a ready local runtime when Docker Space creation requires PRO", async () => {
@@ -1734,6 +2329,242 @@ describe("mlclaw CLI", () => {
     expect(hub.calls.some((call) => call.name === "requestSpaceHardware")).toBe(false);
   });
 
+  it("updates an existing private Space when public visibility is requested", async () => {
+    const hub = createFakeHub({ existingSpaces: ["alice/research"] });
+    const runtime = await createRuntime(hub, createPrompt([], false).prompt);
+
+    await expect(main(["bootstrap", "--name", "research", "--public-space", "--yes"], runtime)).resolves.toBe(0);
+
+    expect(hub.calls).toContainEqual({
+      name: "updateSpaceVisibility",
+      args: ["alice/research", "public"],
+    });
+    expect(hub.calls.findIndex((call) => call.name === "updateSpaceVisibility")).toBeGreaterThan(
+      hub.calls.findIndex((call) => call.name === "control.compareAndSwap"),
+    );
+    expect(JSON.parse(hub.bucketObjects.get(".mlclaw/desired-state.json") ?? "null")).toMatchObject({
+      space: { visibility: "public" },
+    });
+  });
+
+  it("preserves the actual visibility of a legacy Space manifest", async () => {
+    const hub = createFakeHub({
+      existingSpaces: ["alice/research"],
+      spaceVisibilities: { "alice/research": "public" },
+    });
+    const runtime = await createRuntime(hub, createPrompt([], false).prompt);
+    await writeManifest(runtime.configRoot, {
+      version: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-existing",
+      gatewayLocation: "space",
+      model: DEFAULT_MODEL,
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      createdAt: "2026-06-16T00:00:00.000Z",
+      updatedAt: "2026-06-16T00:00:00.000Z",
+    });
+
+    await expect(main(["bootstrap", "--name", "research", "--yes"], runtime)).resolves.toBe(0);
+
+    expect(hub.calls.some((call) => call.name === "updateSpaceVisibility")).toBe(false);
+    expect(JSON.parse(hub.bucketObjects.get(".mlclaw/desired-state.json") ?? "null")).toMatchObject({
+      space: { visibility: "public" },
+    });
+  });
+
+  it("preserves portable Space settings when rerun flags are omitted", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([], false);
+    const runtime = await createRuntime(hub, prompt);
+    await expect(
+      main(
+        [
+          "bootstrap",
+          "--name",
+          "research",
+          "--public-space",
+          "--hardware",
+          "cpu-upgrade",
+          "--sleep-time",
+          "42",
+          "--yes",
+        ],
+        runtime,
+      ),
+    ).resolves.toBe(0);
+
+    await expect(main(["bootstrap", "--yes"], runtime)).resolves.toBe(0);
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      spaceVisibility: "public",
+      spaceHardware: "cpu-upgrade",
+      spaceSleepTime: 42,
+    });
+    expect(JSON.parse(hub.bucketObjects.get(".mlclaw/desired-state.json") ?? "null")).toMatchObject({
+      space: { visibility: "public", hardware: "cpu-upgrade", sleepTime: 42 },
+    });
+  });
+
+  it("verifies an unchanged Space without redeploying it", async () => {
+    const hub = createFakeHub();
+    const runtime = await createRuntime(hub, createPrompt([], false).prompt);
+    await expect(main(["bootstrap", "--name", "research", "--yes"], runtime)).resolves.toBe(0);
+    hub.calls.length = 0;
+
+    await expect(main(["bootstrap", "--yes"], runtime)).resolves.toBe(0);
+    expect(hub.calls.some((call) => call.name === "getSpaceRuntime")).toBe(true);
+    expect(
+      hub.calls.some((call) =>
+        ["addSpaceVariable", "addSpaceSecret", "requestSpaceHardware", "setSpaceSleepTime", "restartSpace"].includes(
+          call.name,
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("fully redeploys a Space that was deleted outside ML Claw", async () => {
+    const hub = createFakeHub();
+    const baseRuntime = await createRuntime(hub, createPrompt([], false).prompt);
+    let pushes = 0;
+    const runtime = {
+      ...baseRuntime,
+      pushTemplateToSpace: async () => {
+        pushes += 1;
+        return { templateRev: "test-template" };
+      },
+    };
+    await expect(main(["bootstrap", "--name", "research", "--yes"], runtime)).resolves.toBe(0);
+    hub.existingSpaces.delete("alice/research");
+    pushes = 0;
+
+    await expect(main(["bootstrap", "--yes"], runtime)).resolves.toBe(0);
+
+    expect(pushes).toBe(1);
+    expect(hub.calls).toContainEqual({
+      name: "createDockerSpace",
+      args: ["alice/research", { private: true }],
+    });
+  });
+
+  it("repairs drifted Space variables and bucket mounts", async () => {
+    const hub = createFakeHub();
+    const baseRuntime = await createRuntime(hub, createPrompt([], false).prompt);
+    let pushes = 0;
+    const runtime = {
+      ...baseRuntime,
+      pushTemplateToSpace: async () => {
+        pushes += 1;
+        return { templateRev: "test-template" };
+      },
+    };
+    await expect(main(["bootstrap", "--name", "research", "--yes"], runtime)).resolves.toBe(0);
+    hub.variables.delete("OPENCLAW_MODEL");
+    hub.volumes.length = 0;
+    pushes = 0;
+
+    await expect(main(["bootstrap", "--yes"], runtime)).resolves.toBe(0);
+
+    expect(pushes).toBe(1);
+    expect(hub.variables.get("OPENCLAW_MODEL")?.value).toBe(DEFAULT_MODEL);
+    expect(hub.volumes).toContainEqual(
+      expect.objectContaining({
+        type: "bucket",
+        source: "alice/research-data",
+        mountPath: "/data/mlclaw-state",
+      }),
+    );
+  });
+
+  it("persists a newer canonical generation during an unchanged Space bootstrap", async () => {
+    const hub = createFakeHub();
+    const runtime = await createRuntime(hub, createPrompt([], false).prompt);
+    await expect(main(["bootstrap", "--name", "research", "--yes"], runtime)).resolves.toBe(0);
+    const desired = JSON.parse(hub.bucketObjects.get(".mlclaw/desired-state.json") ?? "null") as Record<
+      string,
+      unknown
+    >;
+    hub.bucketObjects.set(".mlclaw/desired-state.json", JSON.stringify({ ...desired, generation: 7 }));
+
+    await expect(main(["bootstrap", "--yes"], runtime)).resolves.toBe(0);
+
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({ desiredGeneration: 7 });
+  });
+
+  it("applies rotated credentials to an unchanged Space without redeploying it", async () => {
+    const hub = createFakeHub();
+    const baseRuntime = await createRuntime(hub, createPrompt([], false).prompt);
+    let pushes = 0;
+    const runtime = {
+      ...baseRuntime,
+      pushTemplateToSpace: async () => {
+        pushes += 1;
+        return { templateRev: "test-template" };
+      },
+    };
+    await expect(main(["bootstrap", "--name", "research", "--yes"], runtime)).resolves.toBe(0);
+    pushes = 0;
+    hub.calls.length = 0;
+
+    await expect(main(["bootstrap", "--yes", "--router-token", "hf_router_rotated"], runtime)).resolves.toBe(0);
+
+    expect(pushes).toBe(0);
+    expect(hub.calls).toContainEqual({
+      name: "addSpaceSecret",
+      args: ["alice/research", "MLCLAW_ROUTER_TOKEN", "hf_router_rotated"],
+    });
+    await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
+      MLCLAW_ROUTER_TOKEN: "hf_router_rotated",
+    });
+  });
+
+  it("preserves a deployment's custom runtime image during a Space update", async () => {
+    const hub = createFakeHub();
+    const baseRuntime = await createRuntime(hub, createPrompt([], false).prompt);
+    const pushed: Array<string | undefined> = [];
+    const runtime = {
+      ...baseRuntime,
+      pushTemplateToSpace: async (params: { runtimeImage?: string }) => {
+        pushed.push(params.runtimeImage);
+        return { templateRev: "test-template" };
+      },
+    };
+    await expect(
+      main(["bootstrap", "--name", "research", "--runtime-image", "registry.example/mlclaw:custom", "--yes"], runtime),
+    ).resolves.toBe(0);
+    pushed.length = 0;
+
+    await expect(main(["bootstrap", "--model", "example/provider-model", "--yes"], runtime)).resolves.toBe(0);
+
+    expect(pushed).toEqual(["registry.example/mlclaw:custom"]);
+  });
+
+  it("restarts a paused Space during an unchanged bootstrap", async () => {
+    const hub = createFakeHub({
+      spaceRuntime: {
+        stage: "PAUSED",
+        hardware: "cpu-basic",
+        requested_hardware: "cpu-basic",
+        volumes: [
+          {
+            type: "bucket",
+            source: "alice/research-data",
+            mountPath: "/data/mlclaw-state",
+            readOnly: false,
+          },
+        ],
+      },
+    });
+    const runtime = await createRuntime(hub, createPrompt([], false).prompt);
+    await expect(main(["bootstrap", "--name", "research", "--yes"], runtime)).resolves.toBe(0);
+    hub.calls.length = 0;
+
+    await expect(main(["bootstrap", "--yes"], runtime)).resolves.toBe(0);
+    expect(hub.calls).toContainEqual({ name: "restartSpace", args: ["alice/research", true] });
+    expect(hub.calls.some((call) => call.name === "addSpaceVariable" || call.name === "addSpaceSecret")).toBe(false);
+  });
+
   it("allowlists the authenticated user for org-owned browser Spaces", async () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt([], false);
@@ -1762,16 +2593,36 @@ describe("mlclaw CLI", () => {
   it("updates Space hardware settings through the Hugging Face settings API", async () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt([]);
+    const runtime = await createRuntime(hub, prompt);
+    await writeManifest(runtime.configRoot, {
+      version: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-existing",
+      gatewayLocation: "space",
+      model: DEFAULT_MODEL,
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      createdAt: "2026-06-16T00:00:00.000Z",
+      updatedAt: "2026-06-16T00:00:00.000Z",
+    });
+    await writeSecretEnv(runtime.configRoot, "research", {
+      OPENCLAW_HF_STATE_BUCKET: "alice/research-data",
+    });
 
     const code = await main(
       ["settings", "alice/research", "--hardware", "cpu-upgrade", "--sleep-time", "-1", "--yes"],
-      await createRuntime(hub, prompt),
+      runtime,
     );
 
     expect(code).toBe(0);
     expect(hub.calls).toContainEqual({
       name: "requestSpaceHardware",
       args: ["alice/research", "cpu-upgrade", -1],
+    });
+    expect(JSON.parse(hub.bucketObjects.get(".mlclaw/desired-state.json") ?? "null")).toMatchObject({
+      space: { repo: "alice/research", hardware: "cpu-upgrade", sleepTime: -1 },
     });
   });
 
@@ -2263,7 +3114,7 @@ describe("mlclaw CLI", () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt(["telegram-token", "1234567890"]);
     const runtime = await createRuntime(hub, prompt);
-    runtime.tailscaleRunner.discovery = { ready: true, dnsName: "isengard.example.ts.net" };
+    runtime.tailscaleRunner.discovery = { ready: true, ipv4: "100.100.100.100", dnsName: "gateway.example.ts.net" };
 
     await expect(
       main(
@@ -2275,7 +3126,7 @@ describe("mlclaw CLI", () => {
           "research",
           "--gateway-token",
           "gateway-token",
-          "--tailscale",
+          "--tailscale=serve",
           "--no-pull",
         ],
         runtime,
@@ -2333,7 +3184,7 @@ describe("mlclaw CLI", () => {
     expect(removeVolumeIndex).toBeGreaterThan(removeIndex);
     expect(startIndex).toBeGreaterThan(removeVolumeIndex);
     expect(runtime.dockerRunner.calls.some((call) => call.name === "start")).toBe(false);
-    expect(runtime.tailscaleRunner.state).toBe("free");
+    expect(runtime.tailscaleRunner.state).toBe("owned");
   });
 
   it("reuses a persisted Router token when migrating local to Space", async () => {
@@ -2565,6 +3416,92 @@ describe("mlclaw CLI", () => {
     expect(removeVolumeIndex).toBeGreaterThan(removeIndex);
     expect(runIndex).toBeGreaterThan(removeVolumeIndex);
     expect(runtime.dockerRunner.calls.some((call) => call.name === "start")).toBe(false);
+    expect(JSON.parse(hub.bucketObjects.get(".mlclaw/tombstone.json") ?? "null")).toMatchObject({
+      movedTo: "alice/research-archive-data",
+    });
+  });
+
+  it("retries an interrupted old-bucket tombstone", async () => {
+    const hub = createFakeHub({ failFirstTombstoneUpload: true });
+    const stderr: string[] = [];
+    const runtime = await createRuntime(hub, createPrompt([]).prompt, stderr);
+    await expect(
+      main(
+        ["bootstrap", "--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--no-pull"],
+        runtime,
+      ),
+    ).resolves.toBe(0);
+    seedValidStateSnapshot(hub);
+
+    const command = ["state", "adopt", "research", "--bucket", "alice/research-archive-data", "--yes", "--no-pull"];
+    await expect(main(command, runtime)).resolves.toBe(1);
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      bucket: "alice/research-archive-data",
+      pendingTombstoneBucket: "alice/research-data",
+    });
+
+    await expect(main(command, runtime)).resolves.toBe(0);
+    expect((await readManifest(runtime.configRoot, "research")).pendingTombstoneBucket).toBeUndefined();
+    expect(JSON.parse(hub.bucketObjects.get(".mlclaw/tombstone.json") ?? "null")).toMatchObject({
+      movedTo: "alice/research-archive-data",
+    });
+  });
+
+  it("restarts the target gateway before completing an interrupted bucket adoption", async () => {
+    const hub = createFakeHub();
+    const errors: string[] = [];
+    const runtime = await createRuntime(hub, createPrompt([]).prompt, errors);
+    await expect(main(["bootstrap", "--gateway", "local", "--name", "research", "--no-pull"], runtime)).resolves.toBe(
+      0,
+    );
+    seedValidStateSnapshot(hub);
+    runtime.dockerRunner.runErrors.push(new Error("simulated target startup failure"));
+    const command = ["state", "adopt", "research", "--bucket", "alice/research-archive-data", "--yes", "--no-pull"];
+
+    await expect(main(command, runtime)).resolves.toBe(1);
+    expect(errors.join("\n")).toContain("simulated target startup failure");
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      bucket: "alice/research-archive-data",
+      pendingTombstoneBucket: "alice/research-data",
+    });
+    expect(runtime.dockerRunner.inspectValue?.running).toBe(false);
+    runtime.dockerRunner.calls.length = 0;
+
+    await expect(main(command, runtime)).resolves.toBe(0);
+
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(true);
+    expect(runtime.dockerRunner.inspectValue?.running).toBe(true);
+    expect((await readManifest(runtime.configRoot, "research")).pendingTombstoneBucket).toBeUndefined();
+    expect(JSON.parse(hub.bucketObjects.get(".mlclaw/tombstone.json") ?? "null")).toMatchObject({
+      movedTo: "alice/research-archive-data",
+    });
+  });
+
+  it("refuses to adopt a bucket that has already been tombstoned", async () => {
+    const hub = createFakeHub();
+    const errors: string[] = [];
+    const runtime = await createRuntime(hub, createPrompt([]).prompt, errors);
+    await expect(main(["bootstrap", "--gateway", "local", "--name", "research", "--no-pull"], runtime)).resolves.toBe(
+      0,
+    );
+    seedValidStateSnapshot(hub);
+    hub.bucketObjects.set(
+      ".mlclaw/tombstone.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        deploymentId: (await readManifest(runtime.configRoot, "research")).deploymentId,
+        movedTo: "alice/current-data",
+        tombstonedAt: "2026-07-16T00:00:00.000Z",
+      }),
+    );
+
+    await expect(
+      main(["state", "adopt", "research", "--bucket", "alice/retired-data", "--yes", "--no-pull"], runtime),
+    ).resolves.toBe(1);
+    expect(errors.join("\n")).toContain("was moved to alice/current-data and cannot be adopted again");
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      bucket: "alice/research-data",
+    });
   });
 
   it("does not hand off a legacy local gateway before Router credential validation", async () => {
@@ -2709,10 +3646,10 @@ describe("mlclaw CLI", () => {
       networkAccess: {
         provider: "tailscale-serve",
         enabled: true,
-        dnsName: "isengard.example.ts.net",
+        dnsName: "gateway.example.ts.net",
         httpsPort: 17860,
         target: "http://127.0.0.1:7860",
-        accessOrigin: "https://isengard.example.ts.net:17860",
+        accessOrigin: "https://gateway.example.ts.net:17860",
       },
       createdAt: "2026-06-16T00:00:00.000Z",
       updatedAt: "2026-06-16T00:00:00.000Z",

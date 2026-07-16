@@ -602,7 +602,7 @@ describe("ML Claw Space runtime", () => {
 
   it("exchanges a fragment-safe local access token for a signed session", async () => {
     const sessionSecret = "local-session-secret".repeat(4);
-    const tailnetOrigin = "https://isengard.example.ts.net:17860";
+    const tailnetOrigin = "https://gateway.example.ts.net:17860";
     const config = await testConfig({
       gatewayLocation: "local",
       oauthClientId: undefined,
@@ -1964,7 +1964,7 @@ describe("ML Claw Space runtime", () => {
     );
     const config = await testConfig({
       publicUrl: "https://alice-research.hf.space",
-      accessOrigins: ["https://alice-research.hf.space", "https://isengard.example.ts.net:17860"],
+      accessOrigins: ["https://alice-research.hf.space", "https://gateway.example.ts.net:17860"],
       openclawConfigPath: configPath,
     });
 
@@ -1986,7 +1986,7 @@ describe("ML Claw Space runtime", () => {
       trustedProxies: ["127.0.0.1", "::1"],
       controlUi: {
         dangerouslyDisableDeviceAuth: true,
-        allowedOrigins: ["https://alice-research.hf.space", "https://isengard.example.ts.net:17860"],
+        allowedOrigins: ["https://alice-research.hf.space", "https://gateway.example.ts.net:17860"],
         embedSandbox: "scripts",
       },
     });
@@ -2211,14 +2211,14 @@ describe("ML Claw Space runtime", () => {
       OPENCLAW_HF_STATE_BUCKET: "alice/research-data",
       MLCLAW_GATEWAY_LOCATION: "local",
       MLCLAW_PUBLIC_URL: "http://127.0.0.1:17860",
-      MLCLAW_ACCESS_ORIGINS: "https://isengard.example.ts.net:17860",
+      MLCLAW_ACCESS_ORIGINS: "https://gateway.example.ts.net:17860",
       MLCLAW_RUNTIME_ID: "local-research-test",
       MLCLAW_SESSION_SECRET: sessionSecret,
       MLCLAW_CREDENTIAL_KEY: "k".repeat(48),
     });
 
     expect(config.publicUrl).toBe("http://127.0.0.1:17860");
-    expect(config.accessOrigins).toEqual(["http://127.0.0.1:17860", "https://isengard.example.ts.net:17860"]);
+    expect(config.accessOrigins).toEqual(["http://127.0.0.1:17860", "https://gateway.example.ts.net:17860"]);
     expect(config.sessionCookieName).toMatch(/^mlclaw_session_[a-f0-9]{12}$/);
     expect(config.localAccessUser).toBe("alice");
     expect(config.localAccessToken).toBe(deriveLocalAccessToken(sessionSecret));

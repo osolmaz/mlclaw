@@ -162,6 +162,25 @@ Use local gateway mode when the user wants the gateway on their machine:
 npx mlclaw@latest bootstrap --gateway local --name mlclaw
 ```
 
+After the first setup, `mlclaw bootstrap` and `mlclaw configure` automatically
+select the only local deployment. Use the same command to reconfigure or resume
+it. If local configuration is missing, interactive bootstrap can recover a
+validated deployment marker from an owned Storage Bucket; credentials and
+machine-specific container bindings must be supplied again.
+
+Tailnet access is explicit:
+
+```bash
+npx mlclaw@latest bootstrap --gateway local --tailscale=direct
+npx mlclaw@latest bootstrap --gateway local --tailscale=serve
+npx mlclaw@latest bootstrap --gateway local --tailscale=off
+```
+
+Direct mode binds loopback and the exact Tailscale IPv4 address. Serve mode
+keeps the gateway on loopback and creates one HTTPS Serve mapping. A Serve
+administrator approval prompt is resumable: approve the printed URL, then run
+bootstrap again.
+
 If the user has multiple Docker engines, pin the intended context:
 
 ```bash
@@ -185,7 +204,7 @@ Default/recommended:
 ```bash
 npx mlclaw@latest bootstrap \
   --name mlclaw \
-  --model huggingface/google/gemma-4-26B-A4B-it:deepinfra
+  --model huggingface/zai-org/GLM-5.2:fireworks-ai
 ```
 
 Known useful router-compatible choices:

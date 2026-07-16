@@ -31,9 +31,11 @@ export type SpaceRuntime = {
   volumes?: SpaceVolume[] | null;
 };
 type SpaceInfo = {
+  private?: boolean;
   runtime?: SpaceRuntime | null;
 };
 export type HubCommitFile = { path: string; content: Uint8Array | Buffer };
+type ModelInfo = { sha?: string };
 
 export class HubApi {
   private readonly hubUrl: string;
@@ -82,6 +84,52 @@ export class HubApi {
     }
   }
 
+  async listBuckets(namespace?: string): Promise<string[]> {
+    const buckets: string[] = [];
+    let url: string | null = `${this.hubUrl}/api/buckets/${encodeURIComponent(namespace ?? "me")}`;
+    while (url) {
+      const response = await this.request(url);
+      const page = (await response.json()) as Array<{ id?: string; name?: string }>;
+      for (const bucket of page) {
+        const id = bucket.id ?? bucket.name;
+        if (typeof id === "string" && id.includes("/")) buckets.push(id);
+      }
+      url = nextLink(response.headers.get("link"));
+    }
+    return [...new Set(buckets)].sort();
+  }
+
+  async deploymentControlStore(
+    owner: string,
+    deploymentId: string,
+  ): Promise<{
+    read(): Promise<{ value: unknown | null; revision: string }>;
+    compareAndSwap(expectedRevision: string, value: unknown | null): Promise<string>;
+  }> {
+    const repoId = `${owner}/mlclaw-control-${deploymentId.replaceAll("-", "")}`;
+    await this.ensurePrivateModelRepo(repoId);
+    const path = "control-lease.json";
+    return {
+      read: async () => await this.readModelDocument(repoId, path),
+      compareAndSwap: async (expectedRevision, value) =>
+        await this.commitModelDocument(repoId, path, expectedRevision, value),
+    };
+  }
+
+  async deploymentClaimStore(owner: string): Promise<{
+    read(): Promise<{ value: unknown | null; revision: string }>;
+    compareAndSwap(expectedRevision: string, value: unknown | null): Promise<string>;
+  }> {
+    const repoId = `${owner}/mlclaw-control-claims`;
+    await this.ensurePrivateModelRepo(repoId);
+    const path = "control-lease.json";
+    return {
+      read: async () => await this.readModelDocument(repoId, path),
+      compareAndSwap: async (expectedRevision, value) =>
+        await this.commitModelDocument(repoId, path, expectedRevision, value),
+    };
+  }
+
   async createDockerSpace(
     repoId: string,
     options?: { private?: boolean; hardware?: string; sleepTimeSeconds?: number },
@@ -125,6 +173,19 @@ export class HubApi {
       }
       throw err;
     }
+  }
+
+  async getSpaceVisibility(repoId: string): Promise<"private" | "public"> {
+    const info = await this.requestJson<SpaceInfo>(`/api/spaces/${repoId}`);
+    return info.private === true ? "private" : "public";
+  }
+
+  async updateSpaceVisibility(repoId: string, visibility: "private" | "public"): Promise<void> {
+    await this.requestJson(`/api/spaces/${repoId}/settings`, {
+      method: "PUT",
+      body: JSON.stringify({ visibility }),
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   async addSpaceVariable(repoId: string, key: string, value: string): Promise<void> {
@@ -274,10 +335,14 @@ export class HubApi {
   }
 
   async fetchSpaceLogsTextFallback(repoId: string, kind: "run" | "build" = "run"): Promise<string> {
-    const response = await this.request(`/api/spaces/${repoId}/logs/${kind}`, {
-      headers: { Accept: "text/event-stream" },
-      signal: AbortSignal.timeout(5000),
-    }, true);
+    const response = await this.request(
+      `/api/spaces/${repoId}/logs/${kind}`,
+      {
+        headers: { Accept: "text/event-stream" },
+        signal: AbortSignal.timeout(5000),
+      },
+      true,
+    );
     return sseDataToText(await response.text());
   }
 
@@ -289,13 +354,16 @@ export class HubApi {
       .sort();
   }
 
-  async commitSpaceFiles(repoId: string, params: {
-    files: HubCommitFile[];
-    deletePaths?: string[];
-    title: string;
-    description?: string;
-    branch?: string;
-  }): Promise<void> {
+  async commitSpaceFiles(
+    repoId: string,
+    params: {
+      files: HubCommitFile[];
+      deletePaths?: string[];
+      title: string;
+      description?: string;
+      branch?: string;
+    },
+  ): Promise<void> {
     const body = [
       {
         key: "header",
@@ -325,6 +393,82 @@ export class HubApi {
       headers: { "Content-Type": "application/x-ndjson" },
       body,
     });
+  }
+
+  private async ensurePrivateModelRepo(repoId: string): Promise<void> {
+    const [owner, name] = splitRepoId(repoId);
+    const me = await this.whoami();
+    try {
+      await this.requestJson("/api/repos/create", {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          organization: owner === me.name ? null : owner,
+          type: "model",
+          private: true,
+        }),
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (error) {
+      if (!(error instanceof HubApiError) || error.status !== 409) throw error;
+    }
+    const info = await this.requestJson<ModelInfo>(`/api/models/${repoId}`);
+    if (info.sha) return;
+    await this.commitModelDocument(repoId, "README.md", "", "# ML Claw deployment control\n");
+  }
+
+  private async readModelDocument(repoId: string, path: string): Promise<{ value: unknown | null; revision: string }> {
+    const info = await this.requestJson<ModelInfo>(`/api/models/${repoId}`);
+    if (!info.sha) throw new Error(`control repository ${repoId} has no revision`);
+    const url = `${this.hubUrl}/${repoId}/resolve/${info.sha}/${path.split("/").map(encodeURIComponent).join("/")}`;
+    const response = await this.fetchImpl(url, {
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
+    if (response.status === 404) return { value: null, revision: info.sha };
+    if (!response.ok) throw new HubApiError(response.status, url, await response.text());
+    return { value: JSON.parse(await response.text()), revision: info.sha };
+  }
+
+  private async commitModelDocument(
+    repoId: string,
+    path: string,
+    parentCommit: string,
+    value: unknown | null,
+  ): Promise<string> {
+    const header: Record<string, string> = {
+      summary: value === null ? "Release deployment control" : "Update deployment control",
+      description: "ML Claw deployment reconciliation state",
+    };
+    if (parentCommit) header.parentCommit = parentCommit;
+    const operation =
+      value === null
+        ? { key: "deletedFile", value: { path } }
+        : {
+            key: "file",
+            value: {
+              path,
+              content: Buffer.from(typeof value === "string" ? value : `${JSON.stringify(value, null, 2)}\n`).toString(
+                "base64",
+              ),
+              encoding: "base64",
+            },
+          };
+    const body = [{ key: "header", value: header }, operation].map((entry) => JSON.stringify(entry)).join("\n");
+    try {
+      const response = await this.request(`/api/models/${repoId}/commit/main`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-ndjson" },
+        body,
+      });
+      const result = (await response.json()) as { commitOid?: string };
+      if (!result.commitOid) throw new Error("Hub commit response omitted commitOid");
+      return result.commitOid;
+    } catch (error) {
+      if (error instanceof HubApiError && (error.status === 409 || error.status === 412)) {
+        throw new Error("deployment control lease changed concurrently", { cause: error });
+      }
+      throw error;
+    }
   }
 
   async assertBucketAccessible(bucketId: string): Promise<void> {
@@ -392,4 +536,13 @@ function sseDataToText(raw: string): string {
     }
   }
   return lines.join("");
+}
+
+function nextLink(header: string | null): string | null {
+  if (!header) return null;
+  for (const part of header.split(",")) {
+    const match = part.match(/<([^>]+)>\s*;\s*rel="next"/);
+    if (match?.[1]) return match[1];
+  }
+  return null;
 }

@@ -4,7 +4,8 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 const TAILSCALE_TIMEOUT_MS = 5_000;
 
-export type TailscaleDiscovery = { ready: true; dnsName: string } | { ready: false; reason: string };
+export type TailscaleDiscovery =
+  { ready: true; ipv4: string; dnsName?: string; tailnet?: string } | { ready: false; reason: string };
 
 export type TailscaleServeMapping = {
   dnsName: string;
@@ -49,7 +50,14 @@ export class CliTailscaleRunner implements TailscaleRunner {
     if (state === "conflict") {
       throw new Error(`Tailscale Serve HTTPS port ${mapping.httpsPort} is already in use`);
     }
-    await this.run(["serve", "--bg", "--yes", `--https=${mapping.httpsPort}`, mapping.target]);
+    try {
+      await this.run(["serve", "--bg", "--yes", `--https=${mapping.httpsPort}`, mapping.target]);
+    } catch (error) {
+      const message = commandErrorMessage(error);
+      const approvalUrl = extractTailscaleApprovalUrl(message);
+      if (approvalUrl) throw new TailscaleApprovalRequiredError(approvalUrl, message);
+      throw error;
+    }
     if ((await this.mappingState(mapping)) !== "owned") {
       throw new Error("Tailscale Serve did not retain the requested ML Claw mapping");
     }
@@ -93,11 +101,34 @@ export function parseTailscaleStatus(value: unknown): TailscaleDiscovery {
   if (self?.Online === false) {
     return { ready: false, reason: "Tailscale is offline" };
   }
+  const ipv4 = arrayValue(self?.TailscaleIPs)?.find(
+    (candidate) => typeof candidate === "string" && isTailscaleIpv4(candidate),
+  );
+  if (typeof ipv4 !== "string") return { ready: false, reason: "Tailscale IPv4 address is unavailable" };
   const dnsName = normalizeTailscaleDnsName(stringValue(self?.DNSName));
-  if (!dnsName) {
-    return { ready: false, reason: "Tailscale MagicDNS name is unavailable" };
+  const tailnet = stringValue(recordValue(status.CurrentTailnet)?.Name);
+  return { ready: true, ipv4, ...(dnsName ? { dnsName } : {}), ...(tailnet ? { tailnet } : {}) };
+}
+
+export class TailscaleApprovalRequiredError extends Error {
+  constructor(
+    readonly approvalUrl: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "TailscaleApprovalRequiredError";
   }
-  return { ready: true, dnsName };
+}
+
+export function extractTailscaleApprovalUrl(message: string): string | undefined {
+  const match = message.match(/https:\/\/login\.tailscale\.com\/[A-Za-z0-9_?&=./%-]+/);
+  if (!match) return undefined;
+  try {
+    const url = new URL(match[0]);
+    return url.protocol === "https:" && url.hostname === "login.tailscale.com" ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function tailscaleServeMappingState(value: unknown, mapping: TailscaleServeMapping): TailscaleServeState {
@@ -196,4 +227,14 @@ function recordValue(value: unknown): Record<string, unknown> | undefined {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function arrayValue(value: unknown): unknown[] | undefined {
+  return Array.isArray(value) ? value : undefined;
+}
+
+function isTailscaleIpv4(value: string): boolean {
+  const octets = value.split(".").map(Number);
+  if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) return false;
+  return octets[0] === 100 && (octets[1] as number) >= 64 && (octets[1] as number) <= 127;
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CliTailscaleRunner,
+  TailscaleApprovalRequiredError,
   parseTailscaleStatus,
   tailscaleAccessOrigin,
   tailscaleServeMappingState,
@@ -8,19 +9,19 @@ import {
 } from "../src/mlclaw/tailscale.js";
 
 const mapping: TailscaleServeMapping = {
-  dnsName: "isengard.example.ts.net",
+  dnsName: "gateway.example.ts.net",
   httpsPort: 7860,
   target: "http://127.0.0.1:7860",
 };
 
 describe("Tailscale access", () => {
-  it("discovers only an online running node with a valid MagicDNS name", () => {
+  it("discovers only an online running node with an exact Tailscale IPv4 address", () => {
     expect(
       parseTailscaleStatus({
         BackendState: "Running",
-        Self: { Online: true, DNSName: "Isengard.Example.ts.net." },
+        Self: { Online: true, DNSName: "Gateway.Example.ts.net.", TailscaleIPs: ["100.100.100.100"] },
       }),
-    ).toEqual({ ready: true, dnsName: "isengard.example.ts.net" });
+    ).toEqual({ ready: true, ipv4: "100.100.100.100", dnsName: "gateway.example.ts.net" });
     expect(parseTailscaleStatus({ BackendState: "NeedsLogin", Self: {} })).toEqual({
       ready: false,
       reason: "Tailscale is NeedsLogin",
@@ -96,8 +97,8 @@ describe("Tailscale access", () => {
   });
 
   it("formats default and custom HTTPS origins", () => {
-    expect(tailscaleAccessOrigin({ dnsName: mapping.dnsName, httpsPort: 443 })).toBe("https://isengard.example.ts.net");
-    expect(tailscaleAccessOrigin(mapping)).toBe("https://isengard.example.ts.net:7860");
+    expect(tailscaleAccessOrigin({ dnsName: mapping.dnsName, httpsPort: 443 })).toBe("https://gateway.example.ts.net");
+    expect(tailscaleAccessOrigin(mapping)).toBe("https://gateway.example.ts.net:7860");
   });
 
   it("preserves an actionable Tailscale setup URL from command output", async () => {
@@ -112,6 +113,19 @@ describe("Tailscale access", () => {
       ready: false,
       reason: "To enable Serve, visit: https://login.tailscale.com/f/serve?node=test",
     });
+  });
+
+  it("classifies Serve administrator approval as a resumable condition", async () => {
+    const runner = new CliTailscaleRunner(async (args) => {
+      if (args.join(" ") === "serve status --json") return { stdout: "{}", stderr: "" };
+      throw Object.assign(new Error("approval required"), {
+        stderr: "Approve Serve at https://login.tailscale.com/f/serve?node=example",
+      });
+    });
+    await expect(runner.ensureMapping(mapping)).rejects.toMatchObject({
+      name: "TailscaleApprovalRequiredError",
+      approvalUrl: "https://login.tailscale.com/f/serve?node=example",
+    } satisfies Partial<TailscaleApprovalRequiredError>);
   });
 });
 

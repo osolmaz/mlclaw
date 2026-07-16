@@ -5,6 +5,7 @@ import {
   isMissingVolumeError,
   mergeDockerLogStreams,
   parsePodmanConnections,
+  renderPublishedPorts,
   withContext,
   withPodmanConnection,
 } from "../src/mlclaw/docker.js";
@@ -80,5 +81,17 @@ describe("Docker error matching", () => {
       context: "local",
       detail: "Podman is installed but its engine is unavailable",
     });
+  });
+
+  it("renders exact published ports and rejects wildcard listeners", () => {
+    expect(
+      renderPublishedPorts([
+        { hostAddress: "127.0.0.1", hostPort: 7860, containerPort: 7860 },
+        { hostAddress: "100.100.100.100", hostPort: 7860, containerPort: 7860 },
+      ]),
+    ).toEqual(["-p", "127.0.0.1:7860:7860", "-p", "100.100.100.100:7860:7860"]);
+    expect(() => renderPublishedPorts([{ hostAddress: "0.0.0.0", hostPort: 7860, containerPort: 7860 }])).toThrow(
+      "wildcard",
+    );
   });
 });

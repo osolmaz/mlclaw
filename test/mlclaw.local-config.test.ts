@@ -46,6 +46,36 @@ describe("local ML Claw config", () => {
     });
   });
 
+  it("rejects unknown manifest fields", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "mlclaw-config-"));
+    await fs.mkdir(path.join(root, "deployments"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "deployments", "research.json"),
+      JSON.stringify({
+        version: 2,
+        deploymentId: "11111111-1111-5111-a111-111111111111",
+        desiredGeneration: 1,
+        agent: "research",
+        owner: "alice",
+        bucket: "alice/research-data",
+        space: "alice/research",
+        localRuntimeId: "local-research-test",
+        gatewayLocation: "local",
+        model: "test-model",
+        runtimeImage: "example.invalid/runtime:test",
+        createdAt: "2026-07-16T00:00:00.000Z",
+        updatedAt: "2026-07-16T00:00:00.000Z",
+        credential: "must-not-be-accepted",
+      }),
+    );
+    await expect(readManifest(root, "research")).rejects.toThrow();
+  });
+
+  it("rejects agent names that can escape the config directories", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "mlclaw-config-"));
+    await expect(writeSecretEnv(root, "../../outside", { HF_TOKEN: "hf_test" })).rejects.toThrow("invalid agent name");
+  });
+
   it("writes secret env files with user-only permissions", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "mlclaw-config-"));
 
@@ -91,10 +121,10 @@ describe("local ML Claw config", () => {
     const raw = "A=plain-token\nB=has spaces\nC=123,456\nD=https://proxy.example/?a=b&c=d\n";
     expect(
       renderSecretEnv({
-      A: "plain-token",
-      B: "has spaces",
-      C: "123,456",
-      D: "https://proxy.example/?a=b&c=d",
+        A: "plain-token",
+        B: "has spaces",
+        C: "123,456",
+        D: "https://proxy.example/?a=b&c=d",
       }),
     ).toBe(raw);
     expect(parseSecretEnv(raw)).toEqual({

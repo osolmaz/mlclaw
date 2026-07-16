@@ -161,6 +161,19 @@ npx mlclaw@latest bootstrap --gateway local --container-runtime docker
 npx mlclaw@latest bootstrap --gateway local --container-runtime podman
 ```
 
+Bootstrap is also the reconfiguration command. With one known deployment,
+rerun `mlclaw bootstrap` or `mlclaw configure` without `--name`; ML Claw selects
+it, shows only configuration changes, and verifies no-op runs without restarting
+a healthy gateway. If the local cache is missing, interactive bootstrap can
+recover a deployment from its validated marker in an owned Storage Bucket.
+Recovery never invents a replacement encryption key: restore the deployment's
+existing `MLCLAW_CREDENTIAL_KEY` in the environment for the recovery run. ML
+Claw verifies its stored SHA-256 fingerprint before changing the runtime.
+
+Cross-host reconciliation uses a generated private Hugging Face model repository
+per deployment as its control lock. Parent-commit compare-and-swap prevents two
+controllers from acquiring the same deployment lease concurrently.
+
 The local control plane is published only on loopback. The default URL is
 `http://127.0.0.1:7860`; choose another unprivileged port with `--local-port`
 when needed. On a remote host, use the SSH forwarding command printed by the
@@ -168,22 +181,25 @@ CLI, then open the same loopback URL in your local browser. The CLI prints a
 private fragment-based access link that is exchanged for an HTTP-only browser
 session; rerun `mlclaw gateway status <agent>` to retrieve it.
 
-To reach the loopback gateway from other devices on your private tailnet, opt
-in to a scoped Tailscale Serve mapping:
+To reach the gateway from other devices on your private tailnet, choose direct
+HTTP over Tailscale or an HTTPS Tailscale Serve mapping:
 
 ```bash
-npx mlclaw@latest bootstrap --gateway local --tailscale
-mlclaw gateway start mlclaw --tailscale
+npx mlclaw@latest bootstrap --gateway local --tailscale=direct
+npx mlclaw@latest bootstrap --gateway local --tailscale=serve
+mlclaw gateway start mlclaw --tailscale=off
 ```
 
 Interactive bootstrap offers this option when Tailscale is installed, signed
-in, and online; it remains off by default. ML Claw maps one HTTPS origin to the
-loopback gateway, prints both access links, and keeps its own browser session
-authentication in front of OpenClaw. It does not enable public Tailscale
-Funnel access or reset unrelated Serve handlers. Use `--tailscale-port <port>`
-when the default HTTPS port is already owned, and disable the persisted mapping
-with `mlclaw gateway start mlclaw --no-tailscale`. The first Serve setup may
-print a Tailscale admin URL for the tailnet owner to approve HTTPS serving.
+in, and online; it remains off by default. Direct mode publishes only loopback
+and the node's exact Tailscale IPv4 address. Traffic is HTTP in the browser but
+encrypted between tailnet peers by Tailscale. Serve mode keeps the container on
+loopback and owns one scoped HTTPS handler. ML Claw keeps its own browser
+session authentication in front of OpenClaw in both modes, never enables
+Funnel, and never resets unrelated Serve handlers. Use `--tailscale-port
+<port>` for a non-default port. If Serve needs tailnet administrator approval,
+the loopback gateway remains running; approve the printed URL and rerun
+`mlclaw bootstrap` to resume.
 
 Docker Desktop, OrbStack, Colima, Rancher Desktop, and other Docker-compatible
 engines are used through Docker contexts. On Windows, Podman machine

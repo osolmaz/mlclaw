@@ -5,7 +5,7 @@ describe("mlclaw naming", () => {
   it("derives deployable names from Telegram bot usernames", () => {
     expect(slugifyAgentName("@Bob_Bot")).toBe("bob");
     expect(slugifyAgentName("research-helper-bot")).toBe("research-helper");
-    expect(slugifyAgentName("Onur Claw")).toBe("onur-claw");
+    expect(slugifyAgentName("Example Claw")).toBe("example-claw");
   });
 
   it("derives space and bucket ids from the agent name", () => {
