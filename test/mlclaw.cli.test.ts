@@ -152,8 +152,8 @@ function createFakeHub(
       calls.push({ name: "bucketExists", args: [bucket] });
       return existingBuckets.has(bucket);
     },
-    async listBuckets() {
-      calls.push({ name: "listBuckets", args: [] });
+    async listBuckets(namespace?: string) {
+      calls.push({ name: "listBuckets", args: namespace ? [namespace] : [] });
       return [...existingBuckets];
     },
     async deploymentControlStore() {
@@ -684,6 +684,43 @@ describe("mlclaw CLI", () => {
       bucket: "research-org/research-data",
       space: "research-org/research",
     });
+  });
+
+  it("does not auto-select a local deployment from a different explicit owner", async () => {
+    const hub = createFakeHub();
+    const runtime = await createRuntime(hub, createPrompt(["new-agent"]).prompt);
+    await writeManifest(runtime.configRoot, {
+      version: 2,
+      deploymentId: "11111111-1111-5111-a111-111111111111",
+      desiredGeneration: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-existing",
+      gatewayLocation: "local",
+      model: DEFAULT_MODEL,
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      createdAt: "2026-07-16T00:00:00.000Z",
+      updatedAt: "2026-07-16T00:00:00.000Z",
+    });
+
+    await expect(
+      main(
+        ["bootstrap", "--owner", "research-org", "--gateway", "local", "--gateway-token", "gateway-token", "--no-pull"],
+        runtime,
+      ),
+    ).resolves.toBe(0);
+
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      owner: "alice",
+      bucket: "alice/research-data",
+    });
+    await expect(readManifest(runtime.configRoot, "new-agent")).resolves.toMatchObject({
+      owner: "research-org",
+      bucket: "research-org/new-agent-data",
+    });
+    expect(hub.calls).toContainEqual({ name: "listBuckets", args: ["research-org"] });
   });
 
   it("recovers the only trusted remote deployment when local state is absent", async () => {
@@ -1472,6 +1509,31 @@ describe("mlclaw CLI", () => {
 
     await expect(main(["gateway", "stop", "research"], runtime)).resolves.toBe(1);
     expect(stderr.join("\n")).toContain("canonical desired state generation 5 is newer");
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "stop")).toBe(false);
+  });
+
+  it("refuses to reconcile a deployment through its tombstoned bucket", async () => {
+    const hub = createFakeHub();
+    const errors: string[] = [];
+    const runtime = await createRuntime(hub, createPrompt([]).prompt, errors);
+    await expect(main(["bootstrap", "--gateway", "local", "--name", "research", "--no-pull"], runtime)).resolves.toBe(
+      0,
+    );
+    const manifest = await readManifest(runtime.configRoot, "research");
+    hub.bucketObjects.set(
+      ".mlclaw/tombstone.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        deploymentId: manifest.deploymentId,
+        movedTo: "alice/research-archive-data",
+        tombstonedAt: "2026-07-16T00:00:00.000Z",
+      }),
+    );
+    runtime.dockerRunner.calls.length = 0;
+
+    await expect(main(["gateway", "stop", "research"], runtime)).resolves.toBe(1);
+
+    expect(errors.join("\n")).toContain("was moved to alice/research-archive-data and cannot be reconciled");
     expect(runtime.dockerRunner.calls.some((call) => call.name === "stop")).toBe(false);
   });
 
@@ -3083,6 +3145,36 @@ describe("mlclaw CLI", () => {
     });
 
     await expect(main(command, runtime)).resolves.toBe(0);
+    expect((await readManifest(runtime.configRoot, "research")).pendingTombstoneBucket).toBeUndefined();
+    expect(JSON.parse(hub.bucketObjects.get(".mlclaw/tombstone.json") ?? "null")).toMatchObject({
+      movedTo: "alice/research-archive-data",
+    });
+  });
+
+  it("restarts the target gateway before completing an interrupted bucket adoption", async () => {
+    const hub = createFakeHub();
+    const errors: string[] = [];
+    const runtime = await createRuntime(hub, createPrompt([]).prompt, errors);
+    await expect(main(["bootstrap", "--gateway", "local", "--name", "research", "--no-pull"], runtime)).resolves.toBe(
+      0,
+    );
+    seedValidStateSnapshot(hub);
+    runtime.dockerRunner.runErrors.push(new Error("simulated target startup failure"));
+    const command = ["state", "adopt", "research", "--bucket", "alice/research-archive-data", "--yes", "--no-pull"];
+
+    await expect(main(command, runtime)).resolves.toBe(1);
+    expect(errors.join("\n")).toContain("simulated target startup failure");
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      bucket: "alice/research-archive-data",
+      pendingTombstoneBucket: "alice/research-data",
+    });
+    expect(runtime.dockerRunner.inspectValue?.running).toBe(false);
+    runtime.dockerRunner.calls.length = 0;
+
+    await expect(main(command, runtime)).resolves.toBe(0);
+
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(true);
+    expect(runtime.dockerRunner.inspectValue?.running).toBe(true);
     expect((await readManifest(runtime.configRoot, "research")).pendingTombstoneBucket).toBeUndefined();
     expect(JSON.parse(hub.bucketObjects.get(".mlclaw/tombstone.json") ?? "null")).toMatchObject({
       movedTo: "alice/research-archive-data",

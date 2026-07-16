@@ -51,6 +51,20 @@ describe("HubApi Space commits", () => {
     expect(requests).toEqual(["https://huggingface.co/api/buckets/me", "https://huggingface.co/api/buckets/me?page=2"]);
   });
 
+  it("lists buckets from an explicit organization namespace", async () => {
+    const requests: string[] = [];
+    const hub = new HubApi({
+      token: "hf_test_token",
+      fetch: async (url) => {
+        requests.push(String(url));
+        return Response.json([{ id: "research-org/shared-state" }]);
+      },
+    });
+
+    await expect(hub.listBuckets("research-org")).resolves.toEqual(["research-org/shared-state"]);
+    expect(requests).toEqual(["https://huggingface.co/api/buckets/research-org"]);
+  });
+
   it("creates Docker Spaces as private by default", async () => {
     const requests: Array<{ url: string; init: RequestInit }> = [];
     const hub = new HubApi({

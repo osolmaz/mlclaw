@@ -83,9 +83,9 @@ export class HubApi {
     }
   }
 
-  async listBuckets(): Promise<string[]> {
+  async listBuckets(namespace?: string): Promise<string[]> {
     const buckets: string[] = [];
-    let url: string | null = `${this.hubUrl}/api/buckets/me`;
+    let url: string | null = `${this.hubUrl}/api/buckets/${encodeURIComponent(namespace ?? "me")}`;
     while (url) {
       const response = await this.request(url);
       const page = (await response.json()) as Array<{ id?: string; name?: string }>;

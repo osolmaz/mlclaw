@@ -14928,9 +14928,9 @@ var HubApi = class {
       throw err;
     }
   }
-  async listBuckets() {
+  async listBuckets(namespace) {
     const buckets = [];
-    let url = `${this.hubUrl}/api/buckets/me`;
+    let url = `${this.hubUrl}/api/buckets/${encodeURIComponent(namespace ?? "me")}`;
     while (url) {
       const response = await this.request(url);
       const page = await response.json();
@@ -20549,7 +20549,9 @@ async function main(argv = process4.argv.slice(2), runtimeOverrides = {}) {
 }
 async function resolveBootstrapAgentName(params) {
   if (params.requestedName) return slugifyAgentName(params.requestedName);
-  const local = await listManifests(params.runtime.configRoot);
+  const local = (await listManifests(params.runtime.configRoot)).filter(
+    (manifest) => !params.requestedOwner || manifest.owner === params.requestedOwner
+  );
   if (local.length === 1) {
     const deployment = local[0];
     params.runtime.stdout.log(`Existing deployment found: ${deployment.agent}`);
@@ -20597,7 +20599,7 @@ async function resolveBootstrapAgentName(params) {
   return slugifyAgentName(await promptAgentName(params.runtime));
 }
 async function discoverRemoteDeployments(owner, hub) {
-  const buckets = (await hub.listBuckets()).filter((bucket) => bucket.startsWith(`${owner}/`));
+  const buckets = (await hub.listBuckets(owner)).filter((bucket) => bucket.startsWith(`${owner}/`));
   const found = [];
   for (let offset = 0; offset < buckets.length; offset += 4) {
     const page = await Promise.all(
@@ -20670,6 +20672,7 @@ async function bootstrap(opts, runtime) {
   const requestedAgentName = opts.name ?? bot?.username;
   let agentName = await resolveBootstrapAgentName({
     ...requestedAgentName ? { requestedName: requestedAgentName } : {},
+    ...opts.owner ? { requestedOwner: opts.owner } : {},
     owner: selectionOwner,
     hub,
     runtime
@@ -20913,6 +20916,12 @@ async function reconcileManifest(params) {
   return await withDeploymentLock(runtime.configRoot, params.manifest.deploymentId, async () => {
     let requestedManifest = params.manifest;
     const client = hub.bucket(requestedManifest.bucket);
+    const tombstone = await readDeploymentTombstone(client);
+    if (tombstone) {
+      throw new Error(
+        `state bucket ${requestedManifest.bucket} was moved to ${tombstone.movedTo} and cannot be reconciled`
+      );
+    }
     const currentIdentity = await readDeploymentIdentity(client);
     if (currentIdentity && currentIdentity.deploymentId !== requestedManifest.deploymentId) {
       throw new Error(`bucket ${requestedManifest.bucket} belongs to deployment ${currentIdentity.deploymentId}`);
@@ -21479,6 +21488,7 @@ async function stateAdopt(agent, opts, runtime) {
   const secrets = await readSecretEnv(runtime.configRoot, agent);
   const bucketPrefix = persistedBucketPrefix(secrets);
   const bucketChanged = current.bucket !== bucket;
+  const resumingBucketChange = !bucketChanged && Boolean(current.pendingTombstoneBucket);
   if (bucketChanged && current.pendingTombstoneBucket) {
     throw new Error(
       `finish tombstoning ${current.pendingTombstoneBucket} by adopting ${current.bucket} again before moving state`
@@ -21553,7 +21563,7 @@ async function stateAdopt(agent, opts, runtime) {
       await assertLease();
       await writeLocalDeployment(runtime.configRoot, updated, updatedSecrets);
       if (updated.gatewayLocation === "local") {
-        if (bucketChanged) {
+        if (bucketChanged || resumingBucketChange) {
           await assertLease();
           await startLocalGateway({
             manifest: updated,
@@ -21584,7 +21594,7 @@ async function stateAdopt(agent, opts, runtime) {
         await deleteStaleSpaceTokenSecrets(hub, updated.space);
       }
       await clearSpaceGatewayDisabled(hub, updated.space);
-      if (bucketChanged) {
+      if (bucketChanged || resumingBucketChange) {
         await assertLease();
         await hub.restartSpace(updated.space, true);
         runtime.stdout.log(`Space gateway restart requested: ${updated.space}`);
