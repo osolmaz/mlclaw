@@ -15707,7 +15707,7 @@ async function bootstrap(opts, runtime) {
   runtime.stdout.log(`Bucket: https://huggingface.co/buckets/${bucket}`);
   if (gatewayLocation === "space") {
     runtime.stdout.log(`Space:  https://huggingface.co/spaces/${names.space}`);
-    runtime.stdout.log(`Agent URL: ${spacePublicUrl(names.space)}`);
+    runtime.stdout.log(`Agent URL: ${spacePageUrl(names.space)}`);
   } else {
     runtime.stdout.log(`Local:  ${containerNameFor(agentName)}`);
   }
@@ -15720,10 +15720,10 @@ async function bootstrap(opts, runtime) {
   if (deployedSpaceRuntime) {
     runtime.stdout.log(`Space runtime: ${deployedSpaceRuntime}`);
   }
-  runtime.prompt.outro(gatewayLocation === "space" ? `Deployment requested. Your agent will soon be available at ${spacePublicUrl(names.space)}.` : "Local gateway start requested.");
+  runtime.prompt.outro(gatewayLocation === "space" ? `Deployment requested. Your agent will soon be available at ${spacePageUrl(names.space)}.` : "Local gateway start requested.");
 }
-function spacePublicUrl(repoId) {
-  return `https://${repoId.replace("/", "-")}.hf.space`;
+function spacePageUrl(repoId) {
+  return `https://huggingface.co/spaces/${repoId}`;
 }
 async function resolveBootstrapPlan(params) {
   const { opts, owner, agentName, requestedGatewayLocation, hfToken, telegramToken, telegramUserId, model, runtimeImage, hub, runtime } = params;

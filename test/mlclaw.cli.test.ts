@@ -860,9 +860,9 @@ describe("mlclaw CLI", () => {
       title: "Bootstrap plan",
       message: expect.stringContaining("Hardware: default free CPU"),
     }));
-    expect(output.join("\n")).toContain("Agent URL: https://alice-research.hf.space");
+    expect(output.join("\n")).toContain("Agent URL: https://huggingface.co/spaces/alice/research");
     expect(output.join("\n")).toContain("Space deployment triggered: alice/research");
-    expect(output.join("\n")).toContain("Your agent will soon be available at https://alice-research.hf.space.");
+    expect(output.join("\n")).toContain("Your agent will soon be available at https://huggingface.co/spaces/alice/research.");
     expect(hub.calls).toContainEqual({
       name: "createDockerSpace",
       args: ["alice/research", { private: true }],
