@@ -602,6 +602,7 @@ describe("ML Claw Space runtime", () => {
 
   it("exchanges a fragment-safe local access token for a signed session", async () => {
     const sessionSecret = "local-session-secret".repeat(4);
+    const tailnetOrigin = "https://isengard.example.ts.net:17860";
     const config = await testConfig({
       gatewayLocation: "local",
       oauthClientId: undefined,
@@ -610,6 +611,7 @@ describe("ML Claw Space runtime", () => {
       localAccessUser: "alice",
       localAccessToken: deriveLocalAccessToken(sessionSecret),
     });
+    config.accessOrigins.push(tailnetOrigin);
     const runtime = new SpaceRuntimeServer(config);
     const server = await runtime.start();
     cleanups.push(
@@ -643,14 +645,23 @@ describe("ML Claw Space runtime", () => {
     });
     expect(authenticated.status).toBe(200);
     const cookie = authenticated.headers.get("set-cookie") ?? "";
-    expect(cookie).toContain(`mlclaw_session_${config.port}=`);
+    expect(cookie).toContain(`${config.sessionCookieName}=`);
     expect(cookie).toContain("HttpOnly");
+    expect(cookie).not.toContain("Secure");
 
     const session = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/session`, {
       headers: { cookie },
     });
     expect(session.status).toBe(200);
     await expect(session.json()).resolves.toMatchObject({ user: "alice", admin: true });
+
+    const tailnetAuthenticated = await fetch(`http://127.0.0.1:${config.port}/mlclaw/api/local-session`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: tailnetOrigin },
+      body: JSON.stringify({ token: config.localAccessToken }),
+    });
+    expect(tailnetAuthenticated.status).toBe(200);
+    expect(tailnetAuthenticated.headers.get("set-cookie")).toContain("Secure");
   });
 
   it("automatically requests MCP authorization for an admin entering the gateway", async () => {
@@ -921,6 +932,7 @@ describe("ML Claw Space runtime", () => {
         cookie,
         "x-forwarded-user": "mallory",
         "x-openclaw-scopes": "operator.admin",
+        "tailscale-user-login": "mallory@example.com",
         authorization: "Bearer attacker",
       },
     });
@@ -934,6 +946,7 @@ describe("ML Claw Space runtime", () => {
       "x-openclaw-scopes": "operator.admin,operator.read,operator.write,operator.approvals,operator.pairing",
     });
     expect(capturedHeaders?.authorization).toBeUndefined();
+    expect(capturedHeaders?.["tailscale-user-login"]).toBeUndefined();
   });
 
   it("does not grant admin Control UI scopes to non-admin allowed users", async () => {
@@ -1951,6 +1964,7 @@ describe("ML Claw Space runtime", () => {
     );
     const config = await testConfig({
       publicUrl: "https://alice-research.hf.space",
+      accessOrigins: ["https://alice-research.hf.space", "https://isengard.example.ts.net:17860"],
       openclawConfigPath: configPath,
     });
 
@@ -1972,7 +1986,7 @@ describe("ML Claw Space runtime", () => {
       trustedProxies: ["127.0.0.1", "::1"],
       controlUi: {
         dangerouslyDisableDeviceAuth: true,
-        allowedOrigins: ["https://alice-research.hf.space"],
+        allowedOrigins: ["https://alice-research.hf.space", "https://isengard.example.ts.net:17860"],
         embedSandbox: "scripts",
       },
     });
@@ -2197,16 +2211,41 @@ describe("ML Claw Space runtime", () => {
       OPENCLAW_HF_STATE_BUCKET: "alice/research-data",
       MLCLAW_GATEWAY_LOCATION: "local",
       MLCLAW_PUBLIC_URL: "http://127.0.0.1:17860",
+      MLCLAW_ACCESS_ORIGINS: "https://isengard.example.ts.net:17860",
+      MLCLAW_RUNTIME_ID: "local-research-test",
       MLCLAW_SESSION_SECRET: sessionSecret,
       MLCLAW_CREDENTIAL_KEY: "k".repeat(48),
     });
 
     expect(config.publicUrl).toBe("http://127.0.0.1:17860");
-    expect(config.sessionCookieName).toBe("mlclaw_session_17860");
+    expect(config.accessOrigins).toEqual(["http://127.0.0.1:17860", "https://isengard.example.ts.net:17860"]);
+    expect(config.sessionCookieName).toMatch(/^mlclaw_session_[a-f0-9]{12}$/);
     expect(config.localAccessUser).toBe("alice");
     expect(config.localAccessToken).toBe(deriveLocalAccessToken(sessionSecret));
     expect(config.allowedUsers).toContain("alice");
     expect(config.adminUsers).toContain("alice");
+  });
+
+  it("rejects wildcard and unbounded local access origin configuration", () => {
+    const base = {
+      OPENCLAW_HF_STATE_BUCKET: "alice/research-data",
+      MLCLAW_GATEWAY_LOCATION: "local",
+      MLCLAW_PUBLIC_URL: "http://127.0.0.1:17860",
+      MLCLAW_SESSION_SECRET: "x".repeat(48),
+      MLCLAW_CREDENTIAL_KEY: "k".repeat(48),
+    };
+
+    expect(() => loadConfig({ ...base, MLCLAW_ACCESS_ORIGINS: "https://*.example.ts.net" })).toThrow(
+      "without credentials, wildcard hosts, paths, queries, or fragments",
+    );
+    expect(() =>
+      loadConfig({
+        ...base,
+        MLCLAW_ACCESS_ORIGINS: Array.from({ length: 8 }, (_, index) => `https://node-${index}.example.ts.net`).join(
+          ",",
+        ),
+      }),
+    ).toThrow("at most 8 origins");
   });
 
   it("implicitly allows explicit admins", () => {
@@ -2331,6 +2370,7 @@ async function testConfig(overrides: Partial<SpaceRuntimeConfig> = {}): Promise<
   const port = overrides.port ?? (await freePort());
   const openclawPort = overrides.openclawPort ?? (await freePort());
   const mcpPort = overrides.mcpPort ?? (await freePort());
+  const publicUrl = overrides.publicUrl ?? `http://127.0.0.1:${port}`;
   return {
     port,
     openclawPort,
@@ -2338,7 +2378,8 @@ async function testConfig(overrides: Partial<SpaceRuntimeConfig> = {}): Promise<
     openclawHost: "127.0.0.1",
     openclawUid: process.getuid?.() ?? 1000,
     openclawGid: process.getgid?.() ?? 1000,
-    publicUrl: `http://127.0.0.1:${port}`,
+    publicUrl,
+    accessOrigins: [publicUrl],
     providerUrl: "https://huggingface.co",
     oauthClientId: "client",
     oauthClientSecret: "secret",

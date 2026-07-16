@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { normalizeBucketPrefix } from "../hf-state-sync/paths.js";
 import { resolveBranding, type RuntimeBranding } from "./branding.js";
 import { DEFAULT_MODEL, normalizeModelChoices, parseModelChoicesEnv, type ModelChoice } from "./model-choices.js";
@@ -16,6 +16,7 @@ export type SpaceRuntimeConfig = {
   openclawUid: number;
   openclawGid: number;
   publicUrl: string;
+  accessOrigins: string[];
   providerUrl: string;
   oauthClientId: string | undefined;
   oauthClientSecret: string | undefined;
@@ -98,6 +99,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpaceRuntimeCo
   ]);
   const allowedUsers = uniqueUsers([...configuredAllowedUsers, ...resolvedAdmins, ...(owner ? [owner] : [])]);
   const publicUrl = publicUrlFromEnv(env, port);
+  const accessOrigins = accessOriginsFromEnv(env, publicUrl);
   const sessionSecret = trim(env.MLCLAW_SESSION_SECRET ?? env.SESSION_SECRET) ?? randomBytes(48).toString("base64url");
   const configuredCredentialKey = trim(env.MLCLAW_CREDENTIAL_KEY);
   if (mode === "app" && !configuredCredentialKey) {
@@ -132,6 +134,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpaceRuntimeCo
     openclawUid: integer(env.MLCLAW_OPENCLAW_UID, 1000),
     openclawGid: integer(env.MLCLAW_OPENCLAW_GID, 1000),
     publicUrl,
+    accessOrigins,
     providerUrl: trim(env.OPENID_PROVIDER_URL) ?? "https://huggingface.co",
     oauthClientId: trim(env.OAUTH_CLIENT_ID),
     oauthClientSecret: trim(env.OAUTH_CLIENT_SECRET),
@@ -140,7 +143,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpaceRuntimeCo
     credentialKey,
     credentialKeyGenerated: !configuredCredentialKey,
     cookieSecure: env.MLCLAW_COOKIE_SECURE === "0" ? false : !publicUrl.startsWith("http://"),
-    sessionCookieName: gatewayLocation === "local" ? localSessionCookieName(publicUrl) : SESSION_COOKIE_PREFIX,
+    sessionCookieName:
+      gatewayLocation === "local"
+        ? localSessionCookieName(trim(env.MLCLAW_RUNTIME_ID) ?? publicUrl)
+        : SESSION_COOKIE_PREFIX,
     spaceId,
     canonicalSpaceId,
     canonicalCreatorUserId,
@@ -193,10 +199,41 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpaceRuntimeCo
 
 const SESSION_COOKIE_PREFIX = "mlclaw_session";
 
-function localSessionCookieName(publicUrl: string): string {
-  const url = new URL(publicUrl);
-  const port = url.port || (url.protocol === "https:" ? "443" : "80");
-  return `${SESSION_COOKIE_PREFIX}_${port}`;
+function localSessionCookieName(identity: string): string {
+  return `${SESSION_COOKIE_PREFIX}_${createHash("sha256").update(identity).digest("hex").slice(0, 12)}`;
+}
+
+function accessOriginsFromEnv(env: NodeJS.ProcessEnv, publicUrl: string): string[] {
+  const configured = (env.MLCLAW_ACCESS_ORIGINS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (configured.length > 8) {
+    throw new Error("MLCLAW_ACCESS_ORIGINS supports at most 8 origins");
+  }
+  const origins = [...new Set([publicUrl, ...configured.map(parseAccessOrigin)])];
+  if (origins.length > 8) {
+    throw new Error("MLCLAW_ACCESS_ORIGINS supports at most 8 origins including MLCLAW_PUBLIC_URL");
+  }
+  return origins;
+}
+
+function parseAccessOrigin(value: string): string {
+  const url = new URL(value);
+  if (
+    (url.protocol !== "http:" && url.protocol !== "https:") ||
+    url.username ||
+    url.password ||
+    url.hostname.includes("*") ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error(
+      "MLCLAW_ACCESS_ORIGINS entries must be HTTP origins without credentials, wildcard hosts, paths, queries, or fragments",
+    );
+  }
+  return url.origin;
 }
 
 function readOptionalSecret(file: string | undefined): string | undefined {

@@ -168,6 +168,23 @@ CLI, then open the same loopback URL in your local browser. The CLI prints a
 private fragment-based access link that is exchanged for an HTTP-only browser
 session; rerun `mlclaw gateway status <agent>` to retrieve it.
 
+To reach the loopback gateway from other devices on your private tailnet, opt
+in to a scoped Tailscale Serve mapping:
+
+```bash
+npx mlclaw@latest bootstrap --gateway local --tailscale
+mlclaw gateway start mlclaw --tailscale
+```
+
+Interactive bootstrap offers this option when Tailscale is installed, signed
+in, and online; it remains off by default. ML Claw maps one HTTPS origin to the
+loopback gateway, prints both access links, and keeps its own browser session
+authentication in front of OpenClaw. It does not enable public Tailscale
+Funnel access or reset unrelated Serve handlers. Use `--tailscale-port <port>`
+when the default HTTPS port is already owned, and disable the persisted mapping
+with `mlclaw gateway start mlclaw --no-tailscale`. The first Serve setup may
+print a Tailscale admin URL for the tailnet owner to approve HTTPS serving.
+
 Docker Desktop, OrbStack, Colima, Rancher Desktop, and other Docker-compatible
 engines are used through Docker contexts. On Windows, Podman machine
 connections are supported through the Podman CLI. Local mode avoids Hugging

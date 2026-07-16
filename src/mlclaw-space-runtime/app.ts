@@ -121,7 +121,8 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
     if (!config.localAccessUser || !config.localAccessToken || config.gatewayLocation !== "local") {
       return c.json({ ok: false, error: "not found" }, 404);
     }
-    if (c.req.header("origin") !== config.publicUrl || !allowLocalLogin("local")) {
+    const origin = c.req.header("origin");
+    if (!origin || !config.accessOrigins.includes(origin) || !allowLocalLogin(origin)) {
       return c.json({ ok: false, error: "access denied" }, 403);
     }
     const contentLength = Number.parseInt(c.req.header("content-length") ?? "0", 10);
@@ -146,16 +147,16 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
       createSessionCookie({
         username: config.localAccessUser,
         sessionSecret: config.sessionSecret,
-        secure: config.cookieSecure,
+        secure: origin.startsWith("https://"),
         cookieName: config.sessionCookieName,
       }),
     );
     return c.json({ ok: true });
   });
   app.get("/login", (c) => c.html(loginPage(config, undefined, normalizeNext(c.req.query("next") ?? "/"))));
-  app.get("/logout", (c) => logoutResponse(config, false));
-  app.get("/mlclaw/logout", (c) => logoutResponse(config, false));
-  app.post("/mlclaw/api/logout", (c) => logoutResponse(config, true));
+  app.get("/logout", (c) => logoutResponse(c, config, false));
+  app.get("/mlclaw/logout", (c) => logoutResponse(c, config, false));
+  app.post("/mlclaw/api/logout", (c) => logoutResponse(c, config, true));
 
   app.get("/mlclaw/assets/*", async (c) => {
     const relative = c.req.path.slice("/mlclaw/assets/".length);
@@ -650,9 +651,11 @@ function trustedBrokerKitHeaders(mode: "launcher" | "popover" | "top-level" | "a
   return headers;
 }
 
-function logoutResponse(config: SpaceRuntimeConfig, json: boolean): Response {
+function logoutResponse(c: Context, config: SpaceRuntimeConfig, json: boolean): Response {
   const headers = new Headers();
-  headers.append("set-cookie", clearSessionCookie(config.cookieSecure, config.sessionCookieName));
+  const origin = c.req.header("origin");
+  const secure = origin && config.accessOrigins.includes(origin) ? origin.startsWith("https://") : config.cookieSecure;
+  headers.append("set-cookie", clearSessionCookie(secure, config.sessionCookieName));
   if (json) {
     headers.set("content-type", "application/json; charset=utf-8");
     return new Response(`${JSON.stringify({ ok: true })}\n`, { status: 200, headers });

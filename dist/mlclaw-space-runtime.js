@@ -12,7 +12,7 @@ import process2 from "node:process";
 
 // src/mlclaw-space-runtime/config.ts
 import { readFileSync as readFileSync2 } from "node:fs";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 // src/hf-state-sync/paths.ts
 var DEFAULT_BUCKET_PREFIX = "openclaw-state";
@@ -5079,6 +5079,7 @@ function loadConfig(env = process.env) {
   ]);
   const allowedUsers = uniqueUsers([...configuredAllowedUsers, ...resolvedAdmins, ...owner ? [owner] : []]);
   const publicUrl = publicUrlFromEnv(env, port);
+  const accessOrigins = accessOriginsFromEnv(env, publicUrl);
   const sessionSecret = trim(env.MLCLAW_SESSION_SECRET ?? env.SESSION_SECRET) ?? randomBytes(48).toString("base64url");
   const configuredCredentialKey = trim(env.MLCLAW_CREDENTIAL_KEY);
   if (mode === "app" && !configuredCredentialKey) {
@@ -5103,6 +5104,7 @@ function loadConfig(env = process.env) {
     openclawUid: integer(env.MLCLAW_OPENCLAW_UID, 1e3),
     openclawGid: integer(env.MLCLAW_OPENCLAW_GID, 1e3),
     publicUrl,
+    accessOrigins,
     providerUrl: trim(env.OPENID_PROVIDER_URL) ?? "https://huggingface.co",
     oauthClientId: trim(env.OAUTH_CLIENT_ID),
     oauthClientSecret: trim(env.OAUTH_CLIENT_SECRET),
@@ -5111,7 +5113,7 @@ function loadConfig(env = process.env) {
     credentialKey,
     credentialKeyGenerated: !configuredCredentialKey,
     cookieSecure: env.MLCLAW_COOKIE_SECURE === "0" ? false : !publicUrl.startsWith("http://"),
-    sessionCookieName: gatewayLocation === "local" ? localSessionCookieName(publicUrl) : SESSION_COOKIE_PREFIX,
+    sessionCookieName: gatewayLocation === "local" ? localSessionCookieName(trim(env.MLCLAW_RUNTIME_ID) ?? publicUrl) : SESSION_COOKIE_PREFIX,
     spaceId,
     canonicalSpaceId,
     canonicalCreatorUserId,
@@ -5158,10 +5160,28 @@ function loadConfig(env = process.env) {
   };
 }
 var SESSION_COOKIE_PREFIX = "mlclaw_session";
-function localSessionCookieName(publicUrl) {
-  const url = new URL(publicUrl);
-  const port = url.port || (url.protocol === "https:" ? "443" : "80");
-  return `${SESSION_COOKIE_PREFIX}_${port}`;
+function localSessionCookieName(identity) {
+  return `${SESSION_COOKIE_PREFIX}_${createHash("sha256").update(identity).digest("hex").slice(0, 12)}`;
+}
+function accessOriginsFromEnv(env, publicUrl) {
+  const configured = (env.MLCLAW_ACCESS_ORIGINS ?? "").split(",").map((value) => value.trim()).filter(Boolean);
+  if (configured.length > 8) {
+    throw new Error("MLCLAW_ACCESS_ORIGINS supports at most 8 origins");
+  }
+  const origins = [.../* @__PURE__ */ new Set([publicUrl, ...configured.map(parseAccessOrigin)])];
+  if (origins.length > 8) {
+    throw new Error("MLCLAW_ACCESS_ORIGINS supports at most 8 origins including MLCLAW_PUBLIC_URL");
+  }
+  return origins;
+}
+function parseAccessOrigin(value) {
+  const url = new URL(value);
+  if (url.protocol !== "http:" && url.protocol !== "https:" || url.username || url.password || url.hostname.includes("*") || url.pathname !== "/" || url.search || url.hash) {
+    throw new Error(
+      "MLCLAW_ACCESS_ORIGINS entries must be HTTP origins without credentials, wildcard hosts, paths, queries, or fragments"
+    );
+  }
+  return url.origin;
 }
 function readOptionalSecret(file) {
   if (!file) {
@@ -7400,7 +7420,7 @@ function signatureMatches(a, b) {
 }
 
 // src/mlclaw-space-runtime/delegated-brokerkit.ts
-import { createHash, createHmac as createHmac3, randomBytes as randomBytes4, timingSafeEqual as timingSafeEqual3 } from "node:crypto";
+import { createHash as createHash2, createHmac as createHmac3, randomBytes as randomBytes4, timingSafeEqual as timingSafeEqual3 } from "node:crypto";
 
 // src/mlclaw-space-runtime/delegated-revisions.ts
 import { randomBytes as randomBytes3 } from "node:crypto";
@@ -7776,7 +7796,7 @@ function handleExpiry(request) {
   return request.pending_expires_at ?? request.active_expires_at ?? "";
 }
 function decisionKey(record, action, actor) {
-  return createHash("sha256").update(
+  return createHash2("sha256").update(
     ["mlclaw-brokerkit-decision-v1", record.sourceId, record.requestId, String(record.revision), action, actor].join(
       "\0"
     ),
@@ -8583,7 +8603,7 @@ async function configureOpenClawGateway(config2) {
   gateway.controlUi = {
     ...typeof gateway.controlUi === "object" && gateway.controlUi ? gateway.controlUi : {},
     dangerouslyDisableDeviceAuth: true,
-    allowedOrigins: [config2.publicUrl],
+    allowedOrigins: config2.accessOrigins,
     embedSandbox: "scripts"
   };
   configureOpenClawModels(openclawConfig, config2);
@@ -9715,7 +9735,8 @@ function createSpaceRuntimeApp(config2, controls) {
     if (!config2.localAccessUser || !config2.localAccessToken || config2.gatewayLocation !== "local") {
       return c.json({ ok: false, error: "not found" }, 404);
     }
-    if (c.req.header("origin") !== config2.publicUrl || !allowLocalLogin("local")) {
+    const origin = c.req.header("origin");
+    if (!origin || !config2.accessOrigins.includes(origin) || !allowLocalLogin(origin)) {
       return c.json({ ok: false, error: "access denied" }, 403);
     }
     const contentLength = Number.parseInt(c.req.header("content-length") ?? "0", 10);
@@ -9740,16 +9761,16 @@ function createSpaceRuntimeApp(config2, controls) {
       createSessionCookie({
         username: config2.localAccessUser,
         sessionSecret: config2.sessionSecret,
-        secure: config2.cookieSecure,
+        secure: origin.startsWith("https://"),
         cookieName: config2.sessionCookieName
       })
     );
     return c.json({ ok: true });
   });
   app.get("/login", (c) => c.html(loginPage(config2, void 0, normalizeNext(c.req.query("next") ?? "/"))));
-  app.get("/logout", (c) => logoutResponse(config2, false));
-  app.get("/mlclaw/logout", (c) => logoutResponse(config2, false));
-  app.post("/mlclaw/api/logout", (c) => logoutResponse(config2, true));
+  app.get("/logout", (c) => logoutResponse(c, config2, false));
+  app.get("/mlclaw/logout", (c) => logoutResponse(c, config2, false));
+  app.post("/mlclaw/api/logout", (c) => logoutResponse(c, config2, true));
   app.get("/mlclaw/assets/*", async (c) => {
     const relative = c.req.path.slice("/mlclaw/assets/".length);
     const safe = safeRelativePath(relative);
@@ -10190,9 +10211,11 @@ function trustedBrokerKitHeaders(mode, origin) {
   if (asset) headers.set("access-control-allow-origin", "null");
   return headers;
 }
-function logoutResponse(config2, json) {
+function logoutResponse(c, config2, json) {
   const headers = new Headers();
-  headers.append("set-cookie", clearSessionCookie(config2.cookieSecure, config2.sessionCookieName));
+  const origin = c.req.header("origin");
+  const secure = origin && config2.accessOrigins.includes(origin) ? origin.startsWith("https://") : config2.cookieSecure;
+  headers.append("set-cookie", clearSessionCookie(secure, config2.sessionCookieName));
   if (json) {
     headers.set("content-type", "application/json; charset=utf-8");
     return new Response(`${JSON.stringify({ ok: true })}
@@ -10890,7 +10913,7 @@ async function proxyHttp(req, res, config2, identity) {
     delete headers["accept-encoding"];
     delete headers["Accept-Encoding"];
   }
-  addTrustedProxyHeaders(headers, config2, identity);
+  addTrustedProxyHeaders(headers, config2, identity, requestAccessOrigin(req, config2));
   const upstream = http2.request(
     {
       host: config2.openclawHost,
@@ -10948,7 +10971,7 @@ function proxyWebSocket(req, socket, head, config2, identity) {
     headers.host = `${config2.openclawHost}:${config2.openclawPort}`;
     headers.connection = "Upgrade";
     headers.upgrade = req.headers.upgrade ?? "websocket";
-    addTrustedProxyHeaders(headers, config2, identity);
+    addTrustedProxyHeaders(headers, config2, identity, requestAccessOrigin(req, config2));
     upstream.write(`${req.method ?? "GET"} ${req.url ?? "/"} HTTP/${req.httpVersion}\r
 `);
     for (const [key, value] of Object.entries(headers)) {
@@ -10992,18 +11015,25 @@ function sanitizeHeaders(headers) {
     if (HOP_BY_HOP_HEADERS.has(lower)) {
       continue;
     }
-    if (lower.startsWith("x-forwarded-") || lower.startsWith("x-openclaw-") || lower === "authorization") {
+    if (lower.startsWith("x-forwarded-") || lower.startsWith("x-openclaw-") || lower.startsWith("tailscale-") || lower === "authorization") {
       continue;
     }
     out[key] = value;
   }
   return out;
 }
-function addTrustedProxyHeaders(headers, config2, identity) {
+function addTrustedProxyHeaders(headers, config2, identity, accessOrigin) {
   headers["x-forwarded-user"] = identity.username;
-  headers["x-forwarded-proto"] = config2.publicUrl.startsWith("https://") ? "https" : "http";
-  headers["x-forwarded-host"] = new URL(config2.publicUrl).host;
+  headers["x-forwarded-proto"] = accessOrigin.startsWith("https://") ? "https" : "http";
+  headers["x-forwarded-host"] = new URL(accessOrigin).host;
   headers["x-openclaw-scopes"] = resolveControlUiScopes(config2, identity).join(",");
+}
+function requestAccessOrigin(req, config2) {
+  const host = req.headers.host?.trim().toLowerCase();
+  if (!host) {
+    return config2.publicUrl;
+  }
+  return config2.accessOrigins.find((origin) => new URL(origin).host.toLowerCase() === host) ?? config2.publicUrl;
 }
 function resolveControlUiScopes(config2, identity) {
   return config2.adminUsers.includes(identity.username) ? ADMIN_CONTROL_UI_SCOPES : USER_CONTROL_UI_SCOPES;

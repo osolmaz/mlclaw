@@ -15,8 +15,18 @@ export type DeploymentManifest = {
   runtimeImage: string;
   localPort?: number;
   localGateway?: LocalGatewayBinding;
+  networkAccess?: NetworkAccessBinding;
   createdAt: string;
   updatedAt: string;
+};
+
+export type NetworkAccessBinding = {
+  provider: "tailscale-serve";
+  enabled: boolean;
+  dnsName: string;
+  httpsPort: number;
+  target: string;
+  accessOrigin: string;
 };
 
 export type LocalGatewayBinding = {

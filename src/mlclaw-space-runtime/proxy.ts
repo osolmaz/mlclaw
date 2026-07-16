@@ -40,7 +40,7 @@ export async function proxyHttp(
     delete headers["accept-encoding"];
     delete headers["Accept-Encoding"];
   }
-  addTrustedProxyHeaders(headers, config, identity);
+  addTrustedProxyHeaders(headers, config, identity, requestAccessOrigin(req, config));
 
   const upstream = http.request(
     {
@@ -108,7 +108,7 @@ export function proxyWebSocket(
     headers.host = `${config.openclawHost}:${config.openclawPort}`;
     headers.connection = "Upgrade";
     headers.upgrade = req.headers.upgrade ?? "websocket";
-    addTrustedProxyHeaders(headers, config, identity);
+    addTrustedProxyHeaders(headers, config, identity, requestAccessOrigin(req, config));
     upstream.write(`${req.method ?? "GET"} ${req.url ?? "/"} HTTP/${req.httpVersion}\r\n`);
     for (const [key, value] of Object.entries(headers)) {
       if (Array.isArray(value)) {
@@ -150,7 +150,12 @@ function sanitizeHeaders(headers: http.IncomingHttpHeaders): http.OutgoingHttpHe
     if (HOP_BY_HOP_HEADERS.has(lower)) {
       continue;
     }
-    if (lower.startsWith("x-forwarded-") || lower.startsWith("x-openclaw-") || lower === "authorization") {
+    if (
+      lower.startsWith("x-forwarded-") ||
+      lower.startsWith("x-openclaw-") ||
+      lower.startsWith("tailscale-") ||
+      lower === "authorization"
+    ) {
       continue;
     }
     out[key] = value;
@@ -162,11 +167,20 @@ function addTrustedProxyHeaders(
   headers: http.OutgoingHttpHeaders,
   config: SpaceRuntimeConfig,
   identity: ProxyIdentity,
+  accessOrigin: string,
 ): void {
   headers["x-forwarded-user"] = identity.username;
-  headers["x-forwarded-proto"] = config.publicUrl.startsWith("https://") ? "https" : "http";
-  headers["x-forwarded-host"] = new URL(config.publicUrl).host;
+  headers["x-forwarded-proto"] = accessOrigin.startsWith("https://") ? "https" : "http";
+  headers["x-forwarded-host"] = new URL(accessOrigin).host;
   headers["x-openclaw-scopes"] = resolveControlUiScopes(config, identity).join(",");
+}
+
+function requestAccessOrigin(req: http.IncomingMessage, config: SpaceRuntimeConfig): string {
+  const host = req.headers.host?.trim().toLowerCase();
+  if (!host) {
+    return config.publicUrl;
+  }
+  return config.accessOrigins.find((origin) => new URL(origin).host.toLowerCase() === host) ?? config.publicUrl;
 }
 
 function resolveControlUiScopes(
