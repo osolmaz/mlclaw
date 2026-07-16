@@ -22,6 +22,10 @@ export type LocalGatewayBinding = {
   engine: "docker";
   dockerContext: string;
   dockerEndpoint?: string;
+} | {
+  engine: "podman";
+  podmanConnection: string;
+  podmanEndpoint?: string;
 };
 
 export type LocalConfigPaths = {

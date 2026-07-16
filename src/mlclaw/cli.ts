@@ -6,10 +6,18 @@ import { randomBytes } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { Command, CommanderError, InvalidArgumentError, Option } from "commander";
-import { cancel, confirm, intro, isCancel, note, outro, password, text } from "@clack/prompts";
+import { cancel, confirm, intro, isCancel, note, outro, password, select, text } from "@clack/prompts";
 import { findSkillsRoot, handleSkillflag } from "skillflag";
 import { ensureHfToken, readToken } from "./auth.js";
-import { CliDockerRunner, containerNameFor, type DockerRunner, volumeNameFor } from "./docker.js";
+import {
+  CliDockerRunner,
+  CliPodmanRunner,
+  containerNameFor,
+  type ContainerEngine,
+  type ContainerRuntimeProbe,
+  type ContainerRunner,
+  volumeNameFor,
+} from "./docker.js";
 import { parseGatewayLocation, type GatewayLocation } from "./gateway-location.js";
 import { pushTemplateToSpace } from "./git.js";
 import { HubApi, HubApiError, type SpaceRuntime, type SpaceVolume } from "./hub-api.js";
@@ -37,7 +45,12 @@ import {
   writeSecretEnv,
 } from "./local-config.js";
 import { namesFor, slugifyAgentName } from "./naming.js";
-import { bundledSpaceRuntimeRef, DEFAULT_RUNTIME_IMAGE, resolveRuntimeImage, resolveSpaceRuntimeImage } from "./runtime-image.js";
+import {
+  bundledSpaceRuntimeRef,
+  DEFAULT_RUNTIME_IMAGE,
+  resolveRuntimeImage,
+  resolveSpaceRuntimeImage,
+} from "./runtime-image.js";
 import { getTelegramBot, type TelegramBot } from "./telegram.js";
 import { createSystemHfCli, type HfCliRuntime } from "./hf-cli.js";
 
@@ -54,6 +67,9 @@ export const SPACE_STATE_MOUNT_DIR = "/data/mlclaw-state";
 export const SPACE_LIVE_DIR = "/home/node/.local/share/mlclaw/live";
 export const SPACE_HANDOFF_TIMEOUT_MS = 120_000;
 export const SPACE_HANDOFF_POLL_MS = 5_000;
+
+type ContainerRuntimePreference = "auto" | ContainerEngine;
+type HostedFallbackChoice = "local" | "pro" | "cancel";
 
 const STALE_PATH_VARS = ["OPENCLAW_STATE_DIR", "OPENCLAW_WORKSPACE_DIR", "OPENCLAW_CONFIG_PATH"];
 const SNAPSHOT_MANIFEST_REMOTE_NAME = "manifest.json";
@@ -81,6 +97,8 @@ type BootstrapOptions = {
   routerToken?: string;
   routerTokenFile?: string;
   dockerContext?: string;
+  containerRuntime?: string;
+  allowLocalFallback?: boolean;
   pull?: boolean;
   takeover?: boolean;
   yes?: boolean;
@@ -115,6 +133,7 @@ type GatewayCommandOptions = {
   routerToken?: string;
   routerTokenFile?: string;
   dockerContext?: string;
+  containerRuntime?: string;
   pull?: boolean;
   takeover?: boolean;
   publicSpace?: boolean;
@@ -151,16 +170,18 @@ type BootstrapSpacePlan = {
   visibility: "private" | "public";
 };
 
-type SpaceHardwareRequest = {
-  kind: "default";
-  label: string;
-  sleepTime?: number;
-} | {
-  kind: "explicit";
-  hardware: string;
-  label: string;
-  sleepTime?: number;
-};
+type SpaceHardwareRequest =
+  | {
+      kind: "default";
+      label: string;
+      sleepTime?: number;
+    }
+  | {
+      kind: "explicit";
+      hardware: string;
+      label: string;
+      sleepTime?: number;
+    };
 
 type BootstrapResolvedPlan = {
   agentName: string;
@@ -184,7 +205,8 @@ type CliRuntime = {
   hubFactory?: (token: string) => HubApi;
   pushTemplateToSpace?: typeof pushTemplateToSpace;
   getTelegramBot?: (token: string, apiRoot?: string) => Promise<TelegramBot>;
-  dockerRunner?: DockerRunner;
+  dockerRunner?: ContainerRunner;
+  podmanRunner?: ContainerRunner;
   configRoot?: string;
   now?: () => Date;
   prompt?: PromptRuntime;
@@ -198,6 +220,11 @@ type PromptRuntime = {
   text: (params: { message: string; placeholder?: string; initialValue?: string }) => Promise<string | symbol>;
   password: (params: { message: string; placeholder?: string }) => Promise<string | symbol>;
   confirm: (params: { message: string; initialValue?: boolean }) => Promise<boolean | symbol>;
+  select: (params: {
+    message: string;
+    options: Array<{ value: string; label: string; hint?: string }>;
+    initialValue?: string;
+  }) => Promise<string | symbol>;
   cancel: (message: string) => void;
 };
 
@@ -209,6 +236,7 @@ const defaultPrompt: PromptRuntime = {
   text,
   password,
   confirm,
+  select: async (params) => await select(params),
   cancel,
 };
 
@@ -223,6 +251,7 @@ function createRuntime(overrides: CliRuntime = {}): Required<CliRuntime> {
     pushTemplateToSpace: overrides.pushTemplateToSpace ?? pushTemplateToSpace,
     getTelegramBot: overrides.getTelegramBot ?? getTelegramBot,
     dockerRunner: overrides.dockerRunner ?? new CliDockerRunner(),
+    podmanRunner: overrides.podmanRunner ?? new CliPodmanRunner(),
     configRoot: overrides.configRoot ?? defaultConfigRoot(overrides.env ?? process.env),
     now: overrides.now ?? (() => new Date()),
     prompt: overrides.prompt ?? defaultPrompt,
@@ -260,8 +289,17 @@ export function createProgram(runtimeOverrides: CliRuntime = {}): Command {
     .option("--public-space", "Create the Hugging Face Space as public instead of private", false)
     .addOption(new Option("--gateway-token <token>").hideHelp())
     .option("--router-token <token>", "Hugging Face Router inference token for Space gateway model calls")
-    .option("--router-token-file <path>", "File containing MLCLAW_ROUTER_TOKEN=..., HF_ROUTER_TOKEN=..., or a raw token")
+    .option(
+      "--router-token-file <path>",
+      "File containing MLCLAW_ROUTER_TOKEN=..., HF_ROUTER_TOKEN=..., or a raw token",
+    )
     .option("--docker-context <name>", "Docker context for local gateway mode")
+    .option("--container-runtime <auto|docker|podman>", "Local container runtime", "auto")
+    .option(
+      "--allow-local-fallback",
+      "Allow non-interactive Space bootstrap to fall back to a ready local runtime",
+      false,
+    )
     .option("--no-pull", "Do not docker pull before starting a local gateway")
     .option("--takeover", "Start even if a stale runtime lease is present", false)
     .option("--yes", "Confirm paid hardware prompts for automation", false)
@@ -276,7 +314,10 @@ export function createProgram(runtimeOverrides: CliRuntime = {}): Command {
     .option("--runtime-image <image>", "Runtime image to write into the generated Space Dockerfile")
     .option("--bundled-runtime", "Generate a bundled Space runtime instead of using the prebuilt ML Claw image", false)
     .option("--router-token <token>", "Dedicated Hugging Face Router inference token")
-    .option("--router-token-file <path>", "File containing MLCLAW_ROUTER_TOKEN=..., HF_ROUTER_TOKEN=..., or a raw token")
+    .option(
+      "--router-token-file <path>",
+      "File containing MLCLAW_ROUTER_TOKEN=..., HF_ROUTER_TOKEN=..., or a raw token",
+    )
     .option("--force", "Update even if the Space does not look like ML Claw", false)
     .action(async (repoId: string, opts: UpdateOptions) => {
       const token = await runtime.readToken(runtime.env);
@@ -310,9 +351,7 @@ export function createProgram(runtimeOverrides: CliRuntime = {}): Command {
       await settings(repoId, opts, hub, runtime);
     });
 
-  const gateway = program
-    .command("gateway")
-    .description("Operate a ML Claw gateway");
+  const gateway = program.command("gateway").description("Operate a ML Claw gateway");
 
   gateway
     .command("start")
@@ -365,8 +404,12 @@ export function createProgram(runtimeOverrides: CliRuntime = {}): Command {
     .option("--bundled-runtime", "Generate a bundled Space runtime instead of using the prebuilt ML Claw image", false)
     .option("--public-space", "Create the Hugging Face Space as public instead of private", false)
     .option("--router-token <token>", "Hugging Face Router inference token for Space gateway model calls")
-    .option("--router-token-file <path>", "File containing MLCLAW_ROUTER_TOKEN=..., HF_ROUTER_TOKEN=..., or a raw token")
+    .option(
+      "--router-token-file <path>",
+      "File containing MLCLAW_ROUTER_TOKEN=..., HF_ROUTER_TOKEN=..., or a raw token",
+    )
     .option("--docker-context <name>", "Docker context for local gateway startup when migrating to local")
+    .option("--container-runtime <auto|docker|podman>", "Local container runtime", "auto")
     .option("--no-pull", "Do not docker pull before starting a local gateway")
     .option("--takeover", "Start even if another live runtime lease is present", false)
     .option("--yes", "Confirm paid hardware prompts for automation", false)
@@ -384,9 +427,7 @@ export function createProgram(runtimeOverrides: CliRuntime = {}): Command {
       await gatewayRebind(agent, opts, runtime);
     });
 
-  const state = program
-    .command("state")
-    .description("Operate ML Claw durable state");
+  const state = program.command("state").description("Operate ML Claw durable state");
 
   state
     .command("adopt")
@@ -435,9 +476,11 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
   const owner = opts.owner ?? me.name;
   const telegramToken = await readOptionalTelegramToken(opts, runtime);
   const bot = telegramToken ? await runtime.getTelegramBot(telegramToken, opts.telegramApiRoot) : undefined;
-  let agentName = slugifyAgentName(opts.name ?? bot?.username ?? await promptAgentName(runtime));
+  let agentName = slugifyAgentName(opts.name ?? bot?.username ?? (await promptAgentName(runtime)));
   const telegramUserId = telegramToken
-    ? opts.telegramUserId ?? runtime.env.TELEGRAM_ALLOWED_USERS ?? await promptRequired("Telegram allowed user ID", runtime)
+    ? (opts.telegramUserId ??
+      runtime.env.TELEGRAM_ALLOWED_USERS ??
+      (await promptRequired("Telegram allowed user ID", runtime)))
     : undefined;
 
   const model = opts.model ?? DEFAULT_MODEL;
@@ -471,9 +514,10 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
     agentName = alternative;
   }
 
-  const { names, gatewayLocation, bucketPlan, bucket, spacePlan, manifest, secrets } = plan;
+  let activePlan = plan;
   let deployedSpaceRuntime: string | undefined;
-  if (gatewayLocation === "space") {
+  if (activePlan.gatewayLocation === "space") {
+    const spacePlan = activePlan.spacePlan;
     if (!spacePlan) {
       throw new Error("internal error: Space plan was not resolved");
     }
@@ -481,65 +525,107 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
       ...(opts.hardware ? { requestedHardware: opts.hardware } : {}),
       ...(typeof opts.sleepTime === "number"
         ? { requestedSleepTime: opts.sleepTime }
-        : telegramToken ? { requestedSleepTime: TELEGRAM_SLEEP_TIME } : {}),
-      defaultLabel: spacePlan.exists ? "unchanged Space hardware" : "default free CPU",
+        : telegramToken
+          ? { requestedSleepTime: TELEGRAM_SLEEP_TIME }
+          : {}),
+      defaultLabel: spacePlan.exists ? "unchanged Space hardware" : "default Space CPU",
       requiresMessagingEgress: Boolean(telegramToken),
       yes: Boolean(opts.yes),
       runtime,
     });
     await confirmBootstrapPlan({
-      manifest,
-      bucketPlan,
+      manifest: activePlan.manifest,
+      bucketPlan: activePlan.bucketPlan,
       spacePlan,
-      hasExistingManifest: plan.hasExistingManifest,
+      hasExistingManifest: activePlan.hasExistingManifest,
       hardware: paidHardware.label,
       ...(typeof paidHardware.sleepTime === "number" ? { sleepTime: paidHardware.sleepTime } : {}),
       yes: Boolean(opts.yes),
       runtime,
     });
-    await createOrAdoptBucket({ hub, bucketPlan, runtime });
+    if (activePlan.bucketPlan.exists) {
+      await assertNoLiveForeignLease({
+        hub,
+        bucket: activePlan.bucket,
+        bucketPrefix: activePlan.bucketPrefix,
+        runtimeId: spaceRuntimeId(agentName),
+        takeover: Boolean(opts.takeover),
+      });
+    }
+    try {
+      await createOrAdoptSpace({
+        hub,
+        spacePlan,
+        runtime,
+        ...(paidHardware.kind === "explicit" ? { hardware: paidHardware.hardware } : {}),
+        ...(typeof paidHardware.sleepTime === "number" ? { sleepTime: paidHardware.sleepTime } : {}),
+      });
+    } catch (err) {
+      if (!isHostedComputePaymentRequired(err) || spacePlan.exists) {
+        throw err;
+      }
+      activePlan = await resolveHostedBootstrapFallback({
+        error: err,
+        opts,
+        owner,
+        agentName,
+        hfToken,
+        model,
+        runtimeImage,
+        hub,
+        runtime,
+        ...(telegramToken ? { telegramToken } : {}),
+        ...(telegramUserId ? { telegramUserId } : {}),
+      });
+    }
+    if (activePlan.gatewayLocation === "space") {
+      await createOrAdoptBucket({ hub, bucketPlan: activePlan.bucketPlan, runtime });
+      await assertNoLiveForeignLease({
+        hub,
+        bucket: activePlan.bucket,
+        bucketPrefix: activePlan.bucketPrefix,
+        runtimeId: spaceRuntimeId(agentName),
+        takeover: Boolean(opts.takeover),
+      });
+      const deployed = await deploySpaceGateway({
+        hub,
+        runtime,
+        hfToken,
+        manifest: activePlan.manifest,
+        secrets: activePlan.secrets,
+        allowedUsers: me.name,
+        spaceExists: spacePlan.exists,
+        spacePrepared: true,
+        ...(paidHardware.kind === "explicit" ? { hardware: paidHardware.hardware } : {}),
+        ...(typeof paidHardware.sleepTime === "number" ? { sleepTime: paidHardware.sleepTime } : {}),
+        ...(templateRuntimeImage ? { templateRuntimeImage } : {}),
+      });
+      deployedSpaceRuntime = deployed.runtimeImage;
+      await writeLocalDeployment(runtime.configRoot, activePlan.manifest, activePlan.secrets);
+    }
+  }
+  if (activePlan.gatewayLocation === "local") {
+    if (plan.gatewayLocation === "local") {
+      await confirmBootstrapPlan({
+        manifest: activePlan.manifest,
+        bucketPlan: activePlan.bucketPlan,
+        hasExistingManifest: activePlan.hasExistingManifest,
+        hardware: localGatewayLabel(requiredLocalGateway(activePlan.manifest)),
+        yes: Boolean(opts.yes),
+        runtime,
+      });
+    }
+    await createOrAdoptBucket({ hub, bucketPlan: activePlan.bucketPlan, runtime });
     await assertNoLiveForeignLease({
       hub,
-      bucket,
-      bucketPrefix: plan.bucketPrefix,
-      runtimeId: spaceRuntimeId(agentName),
+      bucket: activePlan.bucket,
+      bucketPrefix: activePlan.bucketPrefix,
+      runtimeId: activePlan.manifest.localRuntimeId,
       takeover: Boolean(opts.takeover),
     });
-    const deployed = await deploySpaceGateway({
-      hub,
-      runtime,
-      hfToken,
-      manifest,
-      secrets,
-      allowedUsers: me.name,
-      spaceExists: spacePlan.exists,
-      publicSpace: Boolean(opts.publicSpace),
-      ...(paidHardware.kind === "explicit" ? { hardware: paidHardware.hardware } : {}),
-      ...(typeof paidHardware.sleepTime === "number" ? { sleepTime: paidHardware.sleepTime } : {}),
-      ...(templateRuntimeImage ? { templateRuntimeImage } : {}),
-    });
-    deployedSpaceRuntime = deployed.runtimeImage;
-    await writeLocalDeployment(runtime.configRoot, manifest, secrets);
-  } else {
-    await confirmBootstrapPlan({
-      manifest,
-      bucketPlan,
-      hasExistingManifest: plan.hasExistingManifest,
-      hardware: "local Docker",
-      yes: Boolean(opts.yes),
-      runtime,
-    });
-    await createOrAdoptBucket({ hub, bucketPlan, runtime });
-    await assertNoLiveForeignLease({
-      hub,
-      bucket,
-      bucketPrefix: plan.bucketPrefix,
-      runtimeId: manifest.localRuntimeId,
-      takeover: Boolean(opts.takeover),
-    });
-    await writeLocalDeployment(runtime.configRoot, manifest, secrets);
+    await writeLocalDeployment(runtime.configRoot, activePlan.manifest, activePlan.secrets);
     await startLocalGateway({
-      manifest,
+      manifest: activePlan.manifest,
       runtime,
       pull: shouldPull(opts),
       refresh: true,
@@ -547,25 +633,25 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
   }
 
   runtime.stdout.log("");
-  runtime.stdout.log(`Bucket: https://huggingface.co/buckets/${bucket}`);
-  if (gatewayLocation === "space") {
-    runtime.stdout.log(`Space:  https://huggingface.co/spaces/${names.space}`);
-    runtime.stdout.log(`Agent URL: ${spacePageUrl(names.space)}`);
+  runtime.stdout.log(`Bucket: https://huggingface.co/buckets/${activePlan.bucket}`);
+  if (activePlan.gatewayLocation === "space") {
+    runtime.stdout.log(`Space:  https://huggingface.co/spaces/${activePlan.names.space}`);
+    runtime.stdout.log(`Agent URL: ${spacePageUrl(activePlan.names.space)}`);
   } else {
     runtime.stdout.log(`Local:  ${containerNameFor(agentName)}`);
   }
   runtime.stdout.log(`Agent:  ${agentName}${bot ? ` (@${bot.username})` : ""}`);
-  runtime.stdout.log(`Gateway: ${gatewayLocation}`);
-  if (gatewayLocation === "local" && manifest.localGateway) {
-    runtime.stdout.log(`Docker:  ${manifest.localGateway.dockerContext}`);
+  runtime.stdout.log(`Gateway: ${activePlan.gatewayLocation}`);
+  if (activePlan.gatewayLocation === "local" && activePlan.manifest.localGateway) {
+    runtime.stdout.log(`Container: ${localGatewayLabel(activePlan.manifest.localGateway)}`);
   }
   runtime.stdout.log(`Runtime image: ${runtimeImage}`);
   if (deployedSpaceRuntime) {
     runtime.stdout.log(`Space runtime: ${deployedSpaceRuntime}`);
   }
-  if (gatewayLocation === "space") {
+  if (activePlan.gatewayLocation === "space") {
     runtime.prompt.note(
-      `Your agent is deploying and will be available shortly.\n\n${spacePageUrl(names.space)}`,
+      `Your agent is deploying and will be available shortly.\n\n${spacePageUrl(activePlan.names.space)}`,
       "HERE IS YOUR ML CLAW",
     );
     runtime.prompt.outro("Bootstrap complete");
@@ -591,7 +677,19 @@ async function resolveBootstrapPlan(params: {
   hub: HubApi;
   runtime: Required<CliRuntime>;
 }): Promise<BootstrapResolvedPlan> {
-  const { opts, owner, agentName, requestedGatewayLocation, hfToken, telegramToken, telegramUserId, model, runtimeImage, hub, runtime } = params;
+  const {
+    opts,
+    owner,
+    agentName,
+    requestedGatewayLocation,
+    hfToken,
+    telegramToken,
+    telegramUserId,
+    model,
+    runtimeImage,
+    hub,
+    runtime,
+  } = params;
   const names = namesFor(owner, agentName);
   const now = runtime.now().toISOString();
   const existingManifest = await readManifest(runtime.configRoot, agentName).catch(() => null);
@@ -599,19 +697,25 @@ async function resolveBootstrapPlan(params: {
   const sessionSecret = existingSecrets.MLCLAW_SESSION_SECRET ?? randomBytes(48).toString("base64url");
   const credentialKey = existingSecrets.MLCLAW_CREDENTIAL_KEY ?? randomBytes(32).toString("base64url");
   const gatewayLocation = requestedGatewayLocation ?? existingManifest?.gatewayLocation ?? DEFAULT_GATEWAY_LOCATION;
+  const containerRuntime = parseContainerRuntimePreference(opts.containerRuntime);
   if (opts.dockerContext && gatewayLocation !== "local") {
     throw new Error("--docker-context only applies to local gateway mode");
   }
+  if (opts.dockerContext && containerRuntime === "podman") {
+    throw new Error("--docker-context cannot be used with --container-runtime podman");
+  }
   const bucketPrefix = bootstrapBucketPrefix(existingManifest, existingSecrets, runtime);
   const localRuntimeId = existingManifest?.localRuntimeId ?? newLocalRuntimeId(agentName);
-  const localGateway = gatewayLocation === "local"
-    ? await resolveLocalGatewayBinding({
-      manifest: existingManifest,
-      requestedContext: opts.dockerContext,
-      runtime,
-      persist: false,
-    })
-    : existingManifest?.localGateway;
+  const localGateway =
+    gatewayLocation === "local"
+      ? await resolveLocalGatewayBinding({
+          manifest: existingManifest,
+          requestedContext: opts.dockerContext,
+          preference: containerRuntime,
+          runtime,
+          persist: false,
+        })
+      : existingManifest?.localGateway;
   const bucketPlan = await resolveBootstrapBucket({
     explicitBucket: opts.bucket,
     defaultBucket: names.bucket,
@@ -626,13 +730,14 @@ async function resolveBootstrapPlan(params: {
     existingSecrets,
     model,
   });
-  const spacePlan = gatewayLocation === "space"
-    ? {
-      space: names.space,
-      exists: await hub.spaceExists(names.space),
-      visibility: opts.publicSpace ? "public" as const : "private" as const,
-    }
-    : undefined;
+  const spacePlan =
+    gatewayLocation === "space"
+      ? {
+          space: names.space,
+          exists: await hub.spaceExists(names.space),
+          visibility: opts.publicSpace ? ("public" as const) : ("private" as const),
+        }
+      : undefined;
 
   const manifest: DeploymentManifest = {
     version: 1,
@@ -689,9 +794,7 @@ async function resolveBootstrapBucket(params: {
   const explicitBucket = params.explicitBucket ? parseBucketId(params.explicitBucket) : undefined;
   const bucket = explicitBucket ?? params.existingManifest?.bucket ?? params.defaultBucket;
   const exists = await params.hub.bucketExists(bucket);
-  const inspection = exists
-    ? await inspectStateBucket(params.hub, bucket, params.bucketPrefix)
-    : { objectCount: 0 };
+  const inspection = exists ? await inspectStateBucket(params.hub, bucket, params.bucketPrefix) : { objectCount: 0 };
 
   return {
     bucket,
@@ -747,14 +850,20 @@ async function confirmBootstrapPlan(params: {
   const lines = [
     `Agent: ${params.manifest.agent}`,
     `Gateway: ${params.manifest.gatewayLocation}`,
-    `Bucket: ${params.bucketPlan.bucket} (${params.bucketPlan.exists
-      ? `exists; keeping ${params.bucketPlan.objectCount} object(s)`
-      : "will be created as private"})`,
+    `Bucket: ${params.bucketPlan.bucket} (${
+      params.bucketPlan.exists
+        ? `exists; keeping ${params.bucketPlan.objectCount} object(s)`
+        : "will be created as private"
+    })`,
   ];
   if (params.spacePlan) {
-    lines.push(`Space: ${params.spacePlan.space} (${params.spacePlan.exists
-      ? "exists; files, variables, secrets, and runtime will be updated"
-      : `will be created as ${params.spacePlan.visibility}`})`);
+    lines.push(
+      `Space: ${params.spacePlan.space} (${
+        params.spacePlan.exists
+          ? "exists; files, variables, secrets, and runtime will be updated"
+          : `will be created as ${params.spacePlan.visibility}`
+      })`,
+    );
     lines.push(`Hardware: ${params.hardware}`);
     lines.push(`Bucket mount: ${SPACE_STATE_MOUNT_DIR}`);
     lines.push(`Live state: ${SPACE_LIVE_DIR}`);
@@ -795,6 +904,121 @@ async function createOrAdoptBucket(params: {
     params.runtime.stdout.log(`Creating private bucket ${params.bucketPlan.bucket}`);
   }
   await params.hub.createBucket(params.bucketPlan.bucket, true);
+}
+
+async function createOrAdoptSpace(params: {
+  hub: HubApi;
+  spacePlan: BootstrapSpacePlan;
+  runtime: Required<CliRuntime>;
+  hardware?: string;
+  sleepTime?: number;
+}): Promise<void> {
+  if (params.spacePlan.exists) {
+    params.runtime.stdout.log(`Updating existing Space ${params.spacePlan.space}`);
+    return;
+  }
+  params.runtime.stdout.log(`Creating ${params.spacePlan.visibility} Space ${params.spacePlan.space}`);
+  await params.hub.createDockerSpace(params.spacePlan.space, {
+    private: params.spacePlan.visibility === "private",
+    ...(params.hardware ? { hardware: params.hardware } : {}),
+    ...(typeof params.sleepTime === "number" ? { sleepTimeSeconds: params.sleepTime } : {}),
+  });
+}
+
+async function resolveHostedBootstrapFallback(params: {
+  error: HubApiError;
+  opts: BootstrapOptions;
+  owner: string;
+  agentName: string;
+  hfToken: string;
+  telegramToken?: string;
+  telegramUserId?: string;
+  model: string;
+  runtimeImage: string;
+  hub: HubApi;
+  runtime: Required<CliRuntime>;
+}): Promise<BootstrapResolvedPlan> {
+  let localPlan: BootstrapResolvedPlan;
+  try {
+    localPlan = await resolveBootstrapPlan({
+      opts: params.opts,
+      owner: params.owner,
+      agentName: params.agentName,
+      requestedGatewayLocation: "local",
+      hfToken: params.hfToken,
+      model: params.model,
+      runtimeImage: params.runtimeImage,
+      hub: params.hub,
+      runtime: params.runtime,
+      ...(params.telegramToken ? { telegramToken: params.telegramToken } : {}),
+      ...(params.telegramUserId ? { telegramUserId: params.telegramUserId } : {}),
+    });
+  } catch (localError) {
+    throw new Error(
+      `Hugging Face requires PRO for this Docker Space, and no local fallback is ready. ` +
+        `${localError instanceof Error ? localError.message : String(localError)}. ` +
+        `Subscribe at https://huggingface.co/pro`,
+      { cause: params.error },
+    );
+  }
+
+  if (!params.runtime.prompt.isInteractive()) {
+    if (!params.opts.allowLocalFallback) {
+      throw new Error(
+        "Hugging Face requires PRO for this Docker Space. Re-run with --allow-local-fallback to use the detected local container runtime, or subscribe at https://huggingface.co/pro",
+        { cause: params.error },
+      );
+    }
+  } else {
+    params.runtime.prompt.note(
+      `Hugging Face requires PRO to host this Docker Space. ${localGatewayLabel(requiredLocalGateway(localPlan.manifest))} is ready on this machine.`,
+      "Hosted gateway unavailable",
+    );
+    const choice = await params.runtime.prompt.select({
+      message: "How should ML Claw continue?",
+      options: [
+        { value: "local", label: "Run the gateway locally" },
+        { value: "pro", label: "Stop and use Hugging Face PRO", hint: "https://huggingface.co/pro" },
+        { value: "cancel", label: "Cancel" },
+      ],
+      initialValue: "local",
+    });
+    if (isCancel(choice) || choice === "cancel") {
+      params.runtime.prompt.cancel("Cancelled");
+      throw new Error("bootstrap cancelled");
+    }
+    if (choice === "pro") {
+      throw new Error("Subscribe at https://huggingface.co/pro, then run bootstrap again");
+    }
+  }
+
+  await confirmBootstrapPlan({
+    manifest: localPlan.manifest,
+    bucketPlan: localPlan.bucketPlan,
+    hasExistingManifest: localPlan.hasExistingManifest,
+    hardware: localGatewayLabel(requiredLocalGateway(localPlan.manifest)),
+    yes: Boolean(params.opts.yes),
+    runtime: params.runtime,
+  });
+  return localPlan;
+}
+
+function isHostedComputePaymentRequired(err: unknown): err is HubApiError {
+  if (!(err instanceof HubApiError) || err.status !== 402) {
+    return false;
+  }
+  try {
+    return new URL(err.url).pathname === "/api/repos/create";
+  } catch {
+    return false;
+  }
+}
+
+function requiredLocalGateway(manifest: DeploymentManifest): LocalGatewayBinding {
+  if (!manifest.localGateway) {
+    throw new Error("internal error: local gateway binding was not resolved");
+  }
+  return manifest.localGateway;
 }
 
 async function stateAdopt(agent: string, opts: StateAdoptOptions, runtime: Required<CliRuntime>): Promise<void> {
@@ -880,7 +1104,12 @@ async function stateAdopt(agent: string, opts: StateAdoptOptions, runtime: Requi
       MLCLAW_RUNTIME_ID: spaceRuntimeId(updated.agent),
     });
     await ensureSpaceStateVolume(hub, updated.space, bucket);
-    if (canDeleteBroadTokenSecrets({ model: updated.model, routerTokenPresent: hasBrokerOrRouterTokenSecretRecord(secrets) })) {
+    if (
+      canDeleteBroadTokenSecrets({
+        model: updated.model,
+        routerTokenPresent: hasBrokerOrRouterTokenSecretRecord(secrets),
+      })
+    ) {
       await deleteStaleSpaceTokenSecrets(hub, updated.space);
     }
     await clearSpaceGatewayDisabled(hub, updated.space);
@@ -894,11 +1123,7 @@ async function stateAdopt(agent: string, opts: StateAdoptOptions, runtime: Requi
   runtime.stdout.log(`State bucket: ${bucket}`);
 }
 
-async function inspectStateBucket(
-  hub: HubApi,
-  bucket: string,
-  bucketPrefix?: string,
-): Promise<BucketStateInspection> {
+async function inspectStateBucket(hub: HubApi, bucket: string, bucketPrefix?: string): Promise<BucketStateInspection> {
   await hub.assertBucketAccessible(bucket);
   const client = hub.bucket(bucket);
   const entries = await client.listFiles();
@@ -906,10 +1131,11 @@ async function inspectStateBucket(
   const prefix = normalizeBucketPrefix(bucketPrefix);
   const prefixWithSlash = `${prefix}/`;
   const manifestPath = `${prefixWithSlash}${SNAPSHOT_MANIFEST_REMOTE_NAME}`;
-  const stateEntries = fileEntries.filter((entry) =>
-    entry.path === manifestPath ||
-    entry.path.startsWith(`${prefixWithSlash}snapshots/`) ||
-    entry.path.startsWith(`${prefixWithSlash}runtime/`)
+  const stateEntries = fileEntries.filter(
+    (entry) =>
+      entry.path === manifestPath ||
+      entry.path.startsWith(`${prefixWithSlash}snapshots/`) ||
+      entry.path.startsWith(`${prefixWithSlash}runtime/`),
   );
 
   if (fileEntries.length > 0 && stateEntries.length === 0) {
@@ -1043,24 +1269,31 @@ async function deploySpaceGateway(params: {
   templateRuntimeImage?: string;
   publicSpace?: boolean;
   spaceExists?: boolean;
+  spacePrepared?: boolean;
 }): Promise<{ runtimeImage: string }> {
   const { hub, runtime, hfToken, manifest, secrets } = params;
-  runtime.stdout.log(params.spaceExists
-    ? `Updating existing Space ${manifest.space}`
-    : `Creating ${params.publicSpace ? "public" : "private"} Space ${manifest.space}`);
-  await hub.createDockerSpace(manifest.space, {
-    private: !params.publicSpace,
-    ...(params.hardware && !params.spaceExists ? { hardware: params.hardware } : {}),
-    ...(typeof params.sleepTime === "number" ? { sleepTimeSeconds: params.sleepTime } : {}),
-  });
+  if (!params.spacePrepared) {
+    runtime.stdout.log(
+      params.spaceExists
+        ? `Updating existing Space ${manifest.space}`
+        : `Creating ${params.publicSpace ? "public" : "private"} Space ${manifest.space}`,
+    );
+    await hub.createDockerSpace(manifest.space, {
+      private: !params.publicSpace,
+      ...(params.hardware && !params.spaceExists ? { hardware: params.hardware } : {}),
+      ...(typeof params.sleepTime === "number" ? { sleepTimeSeconds: params.sleepTime } : {}),
+    });
+  }
   if (params.hardware && params.spaceExists) {
     await hub.requestSpaceHardware(manifest.space, params.hardware, params.sleepTime);
   } else if (!params.hardware && params.spaceExists && typeof params.sleepTime === "number") {
     await hub.setSpaceSleepTime(manifest.space, params.sleepTime);
   }
-  runtime.stdout.log(params.templateRuntimeImage
-    ? "Generating Space files from prebuilt runtime image"
-    : "Generating bundled Space runtime files");
+  runtime.stdout.log(
+    params.templateRuntimeImage
+      ? "Generating Space files from prebuilt runtime image"
+      : "Generating bundled Space runtime files",
+  );
   const { templateRev } = await runtime.pushTemplateToSpace({
     targetRepo: manifest.space,
     token: hfToken,
@@ -1098,7 +1331,12 @@ async function deploySpaceGateway(params: {
     ...(secrets.TELEGRAM_PROXY ? { TELEGRAM_PROXY: secrets.TELEGRAM_PROXY } : {}),
     ...(secrets.TELEGRAM_API_ROOT ? { TELEGRAM_API_ROOT: secrets.TELEGRAM_API_ROOT } : {}),
   });
-  if (canDeleteBroadTokenSecrets({ model: manifest.model, routerTokenPresent: hasBrokerOrRouterTokenSecretRecord(secrets) })) {
+  if (
+    canDeleteBroadTokenSecrets({
+      model: manifest.model,
+      routerTokenPresent: hasBrokerOrRouterTokenSecretRecord(secrets),
+    })
+  ) {
     await deleteStaleSpaceTokenSecrets(hub, manifest.space);
   } else {
     runtime.stdout.log("Keeping legacy broad Hub token secrets until an HF Broker or Router credential is configured");
@@ -1119,8 +1357,9 @@ async function startLocalGateway(params: {
   assertDedicatedRouterToken(manifest.model, secrets);
   const containerName = containerNameFor(manifest.agent);
   const volumeName = volumeNameFor(manifest.agent);
-  const dockerContext = dockerContextFor(manifest);
-  const existing = await runtime.dockerRunner.inspect(containerName, dockerContext);
+  const runner = localRunnerFor(manifest, runtime);
+  const connection = localConnectionFor(manifest);
+  const existing = await runner.inspect(containerName, connection);
   const shouldRefresh = Boolean(params.refresh || params.resetVolume);
   if (existing?.running) {
     if (!shouldRefresh) {
@@ -1129,36 +1368,37 @@ async function startLocalGateway(params: {
     }
   }
   if (params.pull) {
-    await runtime.dockerRunner.pull(manifest.runtimeImage, dockerContext);
+    await runner.pull(manifest.runtimeImage, connection);
   }
   if (existing?.running) {
-    await runtime.dockerRunner.stop(containerName, dockerContext);
+    await runner.stop(containerName, connection);
     runtime.stdout.log(`Local gateway stopped for config refresh: ${containerName}`);
   }
   if (existing) {
-    await runtime.dockerRunner.rm(containerName, dockerContext);
+    await runner.rm(containerName, connection);
     runtime.stdout.log(`Local gateway removed for config refresh: ${containerName}`);
   }
   if (params.resetVolume) {
-    await runtime.dockerRunner.rmVolume(volumeName, dockerContext);
+    await runner.rmVolume(volumeName, connection);
     runtime.stdout.log(`Local gateway volume reset for bucket restore: ${volumeName}`);
   }
-  await runtime.dockerRunner.run({
+  await runner.run({
     containerName,
     image: manifest.runtimeImage,
     envFile: secretEnvPath(runtime.configRoot, manifest.agent),
     volumeName,
     volumeMountPath: LOCAL_VOLUME_MOUNT_PATH,
     liveDir: LOCAL_LIVE_DIR,
-    ...(dockerContext ? { context: dockerContext } : {}),
+    ...(connection ? { context: connection } : {}),
   });
   runtime.stdout.log(`Local gateway created: ${containerName}`);
 }
 
 async function stopLocalGateway(manifest: DeploymentManifest, runtime: Required<CliRuntime>): Promise<void> {
   const containerName = containerNameFor(manifest.agent);
-  const dockerContext = dockerContextFor(manifest);
-  const existing = await runtime.dockerRunner.inspect(containerName, dockerContext);
+  const runner = localRunnerFor(manifest, runtime);
+  const connection = localConnectionFor(manifest);
+  const existing = await runner.inspect(containerName, connection);
   if (!existing) {
     runtime.stdout.log(`Local gateway does not exist: ${containerName}`);
     return;
@@ -1167,7 +1407,7 @@ async function stopLocalGateway(manifest: DeploymentManifest, runtime: Required<
     runtime.stdout.log(`Local gateway already stopped: ${containerName}`);
     return;
   }
-  await runtime.dockerRunner.stop(containerName, dockerContext);
+  await runner.stop(containerName, connection);
   runtime.stdout.log(`Local gateway stopped: ${containerName}`);
 }
 
@@ -1192,13 +1432,14 @@ async function gatewayStart(agent: string, opts: GatewayCommandOptions, runtime:
   }
 }
 
-async function gatewayRestart(agent: string, opts: GatewayCommandOptions, runtime: Required<CliRuntime>): Promise<void> {
+async function gatewayRestart(
+  agent: string,
+  opts: GatewayCommandOptions,
+  runtime: Required<CliRuntime>,
+): Promise<void> {
   const manifest = await readDeploymentManifest(runtime, agent, { requestedDockerContext: opts.dockerContext });
   if (manifest.gatewayLocation === "local") {
-    assertDedicatedRouterToken(
-      manifest.model,
-      await readSecretEnv(runtime.configRoot, agent).catch(() => ({})),
-    );
+    assertDedicatedRouterToken(manifest.model, await readSecretEnv(runtime.configRoot, agent).catch(() => ({})));
   }
   await gatewayStop(agent, runtime);
   await gatewayStart(agent, opts, runtime);
@@ -1225,13 +1466,17 @@ async function gatewayStatus(agent: string, runtime: Required<CliRuntime>): Prom
   runtime.stdout.log(`Space: ${manifest.space}`);
   if (manifest.gatewayLocation === "local") {
     if (manifest.localGateway) {
-      runtime.stdout.log(`Docker: ${manifest.localGateway.dockerContext}`);
-      if (manifest.localGateway.dockerEndpoint) {
-        runtime.stdout.log(`Endpoint: ${manifest.localGateway.dockerEndpoint}`);
+      runtime.stdout.log(`Container: ${localGatewayLabel(manifest.localGateway)}`);
+      const endpoint = localGatewayEndpoint(manifest.localGateway);
+      if (endpoint) {
+        runtime.stdout.log(`Endpoint: ${endpoint}`);
       }
     }
-    const inspect = await runtime.dockerRunner.inspect(containerNameFor(manifest.agent), dockerContextFor(manifest));
-    runtime.stdout.log(`Container: ${inspect ? inspect.status ?? "exists" : "missing"}`);
+    const inspect = await localRunnerFor(manifest, runtime).inspect(
+      containerNameFor(manifest.agent),
+      localConnectionFor(manifest),
+    );
+    runtime.stdout.log(`Container: ${inspect ? (inspect.status ?? "exists") : "missing"}`);
     runtime.stdout.log(`Running: ${inspect?.running ? "yes" : "no"}`);
   } else {
     const token = await runtime.readToken(runtime.env);
@@ -1257,7 +1502,13 @@ async function gatewayStatus(agent: string, runtime: Required<CliRuntime>): Prom
 async function gatewayLogs(agent: string, opts: GatewayCommandOptions, runtime: Required<CliRuntime>): Promise<void> {
   const manifest = await readDeploymentManifest(runtime, agent);
   if (manifest.gatewayLocation === "local") {
-    runtime.stdout.log(await runtime.dockerRunner.logs(containerNameFor(manifest.agent), opts.tail, dockerContextFor(manifest)));
+    runtime.stdout.log(
+      await localRunnerFor(manifest, runtime).logs(
+        containerNameFor(manifest.agent),
+        opts.tail,
+        localConnectionFor(manifest),
+      ),
+    );
     return;
   }
   const token = await runtime.readToken(runtime.env);
@@ -1265,9 +1516,20 @@ async function gatewayLogs(agent: string, opts: GatewayCommandOptions, runtime: 
   runtime.stdout.log(await hub.fetchSpaceLogs(manifest.space, "run"));
 }
 
-async function gatewayMigrate(agent: string, opts: GatewayCommandOptions, runtime: Required<CliRuntime>): Promise<void> {
+async function gatewayMigrate(
+  agent: string,
+  opts: GatewayCommandOptions,
+  runtime: Required<CliRuntime>,
+): Promise<void> {
   const target = parseGatewayLocation(requiredOption(opts.to, "--to"));
-  const current = await readDeploymentManifest(runtime, agent, { requestedDockerContext: target === "space" ? opts.dockerContext : undefined });
+  const requestedContainerRuntime =
+    target === "local" ? parseContainerRuntimePreference(opts.containerRuntime) : undefined;
+  if (target === "local" && opts.dockerContext && requestedContainerRuntime === "podman") {
+    throw new Error("--docker-context cannot be used with --container-runtime podman");
+  }
+  const current = await readDeploymentManifest(runtime, agent, {
+    requestedDockerContext: target === "space" ? opts.dockerContext : undefined,
+  });
   if (current.gatewayLocation === target) {
     runtime.stdout.log(`Gateway already uses ${target}`);
     return;
@@ -1299,7 +1561,9 @@ async function gatewayMigrate(agent: string, opts: GatewayCommandOptions, runtim
       ...(opts.hardware ? { requestedHardware: opts.hardware } : {}),
       ...(typeof opts.sleepTime === "number"
         ? { requestedSleepTime: opts.sleepTime }
-        : secrets.TELEGRAM_BOT_TOKEN ? { requestedSleepTime: TELEGRAM_SLEEP_TIME } : {}),
+        : secrets.TELEGRAM_BOT_TOKEN
+          ? { requestedSleepTime: TELEGRAM_SLEEP_TIME }
+          : {}),
       defaultLabel: "unchanged Space hardware",
       requiresMessagingEgress: Boolean(secrets.TELEGRAM_BOT_TOKEN),
       yes: Boolean(opts.yes),
@@ -1336,9 +1600,13 @@ async function gatewayMigrate(agent: string, opts: GatewayCommandOptions, runtim
       MLCLAW_RUNTIME_ID: spaceRuntimeId(agent),
     });
   } else {
+    const containerRuntime = requestedContainerRuntime ?? "auto";
+    const reuseLocalBinding =
+      !opts.dockerContext && (containerRuntime === "auto" || current.localGateway?.engine === containerRuntime);
     updated.localGateway = await resolveLocalGatewayBinding({
-      manifest: opts.dockerContext ? undefined : current.localGateway ? current : undefined,
+      manifest: reuseLocalBinding && current.localGateway ? current : undefined,
       requestedContext: opts.dockerContext,
+      preference: containerRuntime,
       runtime,
       persist: false,
       agent: current.agent,
@@ -1379,10 +1647,7 @@ async function gatewayRebind(agent: string, opts: GatewayRebindOptions, runtime:
   if (current.gatewayLocation !== "local") {
     throw new Error("Docker context rebind only applies to local gateway deployments");
   }
-  assertDedicatedRouterToken(
-    current.model,
-    await readSecretEnv(runtime.configRoot, agent).catch(() => ({})),
-  );
+  assertDedicatedRouterToken(current.model, await readSecretEnv(runtime.configRoot, agent).catch(() => ({})));
 
   const targetBinding = await resolveLocalGatewayBinding({
     manifest: undefined,
@@ -1391,6 +1656,12 @@ async function gatewayRebind(agent: string, opts: GatewayRebindOptions, runtime:
     persist: false,
     agent,
   });
+  if (targetBinding.engine !== "docker") {
+    throw new Error("internal error: Docker rebind resolved a non-Docker runtime");
+  }
+  if (current.localGateway?.engine === "podman") {
+    throw new Error("Docker context rebind cannot move a Podman deployment; migrate the gateway through Space first");
+  }
   const currentContext = current.localGateway?.dockerContext;
   if (currentContext === targetBinding.dockerContext) {
     runtime.stdout.log(`Local gateway already uses Docker context ${targetBinding.dockerContext}`);
@@ -1400,7 +1671,7 @@ async function gatewayRebind(agent: string, opts: GatewayRebindOptions, runtime:
   const token = await runtime.readToken(runtime.env);
   const hub = runtime.hubFactory(token);
   const bucketPrefix = await readDeploymentBucketPrefix(runtime, agent);
-  if (currentContext && await runtime.dockerRunner.contextExists(currentContext)) {
+  if (currentContext && (await runtime.dockerRunner.contextExists(currentContext))) {
     try {
       await handoffAndStopLocalGateway({
         manifest: current,
@@ -1415,13 +1686,19 @@ async function gatewayRebind(agent: string, opts: GatewayRebindOptions, runtime:
       }
       await clearRuntimeHandoffRequest(hub, current.bucket, bucketPrefix).catch(() => undefined);
       await stopLocalGateway(current, runtime);
-      runtime.stdout.log(`Old Docker context handoff failed; rebinding with --takeover: ${err instanceof Error ? err.message : String(err)}`);
+      runtime.stdout.log(
+        `Old Docker context handoff failed; rebinding with --takeover: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   } else if (!opts.takeover) {
-    const missing = currentContext ? `Docker context ${currentContext} is not available` : "Deployment has no pinned Docker context";
+    const missing = currentContext
+      ? `Docker context ${currentContext} is not available`
+      : "Deployment has no pinned Docker context";
     throw new Error(`${missing}. Run with --takeover to rebind without a final snapshot from the old context.`);
   } else {
-    runtime.stdout.log("Old Docker context unavailable; rebinding with --takeover and using the latest bucket snapshot.");
+    runtime.stdout.log(
+      "Old Docker context unavailable; rebinding with --takeover and using the latest bucket snapshot.",
+    );
   }
 
   const updated: DeploymentManifest = {
@@ -1440,11 +1717,13 @@ async function readDeploymentManifest(
   opts: { requestedDockerContext?: string | undefined; validateLocalGateway?: boolean | undefined } = {},
 ): Promise<DeploymentManifest> {
   const manifest = await readManifest(runtime.configRoot, agent);
-  let updated: DeploymentManifest = manifest.localRuntimeId ? manifest : {
-    ...manifest,
-    localRuntimeId: newLocalRuntimeId(manifest.agent),
-    updatedAt: runtime.now().toISOString(),
-  };
+  let updated: DeploymentManifest = manifest.localRuntimeId
+    ? manifest
+    : {
+        ...manifest,
+        localRuntimeId: newLocalRuntimeId(manifest.agent),
+        updatedAt: runtime.now().toISOString(),
+      };
   if (updated.gatewayLocation === "local" && opts.validateLocalGateway !== false) {
     const localGateway = await resolveLocalGatewayBinding({
       manifest: updated,
@@ -1472,6 +1751,7 @@ async function readDeploymentManifest(
 async function resolveLocalGatewayBinding(params: {
   manifest?: DeploymentManifest | null | undefined;
   requestedContext?: string | undefined;
+  preference?: ContainerRuntimePreference | undefined;
   runtime: Required<CliRuntime>;
   persist: boolean;
   agent?: string | undefined;
@@ -1479,33 +1759,28 @@ async function resolveLocalGatewayBinding(params: {
   const requestedContext = params.requestedContext?.trim();
   const existing = params.manifest?.localGateway;
   const agent = params.agent ?? params.manifest?.agent ?? "deployment";
-  if (existing && requestedContext && existing.dockerContext !== requestedContext) {
+  if (existing && params.preference && params.preference !== "auto" && existing.engine !== params.preference) {
+    throw new Error(`local gateway ${agent} is pinned to ${displayContainerEngine(existing.engine)}`);
+  }
+  if (existing?.engine === "podman" && requestedContext) {
+    throw new Error("--docker-context cannot be used with a Podman local gateway");
+  }
+  if (existing?.engine === "docker" && requestedContext && existing.dockerContext !== requestedContext) {
     throw new Error(
       `local gateway ${agent} is pinned to Docker context ${existing.dockerContext}. ` +
-      `Run \`mlclaw gateway rebind ${agent} --docker-context ${requestedContext}\` to move it.`,
+        `Run \`mlclaw gateway rebind ${agent} --docker-context ${requestedContext}\` to move it.`,
     );
   }
-
-  const dockerContext = existing?.dockerContext ?? requestedContext ?? await params.runtime.dockerRunner.currentContext();
-  if (!dockerContext) {
-    throw new Error("could not determine Docker context");
+  const binding = existing
+    ? await probeExistingLocalGateway(existing, params.runtime)
+    : await selectLocalGatewayBinding({
+        preference: params.preference ?? "auto",
+        ...(requestedContext ? { requestedDockerContext: requestedContext } : {}),
+        runtime: params.runtime,
+      });
+  if (binding.engine === "docker" && existing) {
+    await warnOnDockerContextMismatch(binding.dockerContext, params.runtime);
   }
-  if (!await params.runtime.dockerRunner.contextExists(dockerContext)) {
-    throw new Error(
-      `Docker context ${dockerContext} is not available. ` +
-      `Run \`mlclaw gateway rebind ${agent} --docker-context <context>\` to move this local gateway to another Docker engine.`,
-    );
-  }
-
-  if (existing) {
-    await warnOnDockerContextMismatch(dockerContext, params.runtime);
-  }
-  const endpoint = await params.runtime.dockerRunner.contextEndpoint(dockerContext);
-  const binding: LocalGatewayBinding = {
-    engine: "docker",
-    dockerContext,
-    ...(endpoint ? { dockerEndpoint: endpoint } : {}),
-  };
   if (params.persist && params.manifest && !sameLocalGatewayBinding(params.manifest.localGateway, binding)) {
     await writeManifest(params.runtime.configRoot, {
       ...params.manifest,
@@ -1519,18 +1794,114 @@ async function resolveLocalGatewayBinding(params: {
 async function warnOnDockerContextMismatch(pinnedContext: string, runtime: Required<CliRuntime>): Promise<void> {
   const currentContext = await runtime.dockerRunner.currentContext().catch(() => undefined);
   if (currentContext && currentContext !== pinnedContext) {
-    runtime.stdout.log(`Using Docker context ${pinnedContext} from the deployment manifest. Current shell context is ${currentContext}.`);
+    runtime.stdout.log(
+      `Using Docker context ${pinnedContext} from the deployment manifest. Current shell context is ${currentContext}.`,
+    );
   }
 }
 
 function sameLocalGatewayBinding(a: LocalGatewayBinding | undefined, b: LocalGatewayBinding | undefined): boolean {
-  return a?.engine === b?.engine &&
-    a?.dockerContext === b?.dockerContext &&
-    a?.dockerEndpoint === b?.dockerEndpoint;
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 function dockerContextFor(manifest: DeploymentManifest): string | undefined {
-  return manifest.localGateway?.dockerContext;
+  return manifest.localGateway?.engine === "docker" ? manifest.localGateway.dockerContext : undefined;
+}
+
+function localConnectionFor(manifest: DeploymentManifest): string | undefined {
+  const binding = manifest.localGateway;
+  if (!binding) {
+    return undefined;
+  }
+  return binding.engine === "docker" ? binding.dockerContext : binding.podmanConnection;
+}
+
+function localRunnerFor(manifest: DeploymentManifest, runtime: Required<CliRuntime>): ContainerRunner {
+  return runnerForEngine(manifest.localGateway?.engine ?? "docker", runtime);
+}
+
+function parseContainerRuntimePreference(value: string | undefined): ContainerRuntimePreference {
+  const normalized = value?.trim().toLowerCase() || "auto";
+  if (normalized === "auto" || normalized === "docker" || normalized === "podman") {
+    return normalized;
+  }
+  throw new InvalidArgumentError(`expected container runtime auto, docker, or podman; got ${value}`);
+}
+
+function displayContainerEngine(engine: ContainerEngine): string {
+  return engine === "docker" ? "Docker" : "Podman";
+}
+
+function runnerForEngine(engine: ContainerEngine, runtime: Required<CliRuntime>): ContainerRunner {
+  return engine === "docker" ? runtime.dockerRunner : runtime.podmanRunner;
+}
+
+function localGatewayLabel(binding: LocalGatewayBinding): string {
+  return binding.engine === "docker"
+    ? `Docker context ${binding.dockerContext}`
+    : binding.podmanConnection === "local"
+      ? "Podman default connection"
+      : `Podman connection ${binding.podmanConnection}`;
+}
+
+function localGatewayEndpoint(binding: LocalGatewayBinding): string | undefined {
+  return binding.engine === "docker" ? binding.dockerEndpoint : binding.podmanEndpoint;
+}
+
+async function probeExistingLocalGateway(
+  binding: LocalGatewayBinding,
+  runtime: Required<CliRuntime>,
+): Promise<LocalGatewayBinding> {
+  const runner = runnerForEngine(binding.engine, runtime);
+  const connection = binding.engine === "docker" ? binding.dockerContext : binding.podmanConnection;
+  const probe = await runner.probe(connection);
+  if (probe.status !== "ready") {
+    throw new Error(`${localGatewayLabel(binding)} is not ready: ${probe.detail}`);
+  }
+  return bindingFromProbe(probe);
+}
+
+async function selectLocalGatewayBinding(params: {
+  preference: ContainerRuntimePreference;
+  requestedDockerContext?: string;
+  runtime: Required<CliRuntime>;
+}): Promise<LocalGatewayBinding> {
+  const engines: ContainerEngine[] = params.requestedDockerContext
+    ? ["docker"]
+    : params.preference === "auto"
+      ? ["docker", "podman"]
+      : [params.preference];
+  const probes: ContainerRuntimeProbe[] = [];
+  for (const engine of engines) {
+    const runner = runnerForEngine(engine, params.runtime);
+    const probe = await runner.probe(engine === "docker" ? params.requestedDockerContext : undefined);
+    probes.push(probe);
+    if (probe.status === "ready") {
+      return bindingFromProbe(probe);
+    }
+  }
+  throw new Error(`no usable local container runtime found. ${probes.map((probe) => probe.detail).join("; ")}`);
+}
+
+function bindingFromProbe(probe: ContainerRuntimeProbe): LocalGatewayBinding {
+  if (probe.status !== "ready") {
+    throw new Error(`container runtime is not ready: ${probe.detail}`);
+  }
+  if (probe.engine === "docker") {
+    if (!probe.context) {
+      throw new Error("Docker readiness probe did not report its context");
+    }
+    return {
+      engine: "docker",
+      dockerContext: probe.context,
+      ...(probe.endpoint ? { dockerEndpoint: probe.endpoint } : {}),
+    };
+  }
+  return {
+    engine: "podman",
+    podmanConnection: probe.context ?? "local",
+    ...(probe.endpoint ? { podmanEndpoint: probe.endpoint } : {}),
+  };
 }
 
 async function readDeploymentBucketPrefix(runtime: Required<CliRuntime>, agent: string): Promise<string | undefined> {
@@ -1579,8 +1950,9 @@ async function handoffAndStopLocalGateway(params: {
   targetRuntimeId?: string | undefined;
 }): Promise<void> {
   const containerName = containerNameFor(params.manifest.agent);
-  const dockerContext = dockerContextFor(params.manifest);
-  const existing = await params.runtime.dockerRunner.inspect(containerName, dockerContext);
+  const runner = localRunnerFor(params.manifest, params.runtime);
+  const connection = localConnectionFor(params.manifest);
+  const existing = await runner.inspect(containerName, connection);
   if (!existing) {
     params.runtime.stdout.log(`Local gateway does not exist: ${containerName}`);
     return;
@@ -1590,17 +1962,22 @@ async function handoffAndStopLocalGateway(params: {
     return;
   }
 
-  await params.runtime.dockerRunner.disableRestart(containerName, dockerContext);
+  await runner.disableRestart(containerName, connection);
   const handoffStartedAt = params.runtime.now();
   const requestId = randomBytes(16).toString("hex");
-  await writeRuntimeHandoffRequest(params.hub, params.manifest.bucket, {
-    schemaVersion: 1,
-    requestId,
-    agent: params.manifest.agent,
-    runtimeId: params.manifest.localRuntimeId,
-    requestedAt: handoffStartedAt.toISOString(),
-    targetRuntimeId: params.targetRuntimeId ?? spaceRuntimeId(params.manifest.agent),
-  }, params.bucketPrefix);
+  await writeRuntimeHandoffRequest(
+    params.hub,
+    params.manifest.bucket,
+    {
+      schemaVersion: 1,
+      requestId,
+      agent: params.manifest.agent,
+      runtimeId: params.manifest.localRuntimeId,
+      requestedAt: handoffStartedAt.toISOString(),
+      targetRuntimeId: params.targetRuntimeId ?? spaceRuntimeId(params.manifest.agent),
+    },
+    params.bucketPrefix,
+  );
   params.runtime.stdout.log("Waiting for local gateway to upload a final snapshot");
   await waitForRuntimeHandoffAck({
     hub: params.hub,
@@ -1633,14 +2010,19 @@ async function disableAndPauseSpaceGateway(params: {
     params.runtime.stdout.log(`Space pause requested: ${params.manifest.space}`);
     return;
   }
-  await writeRuntimeHandoffRequest(params.hub, params.manifest.bucket, {
-    schemaVersion: 1,
-    requestId,
-    agent: params.manifest.agent,
-    runtimeId: spaceRuntimeId(params.manifest.agent),
-    requestedAt: handoffStartedAt.toISOString(),
-    targetRuntimeId: params.targetRuntimeId ?? params.manifest.localRuntimeId,
-  }, params.bucketPrefix);
+  await writeRuntimeHandoffRequest(
+    params.hub,
+    params.manifest.bucket,
+    {
+      schemaVersion: 1,
+      requestId,
+      agent: params.manifest.agent,
+      runtimeId: spaceRuntimeId(params.manifest.agent),
+      requestedAt: handoffStartedAt.toISOString(),
+      targetRuntimeId: params.targetRuntimeId ?? params.manifest.localRuntimeId,
+    },
+    params.bucketPrefix,
+  );
   await params.hub.addSpaceVariable(params.manifest.space, "MLCLAW_GATEWAY_DISABLED", "1");
   params.runtime.stdout.log("Waiting for Space gateway to upload a final snapshot");
   await waitForRuntimeHandoffAck({
@@ -1710,10 +2092,7 @@ async function waitForRuntimeHandoffAck(params: {
   while (true) {
     try {
       const ack = await readRuntimeHandoffAck(params.hub, params.bucket, params.bucketPrefix);
-      if (
-        ack?.requestId === params.requestId &&
-        ack.runtimeId === params.runtimeId
-      ) {
+      if (ack?.requestId === params.requestId && ack.runtimeId === params.runtimeId) {
         return ack;
       }
       lastError = undefined;
@@ -1741,7 +2120,8 @@ async function ensureDeploymentCredentialKey(
   agent: string,
   existing?: Record<string, string>,
 ): Promise<Record<string, string>> {
-  const secrets: Record<string, string> = existing ?? await readSecretEnv(runtime.configRoot, agent).catch(() => ({}));
+  const secrets: Record<string, string> =
+    existing ?? (await readSecretEnv(runtime.configRoot, agent).catch(() => ({})));
   if (secrets.MLCLAW_CREDENTIAL_KEY) {
     return secrets;
   }
@@ -1773,7 +2153,12 @@ async function update(
 ): Promise<void> {
   const variables = await hub.getSpaceVariables(repoId);
   const canonicalTemplate = isCanonicalTemplateSpace(repoId, runtime.env);
-  if (!canonicalTemplate && !variables.has("MLCLAW_TEMPLATE_REV") && !variables.has("OPENCLAW_HF_TEMPLATE_REV") && !opts.force) {
+  if (
+    !canonicalTemplate &&
+    !variables.has("MLCLAW_TEMPLATE_REV") &&
+    !variables.has("OPENCLAW_HF_TEMPLATE_REV") &&
+    !opts.force
+  ) {
     throw new Error(`${repoId} does not look like a ML Claw deployment; pass --force to update anyway`);
   }
   const runtimeImage = resolveSpaceRuntimeImage(opts, runtime.env);
@@ -1839,11 +2224,11 @@ async function ensureUpdateRouterToken(params: {
     : {};
   const routerToken = hasExplicitOverride
     ? await resolveRouterToken({
-      opts: params.opts,
-      runtime: params.runtime,
-      existingSecrets: localSecrets,
-      model: params.model,
-    })
+        opts: params.opts,
+        runtime: params.runtime,
+        existingSecrets: localSecrets,
+        model: params.model,
+      })
     : undefined;
   const brokerToken = routerToken ? undefined : await params.runtime.readToken(params.runtime.env);
   const credential = routerToken ?? brokerToken;
@@ -1858,15 +2243,13 @@ async function ensureUpdateRouterToken(params: {
   if (hasManifest) {
     await writeSecretEnv(params.runtime.configRoot, params.agentName, {
       ...localSecrets,
-      ...(routerToken
-        ? { MLCLAW_ROUTER_TOKEN: routerToken }
-        : { MLCLAW_BROKER_HF_TOKEN: brokerToken as string }),
+      ...(routerToken ? { MLCLAW_ROUTER_TOKEN: routerToken } : { MLCLAW_BROKER_HF_TOKEN: brokerToken as string }),
     });
   }
 }
 
 async function doctor(repoId: string, opts: DoctorOptions, hub: HubApi, runtime: Required<CliRuntime>): Promise<void> {
-  if (!repoId.includes("/") && await manifestExists(runtime.configRoot, repoId)) {
+  if (!repoId.includes("/") && (await manifestExists(runtime.configRoot, repoId))) {
     await gatewayStatus(repoId, runtime);
     return;
   }
@@ -1980,9 +2363,13 @@ async function doctor(repoId: string, opts: DoctorOptions, hub: HubApi, runtime:
       await deleteStaleSpaceTokenSecrets(hub, repoId);
       fixed.push(`deleted stale secret${staleTokenSecrets.length === 1 ? "" : "s"} ${staleTokenSecrets.join(", ")}`);
     } else if (fix) {
-      issues.push(`stale broad Hub token secret${staleTokenSecrets.length === 1 ? "" : "s"} present: ${staleTokenSecrets.join(", ")}; add MLCLAW_BROKER_HF_TOKEN before removing`);
+      issues.push(
+        `stale broad Hub token secret${staleTokenSecrets.length === 1 ? "" : "s"} present: ${staleTokenSecrets.join(", ")}; add MLCLAW_BROKER_HF_TOKEN before removing`,
+      );
     } else {
-      issues.push(`stale broad Hub token secret${staleTokenSecrets.length === 1 ? "" : "s"} present: ${staleTokenSecrets.join(", ")}`);
+      issues.push(
+        `stale broad Hub token secret${staleTokenSecrets.length === 1 ? "" : "s"} present: ${staleTokenSecrets.join(", ")}`,
+      );
     }
   }
   if (!secrets.has("MLCLAW_SESSION_SECRET")) {
@@ -1996,7 +2383,7 @@ async function doctor(repoId: string, opts: DoctorOptions, hub: HubApi, runtime:
   if (!secrets.has("MLCLAW_CREDENTIAL_KEY")) {
     if (fix) {
       const agent = variables.get("OPENCLAW_AGENT_NAME")?.value?.trim() || repoId.split("/")[1] || "openclaw";
-      const credentialKey = await manifestExists(runtime.configRoot, agent)
+      const credentialKey = (await manifestExists(runtime.configRoot, agent))
         ? requiredSecret(await ensureDeploymentCredentialKey(runtime, agent), "MLCLAW_CREDENTIAL_KEY")
         : randomBytes(32).toString("base64url");
       await hub.addSpaceSecret(repoId, "MLCLAW_CREDENTIAL_KEY", credentialKey);
@@ -2102,7 +2489,9 @@ function addRuntimeImageFindings(value: string | undefined, issues: string[]): v
     return;
   }
   if (runtimeImage.startsWith("ghcr.io/osolmaz/mlclaw-runtime:")) {
-    issues.push(`MLCLAW_RUNTIME_IMAGE points at the legacy mlclaw-runtime package; run \`mlclaw update\` to use ${DEFAULT_RUNTIME_IMAGE}`);
+    issues.push(
+      `MLCLAW_RUNTIME_IMAGE points at the legacy mlclaw-runtime package; run \`mlclaw update\` to use ${DEFAULT_RUNTIME_IMAGE}`,
+    );
     return;
   }
   if (runtimeImage.startsWith("bundled:")) {
@@ -2110,7 +2499,12 @@ function addRuntimeImageFindings(value: string | undefined, issues: string[]): v
   }
 }
 
-async function settings(repoId: string, opts: SettingsOptions, hub: HubApi, runtime: Required<CliRuntime>): Promise<void> {
+async function settings(
+  repoId: string,
+  opts: SettingsOptions,
+  hub: HubApi,
+  runtime: Required<CliRuntime>,
+): Promise<void> {
   if (opts.gateway) {
     throw new Error("gateway location changes must use `mlclaw gateway migrate` to preserve state");
   }
@@ -2152,21 +2546,13 @@ function formatRuntimeValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
-async function setDeploymentVariables(
-  hub: HubApi,
-  repoId: string,
-  variables: Record<string, string>,
-): Promise<void> {
+async function setDeploymentVariables(hub: HubApi, repoId: string, variables: Record<string, string>): Promise<void> {
   for (const [key, value] of Object.entries(variables)) {
     await hub.addSpaceVariable(repoId, key, value);
   }
 }
 
-async function setDeploymentSecrets(
-  hub: HubApi,
-  repoId: string,
-  secrets: Record<string, string>,
-): Promise<void> {
+async function setDeploymentSecrets(hub: HubApi, repoId: string, secrets: Record<string, string>): Promise<void> {
   for (const [key, value] of Object.entries(secrets)) {
     await hub.addSpaceSecret(repoId, key, value);
   }
@@ -2201,9 +2587,7 @@ function hasBrokerOrRouterTokenSecretMap(secrets: Map<string, { key: string }>):
 
 function assertDedicatedRouterToken(model: string, secrets: Record<string, string>): void {
   if (isHuggingFaceRouterModel(model) && !hasBrokerOrRouterTokenSecretRecord(secrets)) {
-    throw new Error(
-      "Hugging Face Router models require MLCLAW_BROKER_HF_TOKEN or a dedicated inference token",
-    );
+    throw new Error("Hugging Face Router models require MLCLAW_BROKER_HF_TOKEN or a dedicated inference token");
   }
 }
 
@@ -2216,7 +2600,9 @@ async function ensureSpaceStateVolume(
   const runtime = await hub.getSpaceRuntime(repoId);
   const volumes = Array.isArray(runtime.volumes)
     ? runtime.volumes
-    : opts.allowMissingVolumes ? [] : requireRuntimeVolumes(runtime, repoId);
+    : opts.allowMissingVolumes
+      ? []
+      : requireRuntimeVolumes(runtime, repoId);
   await hub.setSpaceVolumes(repoId, mergeStateVolume(volumes, bucket));
 }
 
@@ -2229,9 +2615,7 @@ function requireRuntimeVolumes(runtime: SpaceRuntime, repoId: string): SpaceVolu
 
 export function mergeStateVolume(existing: SpaceVolume[], bucket: string): SpaceVolume[] {
   return [
-    ...existing
-      .filter((volume) => volumeMountPath(volume) !== SPACE_STATE_MOUNT_DIR)
-      .map(normalizeSpaceVolume),
+    ...existing.filter((volume) => volumeMountPath(volume) !== SPACE_STATE_MOUNT_DIR).map(normalizeSpaceVolume),
     {
       type: "bucket",
       source: bucket,
@@ -2242,12 +2626,15 @@ export function mergeStateVolume(existing: SpaceVolume[], bucket: string): Space
 }
 
 function hasStateVolume(volumes: SpaceVolume[] | null | undefined, bucket: string): boolean {
-  return Boolean(volumes?.some((volume) =>
-    volume.type === "bucket" &&
-    volume.source === bucket &&
-    volumeMountPath(volume) === SPACE_STATE_MOUNT_DIR &&
-    volumeReadOnly(volume) !== true
-  ));
+  return Boolean(
+    volumes?.some(
+      (volume) =>
+        volume.type === "bucket" &&
+        volume.source === bucket &&
+        volumeMountPath(volume) === SPACE_STATE_MOUNT_DIR &&
+        volumeReadOnly(volume) !== true,
+    ),
+  );
 }
 
 function normalizeSpaceVolume(volume: SpaceVolume): SpaceVolume {
@@ -2282,7 +2669,10 @@ async function clearSpaceGatewayDisabled(hub: HubApi, repoId: string): Promise<v
   }
 }
 
-async function readOptionalTelegramToken(opts: BootstrapOptions, runtime: Required<CliRuntime>): Promise<string | undefined> {
+async function readOptionalTelegramToken(
+  opts: BootstrapOptions,
+  runtime: Required<CliRuntime>,
+): Promise<string | undefined> {
   const direct = opts.telegramToken ?? runtime.env.TELEGRAM_BOT_TOKEN;
   if (direct) {
     return direct;
@@ -2301,9 +2691,10 @@ async function resolveRouterToken(params: {
   existingSecrets?: Record<string, string>;
   model: string;
 }): Promise<string | undefined> {
-  const explicit = nonEmpty(params.opts.routerToken) ??
-    await readOptionalRouterTokenFile(params.opts.routerTokenFile);
-  const direct = explicit ??
+  const explicit =
+    nonEmpty(params.opts.routerToken) ?? (await readOptionalRouterTokenFile(params.opts.routerTokenFile));
+  const direct =
+    explicit ??
     params.runtime.env.MLCLAW_ROUTER_TOKEN ??
     params.runtime.env.HF_ROUTER_TOKEN ??
     params.existingSecrets?.MLCLAW_ROUTER_TOKEN ??
@@ -2353,14 +2744,18 @@ async function resolveHardware(params: {
 }): Promise<SpaceHardwareRequest> {
   const hardware = params.requestedHardware ?? (params.requiresMessagingEgress ? TELEGRAM_HARDWARE : undefined);
   if (!hardware) {
-    const label = params.defaultLabel ?? "default free CPU";
+    const label = params.defaultLabel ?? "default Space CPU";
     return typeof params.requestedSleepTime === "number"
       ? { kind: "default", label, sleepTime: params.requestedSleepTime }
       : { kind: "default", label };
   }
-  const sleepTime = isPaidHardware(hardware) ? params.requestedSleepTime ?? TELEGRAM_SLEEP_TIME : params.requestedSleepTime;
+  const sleepTime = isPaidHardware(hardware)
+    ? (params.requestedSleepTime ?? TELEGRAM_SLEEP_TIME)
+    : params.requestedSleepTime;
   if (params.requiresMessagingEgress && !isPaidHardware(hardware)) {
-    throw new Error(`Telegram requires upgraded paid Space hardware today; use --hardware ${TELEGRAM_HARDWARE} or --gateway local`);
+    throw new Error(
+      `Telegram requires upgraded paid Space hardware today; use --hardware ${TELEGRAM_HARDWARE} or --gateway local`,
+    );
   }
   if (isPaidHardware(hardware)) {
     const paidSleepTime = params.requestedSleepTime ?? TELEGRAM_SLEEP_TIME;

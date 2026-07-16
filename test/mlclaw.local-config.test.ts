@@ -62,14 +62,41 @@ describe("local ML Claw config", () => {
     expect(stat.mode & 0o777).toBe(0o600);
   });
 
+  it("round-trips Podman gateway bindings", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "mlclaw-config-"));
+    await writeManifest(root, {
+      version: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-test",
+      gatewayLocation: "local",
+      model: "test-model",
+      runtimeImage: "example/runtime:test",
+      localGateway: {
+        engine: "podman",
+        podmanConnection: "local",
+      },
+      createdAt: "2026-06-16T00:00:00.000Z",
+      updatedAt: "2026-06-16T00:00:00.000Z",
+    });
+
+    await expect(readManifest(root, "research")).resolves.toMatchObject({
+      localGateway: { engine: "podman", podmanConnection: "local" },
+    });
+  });
+
   it("writes Docker env-file values without shell quotes", () => {
     const raw = "A=plain-token\nB=has spaces\nC=123,456\nD=https://proxy.example/?a=b&c=d\n";
-    expect(renderSecretEnv({
+    expect(
+      renderSecretEnv({
       A: "plain-token",
       B: "has spaces",
       C: "123,456",
       D: "https://proxy.example/?a=b&c=d",
-    })).toBe(raw);
+      }),
+    ).toBe(raw);
     expect(parseSecretEnv(raw)).toEqual({
       A: "plain-token",
       B: "has spaces",

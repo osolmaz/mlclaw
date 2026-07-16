@@ -62,10 +62,9 @@ npx mlclaw@latest bootstrap --name mlclaw
 
 This creates:
 
-- a private Storage Bucket for OpenClaw state;
-- a private Docker Space for the browser gateway;
-- no explicit Space hardware request; Hugging Face uses the default free CPU
-  hardware unless you pass `--hardware`;
+- a private Docker Space for the browser gateway when the account can host it;
+- a private Storage Bucket for OpenClaw state after the Space is accepted;
+- no explicit Space hardware request unless you pass `--hardware`;
 - a Docker Space that starts from the prebuilt `ghcr.io/osolmaz/mlclaw` image;
 - Hugging Face OAuth metadata for browser auth, Hugging Face MCP, and Research
   Agent access in the Space README;
@@ -74,6 +73,19 @@ This creates:
 - an `MLCLAW_BROKER_HF_TOKEN` Space secret consumed only by the isolated HF
   Broker process;
 - a local deployment manifest under `~/.config/mlclaw`.
+
+Hugging Face currently requires PRO for Docker Space hosting. When creation is
+rejected for that reason, interactive bootstrap checks for a usable local
+Docker or rootless Podman engine and offers to run the same gateway locally.
+No bucket is created before hosted eligibility is known. Bootstrap does not
+install a container engine or change daemon permissions.
+
+Automation fails instead of changing execution location implicitly. Opt in to
+the same fallback with:
+
+```bash
+npx mlclaw@latest bootstrap --yes --allow-local-fallback
+```
 
 Open the Space, sign in with your Hugging Face account, and use the OpenClaw
 browser gateway directly. The gateway includes a small ML Claw control link
@@ -139,9 +151,20 @@ You can run the gateway locally instead of inside a Space:
 npx mlclaw@latest bootstrap --gateway local --name mlclaw
 ```
 
-Local mode uses Docker on your machine and the same private Storage Bucket.
-It avoids Hugging Face messaging egress limits because Telegram traffic comes
-from your network.
+Local mode uses a ready Docker-compatible engine or rootless Podman on your
+machine and the same private Storage Bucket. Runtime selection is deterministic:
+the existing manifest binding wins, an explicit choice comes next, and
+`auto` probes Docker before Podman. Select one explicitly when needed:
+
+```bash
+npx mlclaw@latest bootstrap --gateway local --container-runtime docker
+npx mlclaw@latest bootstrap --gateway local --container-runtime podman
+```
+
+Docker Desktop, OrbStack, Colima, Rancher Desktop, and other Docker-compatible
+engines are used through Docker contexts. On Windows, Podman machine
+connections are supported through the Podman CLI. Local mode avoids Hugging
+Face messaging egress limits because Telegram traffic comes from your network.
 
 Move between local and Space without losing state:
 
@@ -163,9 +186,9 @@ mlclaw gateway stop mlclaw
 mlclaw gateway start mlclaw
 ```
 
-Local Docker deployments are pinned to the Docker context used at bootstrap
-time. Rebind explicitly if you move between Docker Desktop, OrbStack, Colima,
-or another Docker engine:
+Local deployments are pinned to their selected engine and connection. Rebind
+Docker deployments explicitly if you move between Docker Desktop, OrbStack,
+Colima, or another Docker engine:
 
 ```bash
 mlclaw gateway rebind mlclaw --docker-context desktop-linux

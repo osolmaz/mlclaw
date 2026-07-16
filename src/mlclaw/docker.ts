@@ -4,22 +4,36 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 const DOCKER_STOP_GRACE_SECONDS = 300;
 
-export type DockerRunner = {
+export type ContainerRunner = {
+  readonly engine: ContainerEngine;
+  probe(context?: string): Promise<ContainerRuntimeProbe>;
   currentContext(): Promise<string>;
   contextExists(context: string): Promise<boolean>;
   contextEndpoint(context: string): Promise<string | undefined>;
   pull(image: string, context?: string): Promise<void>;
-  run(params: DockerRunParams): Promise<void>;
+  run(params: ContainerRunParams): Promise<void>;
   start(containerName: string, context?: string): Promise<void>;
   stop(containerName: string, context?: string): Promise<void>;
   rm(containerName: string, context?: string): Promise<void>;
   rmVolume(volumeName: string, context?: string): Promise<void>;
   disableRestart(containerName: string, context?: string): Promise<void>;
   logs(containerName: string, tail?: number, context?: string): Promise<string>;
-  inspect(containerName: string, context?: string): Promise<DockerInspect | null>;
+  inspect(containerName: string, context?: string): Promise<ContainerInspect | null>;
 };
 
-export type DockerRunParams = {
+export type ContainerEngine = "docker" | "podman";
+
+export type ContainerProbeStatus = "ready" | "missing" | "permission-denied" | "unavailable";
+
+export type ContainerRuntimeProbe = {
+  engine: ContainerEngine;
+  status: ContainerProbeStatus;
+  context?: string;
+  endpoint?: string;
+  detail: string;
+};
+
+export type ContainerRunParams = {
   containerName: string;
   image: string;
   envFile: string;
@@ -29,14 +43,41 @@ export type DockerRunParams = {
   context?: string;
 };
 
-export type DockerInspect = {
+export type ContainerInspect = {
   exists: boolean;
   running: boolean;
   status?: string;
   image?: string;
 };
 
-export class CliDockerRunner implements DockerRunner {
+type PodmanConnection = {
+  name: string;
+  uri?: string;
+  isDefault: boolean;
+};
+
+export class CliDockerRunner implements ContainerRunner {
+  readonly engine = "docker" as const;
+
+  async probe(context?: string): Promise<ContainerRuntimeProbe> {
+    try {
+      const selected = context?.trim() || (await this.currentContext());
+      if (!selected || !(await this.contextExists(selected))) {
+        return unavailableProbe(this.engine, `Docker context ${selected || "<unknown>"} is not available`, selected);
+      }
+      await docker(withContext(selected, ["version", "--format", "{{.Server.Version}}"]), PROBE_TIMEOUT_MS);
+      return {
+        engine: this.engine,
+        status: "ready",
+        context: selected,
+        ...(await this.contextEndpoint(selected).then((endpoint) => (endpoint ? { endpoint } : {}))),
+        detail: `Docker context ${selected} is ready`,
+      };
+    } catch (err) {
+      return classifyContainerProbeError(this.engine, err, context);
+    }
+  }
+
   async currentContext(): Promise<string> {
     const { stdout } = await docker(["context", "show"]);
     return stdout.trim();
@@ -68,22 +109,24 @@ export class CliDockerRunner implements DockerRunner {
     await docker(withContext(context, ["pull", image]));
   }
 
-  async run(params: DockerRunParams): Promise<void> {
-    await docker(withContext(params.context, [
-      "run",
-      "-d",
-      "--name",
-      params.containerName,
-      "--restart",
-      "unless-stopped",
-      "--env-file",
-      params.envFile,
-      "-e",
-      `OPENCLAW_LIVE_DIR=${params.liveDir}`,
-      "-v",
-      `${params.volumeName}:${params.volumeMountPath}`,
-      params.image,
-    ]));
+  async run(params: ContainerRunParams): Promise<void> {
+    await docker(
+      withContext(params.context, [
+        "run",
+        "-d",
+        "--name",
+        params.containerName,
+        "--restart",
+        "unless-stopped",
+        "--env-file",
+        params.envFile,
+        "-e",
+        `OPENCLAW_LIVE_DIR=${params.liveDir}`,
+        "-v",
+        `${params.volumeName}:${params.volumeMountPath}`,
+        params.image,
+      ]),
+    );
   }
 
   async start(containerName: string, context?: string): Promise<void> {
@@ -118,14 +161,146 @@ export class CliDockerRunner implements DockerRunner {
     return mergeDockerLogStreams(stdout, stderr);
   }
 
-  async inspect(containerName: string, context?: string): Promise<DockerInspect | null> {
+  async inspect(containerName: string, context?: string): Promise<ContainerInspect | null> {
     try {
-      const { stdout } = await docker(withContext(context, [
-        "inspect",
-        containerName,
-        "--format",
-        "{{.State.Running}}\t{{.State.Status}}\t{{.Config.Image}}",
-      ]));
+      const { stdout } = await docker(
+        withContext(context, [
+          "inspect",
+          containerName,
+          "--format",
+          "{{.State.Running}}\t{{.State.Status}}\t{{.Config.Image}}",
+        ]),
+      );
+      const [running, status, image] = stdout.trim().split("\t");
+      return {
+        exists: true,
+        running: running === "true",
+        ...(status ? { status } : {}),
+        ...(image ? { image } : {}),
+      };
+    } catch (err) {
+      if (isMissingContainerError(err)) {
+        return null;
+      }
+      throw err;
+    }
+  }
+}
+
+export class CliPodmanRunner implements ContainerRunner {
+  readonly engine = "podman" as const;
+
+  async probe(context?: string): Promise<ContainerRuntimeProbe> {
+    try {
+      const selected = context?.trim() || (await this.currentContext());
+      await podman(withPodmanConnection(selected, ["info", "--format", "json"]), PROBE_TIMEOUT_MS);
+      return {
+        engine: this.engine,
+        status: "ready",
+        context: selected,
+        ...(await this.contextEndpoint(selected).then((endpoint) => (endpoint ? { endpoint } : {}))),
+        detail:
+          selected === LOCAL_PODMAN_CONNECTION
+            ? "Podman default connection is ready"
+            : `Podman connection ${selected} is ready`,
+      };
+    } catch (err) {
+      return classifyContainerProbeError(this.engine, err, context?.trim());
+    }
+  }
+
+  async currentContext(): Promise<string> {
+    try {
+      const { stdout } = await podman(["system", "connection", "list", "--format", "json"], PROBE_TIMEOUT_MS);
+      return parsePodmanConnections(stdout).find((connection) => connection.isDefault)?.name ?? LOCAL_PODMAN_CONNECTION;
+    } catch {
+      return LOCAL_PODMAN_CONNECTION;
+    }
+  }
+
+  async contextExists(context: string): Promise<boolean> {
+    return (await this.probe(context)).status === "ready";
+  }
+
+  async contextEndpoint(context: string): Promise<string | undefined> {
+    if (normalizePodmanConnection(context) === LOCAL_PODMAN_CONNECTION) {
+      return undefined;
+    }
+    try {
+      const { stdout } = await podman(["system", "connection", "list", "--format", "json"]);
+      return parsePodmanConnections(stdout).find((connection) => connection.name === context)?.uri;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async pull(image: string, context?: string): Promise<void> {
+    await podman(withPodmanConnection(context, ["pull", image]));
+  }
+
+  async run(params: ContainerRunParams): Promise<void> {
+    await podman(
+      withPodmanConnection(params.context, [
+        "run",
+        "-d",
+        "--name",
+        params.containerName,
+        "--restart",
+        "unless-stopped",
+        "--env-file",
+        params.envFile,
+        "-e",
+        `OPENCLAW_LIVE_DIR=${params.liveDir}`,
+        "-v",
+        `${params.volumeName}:${params.volumeMountPath}`,
+        params.image,
+      ]),
+    );
+  }
+
+  async start(containerName: string, context?: string): Promise<void> {
+    await podman(withPodmanConnection(context, ["start", containerName]));
+  }
+
+  async stop(containerName: string, context?: string): Promise<void> {
+    await podman(withPodmanConnection(context, ["stop", "--time", String(DOCKER_STOP_GRACE_SECONDS), containerName]));
+  }
+
+  async rm(containerName: string, context?: string): Promise<void> {
+    await podman(withPodmanConnection(context, ["rm", containerName]));
+  }
+
+  async rmVolume(volumeName: string, context?: string): Promise<void> {
+    try {
+      await podman(withPodmanConnection(context, ["volume", "rm", volumeName]));
+    } catch (err) {
+      if (!isMissingVolumeError(err)) {
+        throw err;
+      }
+    }
+  }
+
+  async disableRestart(containerName: string, context?: string): Promise<void> {
+    await podman(withPodmanConnection(context, ["update", "--restart", "no", containerName]));
+  }
+
+  async logs(containerName: string, tail = 200, context?: string): Promise<string> {
+    const { stdout, stderr } = await podman(
+      withPodmanConnection(context, ["logs", "--tail", String(tail), containerName]),
+    );
+    return mergeDockerLogStreams(stdout, stderr);
+  }
+
+  async inspect(containerName: string, context?: string): Promise<ContainerInspect | null> {
+    try {
+      const { stdout } = await podman(
+        withPodmanConnection(context, [
+          "inspect",
+          containerName,
+          "--format",
+          "{{.State.Running}}\t{{.State.Status}}\t{{.Config.Image}}",
+        ]),
+      );
       const [running, status, image] = stdout.trim().split("\t");
       return {
         exists: true,
@@ -158,15 +333,102 @@ export function withContext(context: string | undefined, args: string[]): string
   return context ? ["--context", context, ...args] : args;
 }
 
-async function docker(args: string[]): Promise<{ stdout: string; stderr: string }> {
+export function withPodmanConnection(context: string | undefined, args: string[]): string[] {
+  const selected = normalizePodmanConnection(context);
+  return selected === LOCAL_PODMAN_CONNECTION ? args : ["--connection", selected, ...args];
+}
+
+export function classifyContainerProbeError(
+  engine: ContainerEngine,
+  err: unknown,
+  context?: string,
+): ContainerRuntimeProbe {
+  const message = dockerErrorMessage(err);
+  if (isCommandMissing(err)) {
+    return { engine, status: "missing", detail: `${displayEngine(engine)} is not installed` };
+  }
+  if (message.includes("permission denied") || message.includes("access is denied")) {
+    return unavailableProbe(
+      engine,
+      `${displayEngine(engine)} is installed but permission was denied`,
+      context,
+      "permission-denied",
+    );
+  }
+  return unavailableProbe(engine, `${displayEngine(engine)} is installed but its engine is unavailable`, context);
+}
+
+export function parsePodmanConnections(raw: string): PodmanConnection[] {
+  const parsed: unknown = JSON.parse(raw);
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+  return parsed.flatMap((value): PodmanConnection[] => {
+    if (!value || typeof value !== "object") {
+      return [];
+    }
+    const record = value as Record<string, unknown>;
+    const name = record.Name ?? record.name;
+    const uri = record.URI ?? record.uri;
+    const isDefault = record.Default ?? record.default;
+    if (typeof name !== "string" || !name.trim()) {
+      return [];
+    }
+    return [
+      {
+        name: name.trim(),
+        ...(typeof uri === "string" && uri.trim() ? { uri: uri.trim() } : {}),
+        isDefault: isDefault === true,
+      },
+    ];
+  });
+}
+
+const PROBE_TIMEOUT_MS = 5_000;
+const LOCAL_PODMAN_CONNECTION = "local";
+
+async function docker(args: string[], timeout?: number): Promise<{ stdout: string; stderr: string }> {
+  return await containerCommand("docker", args, timeout);
+}
+
+async function podman(args: string[], timeout?: number): Promise<{ stdout: string; stderr: string }> {
+  return await containerCommand("podman", args, timeout);
+}
+
+async function containerCommand(
+  command: ContainerEngine,
+  args: string[],
+  timeout?: number,
+): Promise<{ stdout: string; stderr: string }> {
   try {
-    return await execFileAsync("docker", args, { encoding: "utf8" });
+    return await execFileAsync(command, args, { encoding: "utf8", ...(timeout ? { timeout } : {}) });
   } catch (err) {
     if (err instanceof Error && "stderr" in err && typeof err.stderr === "string") {
       err.message = `${err.message}\n${err.stderr}`;
     }
     throw err;
   }
+}
+
+function unavailableProbe(
+  engine: ContainerEngine,
+  detail: string,
+  context?: string,
+  status: ContainerProbeStatus = "unavailable",
+): ContainerRuntimeProbe {
+  return { engine, status, ...(context ? { context } : {}), detail };
+}
+
+function normalizePodmanConnection(context: string | undefined): string {
+  return context?.trim() || LOCAL_PODMAN_CONNECTION;
+}
+
+function displayEngine(engine: ContainerEngine): string {
+  return engine === "docker" ? "Docker" : "Podman";
+}
+
+function isCommandMissing(err: unknown): boolean {
+  return Boolean(err && typeof err === "object" && "code" in err && err.code === "ENOENT");
 }
 
 export function isMissingContainerError(err: unknown): boolean {

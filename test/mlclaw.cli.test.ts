@@ -5,8 +5,8 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_MODEL, LOCAL_LIVE_DIR, LOCAL_VOLUME_MOUNT_PATH, main } from "../src/mlclaw/cli.js";
 import { DEFAULT_RUNTIME_IMAGE } from "../src/mlclaw/runtime-image.js";
 import { readManifest, readSecretEnv, writeManifest, writeSecretEnv, type DeploymentManifest } from "../src/mlclaw/local-config.js";
-import type { HubApi, SpaceRuntime, SpaceVolume } from "../src/mlclaw/hub-api.js";
-import type { DockerRunner, DockerInspect, DockerRunParams } from "../src/mlclaw/docker.js";
+import { HubApiError, type HubApi, type SpaceRuntime, type SpaceVolume } from "../src/mlclaw/hub-api.js";
+import type { ContainerEngine, ContainerInspect, ContainerRunner, ContainerRunParams } from "../src/mlclaw/docker.js";
 import type { BucketEntry } from "../src/hf-bucket-client/client.js";
 
 type PromptAnswer = string | boolean;
@@ -25,6 +25,7 @@ function createPrompt(answers: PromptAnswer[], interactive = true) {
       text: async () => String(answers.shift() ?? ""),
       password: async () => String(answers.shift() ?? ""),
       confirm: async () => answers.length === 0 ? true : Boolean(answers.shift()),
+      select: async () => String(answers.shift() ?? "cancel"),
       cancel: () => undefined,
     },
   };
@@ -38,6 +39,7 @@ function createFakeHub(opts: {
   spaceRuntime?: SpaceRuntime;
   existingBuckets?: string[];
   existingSpaces?: string[];
+  createDockerSpaceError?: Error;
 } = {}) {
   const calls: Array<{ name: string; args: unknown[] }> = [];
   const variables = new Map<string, { value?: string }>();
@@ -106,6 +108,9 @@ function createFakeHub(opts: {
     },
     async createDockerSpace(...args: unknown[]) {
       calls.push({ name: "createDockerSpace", args });
+      if (opts.createDockerSpaceError) {
+        throw opts.createDockerSpaceError;
+      }
       existingSpaces.add(String(args[0]));
     },
     async bucketExists(bucket: string) {
@@ -210,6 +215,7 @@ function seedValidStateSnapshot(hub: ReturnType<typeof createFakeHub>, prefix = 
 
 async function createRuntime(hub: HubApi, prompt: ReturnType<typeof createPrompt>["prompt"], stderr: string[] = []) {
   const docker = createFakeDocker();
+  const podman = createFakeDocker("podman");
   const configRoot = await fs.mkdtemp(path.join(os.tmpdir(), "mlclaw-cli-test-"));
   return {
     env: { MLCLAW_ROUTER_TOKEN: "hf_router_test" },
@@ -225,23 +231,34 @@ async function createRuntime(hub: HubApi, prompt: ReturnType<typeof createPrompt
       username: "research_bot",
     }),
     dockerRunner: docker,
+    podmanRunner: podman,
     configRoot,
     now: () => new Date("2026-06-16T00:00:00.000Z"),
     prompt,
   };
 }
 
-function createFakeDocker(): DockerRunner & {
+function createFakeDocker(engine: ContainerEngine = "docker"): ContainerRunner & {
   calls: Array<{ name: string; args: unknown[] }>;
   currentContextValue: string;
   contexts: Map<string, string>;
-  inspectValue: DockerInspect | null;
+  inspectValue: ContainerInspect | null;
 } {
   return {
+    engine,
     calls: [],
-    currentContextValue: "desktop-linux",
-    contexts: new Map([["desktop-linux", "unix:///docker-desktop.sock"], ["colima", "unix:///colima.sock"]]),
+    currentContextValue: engine === "docker" ? "desktop-linux" : "local",
+    contexts: new Map(engine === "docker"
+      ? [["desktop-linux", "unix:///docker-desktop.sock"], ["colima", "unix:///colima.sock"]]
+      : [["local", "unix:///run/user/1000/podman/podman.sock"]]),
     inspectValue: null,
+    async probe(context?: string) {
+      const selected = context ?? this.currentContextValue;
+      const endpoint = this.contexts.get(selected);
+      return endpoint
+        ? { engine: this.engine, status: "ready" as const, context: selected, endpoint, detail: `${this.engine} ready` }
+        : { engine: this.engine, status: "unavailable" as const, context: selected, detail: `${this.engine} unavailable` };
+    },
     async currentContext() {
       return this.currentContextValue;
     },
@@ -254,7 +271,7 @@ function createFakeDocker(): DockerRunner & {
     async pull(...args: unknown[]) {
       this.calls.push({ name: "pull", args });
     },
-    async run(params: DockerRunParams) {
+    async run(params: ContainerRunParams) {
       this.calls.push({ name: "run", args: [params] });
       this.inspectValue = { exists: true, running: true, status: "running", image: params.image };
     },
@@ -430,7 +447,7 @@ describe("mlclaw CLI", () => {
     await expect(main(["gateway", "status", "research"], runtime)).resolves.toBe(0);
 
     expect(stdout.join("\n")).toContain("Using Docker context desktop-linux from the deployment manifest. Current shell context is colima.");
-    expect(stdout.join("\n")).toContain("Docker: desktop-linux");
+    expect(stdout.join("\n")).toContain("Container: Docker context desktop-linux");
     expect(runtime.dockerRunner.calls).toContainEqual({
       name: "inspect",
       args: ["mlclaw-research", "desktop-linux"],
@@ -702,7 +719,7 @@ describe("mlclaw CLI", () => {
   });
 
   it("blocks Space bootstrap when a local gateway lease is live", async () => {
-    const hub = createFakeHub();
+    const hub = createFakeHub({ existingBuckets: ["alice/research-data"] });
     hub.bucketObjects.set("openclaw-state/runtime/status.json", JSON.stringify({
       schemaVersion: 1,
       agent: "research",
@@ -862,7 +879,7 @@ describe("mlclaw CLI", () => {
     expect(stderr.join("\n")).toBe("");
     expect(notes).toContainEqual(expect.objectContaining({
       title: "Bootstrap plan",
-      message: expect.stringContaining("Hardware: default free CPU"),
+      message: expect.stringContaining("Hardware: default Space CPU"),
     }));
     expect(output.join("\n")).toContain("Agent URL: https://huggingface.co/spaces/alice/research");
     expect(output.join("\n")).toContain("Space deployment triggered: alice/research");
@@ -874,6 +891,8 @@ describe("mlclaw CLI", () => {
       name: "createDockerSpace",
       args: ["alice/research", { private: true }],
     });
+    expect(hub.calls.findIndex((call) => call.name === "createDockerSpace"))
+      .toBeLessThan(hub.calls.findIndex((call) => call.name === "createBucket"));
     expect(hub.calls.some((call) => call.name === "requestSpaceHardware")).toBe(false);
     expect(hub.calls.some((call) => call.name === "restartSpace")).toBe(false);
     expect(hub.calls).toContainEqual({
@@ -905,6 +924,135 @@ describe("mlclaw CLI", () => {
     expect(hub.calls).toContainEqual({ name: "deleteSpaceSecret", args: ["alice/research", "HF_TOKEN"] });
     expect(hub.calls).toContainEqual({ name: "deleteSpaceSecret", args: ["alice/research", "HUGGINGFACE_HUB_TOKEN"] });
     expect(hub.calls.some((call) => call.name === "addSpaceSecret" && call.args[1] === "TELEGRAM_BOT_TOKEN")).toBe(false);
+  });
+
+  it("offers a ready local runtime when Docker Space creation requires PRO", async () => {
+    const hub = createFakeHub({
+      createDockerSpaceError: new HubApiError(402, "https://huggingface.co/api/repos/create", "PRO required"),
+    });
+    const { prompt, notes } = createPrompt([true, "local", true]);
+    const runtime = await createRuntime(hub, prompt);
+
+    const code = await main(["bootstrap", "--name", "research", "--no-pull"], runtime);
+
+    expect(code).toBe(0);
+    expect(notes).toContainEqual(expect.objectContaining({
+      title: "Hosted gateway unavailable",
+      message: expect.stringContaining("Docker context desktop-linux is ready"),
+    }));
+    expect(hub.calls).toContainEqual({ name: "createBucket", args: ["alice/research-data", true] });
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(true);
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      gatewayLocation: "local",
+      localGateway: { engine: "docker", dockerContext: "desktop-linux" },
+    });
+  });
+
+  it("does not create the bucket before a hosted eligibility failure", async () => {
+    const hub = createFakeHub({
+      createDockerSpaceError: new HubApiError(402, "https://huggingface.co/api/repos/create", "PRO required"),
+    });
+    const { prompt } = createPrompt([], false);
+    const stderr: string[] = [];
+
+    const code = await main(["bootstrap", "--name", "research", "--yes"], await createRuntime(hub, prompt, stderr));
+
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain("--allow-local-fallback");
+    expect(hub.calls.some((call) => call.name === "createBucket")).toBe(false);
+  });
+
+  it("supports explicit non-interactive local fallback", async () => {
+    const hub = createFakeHub({
+      createDockerSpaceError: new HubApiError(402, "https://huggingface.co/api/repos/create", "PRO required"),
+    });
+    const { prompt } = createPrompt([], false);
+    const runtime = await createRuntime(hub, prompt);
+
+    const code = await main([
+      "bootstrap",
+      "--name",
+      "research",
+      "--yes",
+      "--allow-local-fallback",
+      "--no-pull",
+    ], runtime);
+
+    expect(code).toBe(0);
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(true);
+  });
+
+  it("reports both local runtime failures after hosted eligibility failure", async () => {
+    const hub = createFakeHub({
+      createDockerSpaceError: new HubApiError(402, "https://huggingface.co/api/repos/create", "PRO required"),
+    });
+    const { prompt } = createPrompt([], false);
+    const stderr: string[] = [];
+    const runtime = await createRuntime(hub, prompt, stderr);
+    runtime.dockerRunner.contexts.clear();
+    runtime.podmanRunner.contexts.clear();
+
+    const code = await main(["bootstrap", "--name", "research", "--yes", "--allow-local-fallback"], runtime);
+
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain("no local fallback is ready");
+    expect(stderr.join("\n")).toContain("docker unavailable");
+    expect(stderr.join("\n")).toContain("podman unavailable");
+    expect(hub.calls.some((call) => call.name === "createBucket")).toBe(false);
+  });
+
+  it("can bootstrap a local gateway with Podman", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([], false);
+    const runtime = await createRuntime(hub, prompt);
+
+    const code = await main([
+      "bootstrap",
+      "--gateway",
+      "local",
+      "--container-runtime",
+      "podman",
+      "--name",
+      "research",
+      "--yes",
+      "--no-pull",
+    ], runtime);
+
+    expect(code).toBe(0);
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(false);
+    expect(runtime.podmanRunner.calls.some((call) => call.name === "run")).toBe(true);
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      localGateway: { engine: "podman", podmanConnection: "local" },
+    });
+    runtime.podmanRunner.calls.length = 0;
+    await expect(main(["gateway", "status", "research"], runtime)).resolves.toBe(0);
+    expect(runtime.podmanRunner.calls).toContainEqual({
+      name: "inspect",
+      args: ["mlclaw-research", "local"],
+    });
+  });
+
+  it("rejects a Docker context with an explicit Podman runtime", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([], false);
+    const stderr: string[] = [];
+
+    const code = await main([
+      "bootstrap",
+      "--gateway",
+      "local",
+      "--container-runtime",
+      "podman",
+      "--docker-context",
+      "desktop-linux",
+      "--name",
+      "research",
+      "--yes",
+    ], await createRuntime(hub, prompt, stderr));
+
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain("--docker-context cannot be used with --container-runtime podman");
+    expect(hub.calls.some((call) => call.name === "createBucket")).toBe(false);
   });
 
   it("uses the active broad token behind HF Broker for non-interactive Space bootstrap", async () => {
@@ -1113,10 +1261,7 @@ describe("mlclaw CLI", () => {
     expect(hub.calls).toContainEqual({ name: "bucketExists", args: ["alice/mlclaw-data"] });
     expect(hub.calls).toContainEqual({ name: "spaceExists", args: ["alice/mlclaw"] });
     expect(hub.calls).not.toContainEqual({ name: "createBucket", args: ["alice/mlclaw-data", true] });
-    expect(hub.calls).toContainEqual({
-      name: "createDockerSpace",
-      args: ["alice/mlclaw", { private: true }],
-    });
+    expect(hub.calls.some((call) => call.name === "createDockerSpace")).toBe(false);
     expect(hub.calls.some((call) => call.name === "requestSpaceHardware")).toBe(false);
   });
 
@@ -1256,10 +1401,7 @@ describe("mlclaw CLI", () => {
     ], await createRuntime(hub, prompt));
 
     expect(code).toBe(0);
-    expect(hub.calls).toContainEqual({
-      name: "createDockerSpace",
-      args: ["alice/research", { private: true, sleepTimeSeconds: -1 }],
-    });
+    expect(hub.calls.some((call) => call.name === "createDockerSpace")).toBe(false);
     expect(hub.calls).toContainEqual({
       name: "requestSpaceHardware",
       args: ["alice/research", "cpu-upgrade", -1],
@@ -1292,10 +1434,7 @@ describe("mlclaw CLI", () => {
     ], await createRuntime(hub, prompt));
 
     expect(code).toBe(0);
-    expect(hub.calls).toContainEqual({
-      name: "createDockerSpace",
-      args: ["alice/research", { private: true, sleepTimeSeconds: -1 }],
-    });
+    expect(hub.calls.some((call) => call.name === "createDockerSpace")).toBe(false);
     expect(hub.calls.some((call) => call.name === "requestSpaceHardware")).toBe(false);
     expect(hub.calls).toContainEqual({
       name: "setSpaceSleepTime",
@@ -1968,6 +2107,44 @@ describe("mlclaw CLI", () => {
         dockerEndpoint: "unix:///colima.sock",
       },
     });
+  });
+
+  it("rejects conflicting local migration runtime flags before changing the deployment", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([], false);
+    const stderr: string[] = [];
+    const runtime = await createRuntime(hub, prompt, stderr);
+    await writeManifest(runtime.configRoot, {
+      version: 1,
+      agent: "research",
+      owner: "alice",
+      bucket: "alice/research-data",
+      space: "alice/research",
+      localRuntimeId: "local-research-existing",
+      gatewayLocation: "space",
+      model: "test-model",
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+      createdAt: "2026-06-16T00:00:00.000Z",
+      updatedAt: "2026-06-16T00:00:00.000Z",
+    });
+
+    const code = await main([
+      "gateway",
+      "migrate",
+      "research",
+      "--to",
+      "local",
+      "--container-runtime",
+      "podman",
+      "--docker-context",
+      "colima",
+    ], runtime);
+
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain("--docker-context cannot be used with --container-runtime podman");
+    expect(hub.calls).toEqual([]);
+    expect(runtime.dockerRunner.calls).toEqual([]);
+    expect(runtime.podmanRunner.calls).toEqual([]);
   });
 
   it("adopts a state bucket for a local deployment and resets stale live disk", async () => {
