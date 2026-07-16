@@ -57,6 +57,7 @@ function createFakeHub(
     spaceVisibilities?: Record<string, "private" | "public">;
     createDockerSpaceError?: Error;
     failFirstTombstoneUpload?: boolean;
+    onDeploymentClaimAcquired?: (bucketObjects: Map<string, string>) => void;
   } = {},
 ) {
   const calls: Array<{ name: string; args: unknown[] }> = [];
@@ -166,21 +167,13 @@ function createFakeHub(
       calls.push({ name: "listBuckets", args: namespace ? [namespace] : [] });
       return [...existingBuckets];
     },
-    async deploymentControlStore() {
-      calls.push({ name: "deploymentControlStore", args: [] });
-      return {
-        async read() {
-          return { value: controlValue, revision: String(controlRevision) };
-        },
-        async compareAndSwap(expectedRevision: string, value: unknown | null) {
-          calls.push({ name: "control.compareAndSwap", args: [expectedRevision, value] });
-          if (expectedRevision !== String(controlRevision))
-            throw new Error("deployment control lease changed concurrently");
-          controlValue = value;
-          controlRevision += 1;
-          return String(controlRevision);
-        },
-      };
+    async deploymentControlStore(owner: string, deploymentId: string) {
+      calls.push({ name: "deploymentControlStore", args: [owner, deploymentId] });
+      return controlStore("deploymentControlStore");
+    },
+    async deploymentClaimStore(owner: string) {
+      calls.push({ name: "deploymentClaimStore", args: [owner] });
+      return controlStore("deploymentClaimStore");
     },
     async spaceExists(repoId: string) {
       calls.push({ name: "spaceExists", args: [repoId] });
@@ -281,6 +274,27 @@ function createFakeHub(
       };
     },
   };
+
+  function controlStore(kind: "deploymentControlStore" | "deploymentClaimStore") {
+    return {
+      async read() {
+        calls.push({ name: "control.read", args: [] });
+        return { value: controlValue, revision: String(controlRevision) };
+      },
+      async compareAndSwap(expectedRevision: string, value: unknown | null) {
+        calls.push({ name: "control.compareAndSwap", args: [expectedRevision, value] });
+        if (expectedRevision !== String(controlRevision))
+          throw new Error("deployment control lease changed concurrently");
+        const wasUnclaimed = controlValue === null;
+        controlValue = value;
+        controlRevision += 1;
+        if (kind === "deploymentClaimStore" && wasUnclaimed && value !== null) {
+          opts.onDeploymentClaimAcquired?.(bucketObjects);
+        }
+        return String(controlRevision);
+      },
+    };
+  }
   return hub as typeof hub & HubApi;
 }
 
@@ -502,6 +516,37 @@ describe("mlclaw CLI", () => {
       MLCLAW_RUNTIME_ID: manifest.localRuntimeId,
       OPENCLAW_MODEL: DEFAULT_MODEL,
     });
+    expect(hub.calls).toContainEqual({ name: "deploymentClaimStore", args: ["alice"] });
+  });
+
+  it("stops a first bootstrap when another controller claims the bucket identity", async () => {
+    const hub = createFakeHub({
+      existingBuckets: ["alice/research-data"],
+      onDeploymentClaimAcquired: (objects) => {
+        objects.set(
+          ".mlclaw/deployment.json",
+          JSON.stringify({
+            schemaVersion: 1,
+            deploymentId: "33333333-3333-5333-a333-333333333333",
+            agent: "research",
+            owner: "alice",
+            bucket: "alice/research-data",
+            statePrefix: "openclaw-state",
+            credentialKeySha256: "a".repeat(64),
+            createdAt: "2026-07-16T00:00:00.000Z",
+          }),
+        );
+      },
+    });
+    const errors: string[] = [];
+    const runtime = await createRuntime(hub, createPrompt([]).prompt, errors);
+
+    await expect(main(["bootstrap", "--name", "research", "--gateway", "space", "--yes"], runtime)).resolves.toBe(1);
+
+    expect(errors.join("\n")).toContain("different canonical deployment identity");
+    expect(hub.calls).toContainEqual({ name: "deploymentClaimStore", args: ["alice"] });
+    expect(hub.calls.some((call) => call.name === "createDockerSpace")).toBe(false);
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(false);
   });
 
   it("exposes a local gateway through an explicitly approved Tailscale Serve mapping", async () => {
@@ -1894,6 +1939,16 @@ describe("mlclaw CLI", () => {
     expect(hub.calls.some((call) => call.name === "addSpaceSecret" && call.args[1] === "TELEGRAM_BOT_TOKEN")).toBe(
       false,
     );
+    for (const [index, call] of hub.calls.entries()) {
+      if (
+        call.name === "addSpaceVariable" ||
+        call.name === "addSpaceSecret" ||
+        call.name === "deleteSpaceSecret" ||
+        call.name === "setSpaceVolumes"
+      ) {
+        expect(hub.calls[index - 1]?.name).toBe("control.read");
+      }
+    }
   });
 
   it("offers a ready local runtime when Docker Space creation requires PRO", async () => {

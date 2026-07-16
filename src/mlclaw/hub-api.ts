@@ -116,6 +116,20 @@ export class HubApi {
     };
   }
 
+  async deploymentClaimStore(owner: string): Promise<{
+    read(): Promise<{ value: unknown | null; revision: string }>;
+    compareAndSwap(expectedRevision: string, value: unknown | null): Promise<string>;
+  }> {
+    const repoId = `${owner}/mlclaw-control-claims`;
+    await this.ensurePrivateModelRepo(repoId);
+    const path = "control-lease.json";
+    return {
+      read: async () => await this.readModelDocument(repoId, path),
+      compareAndSwap: async (expectedRevision, value) =>
+        await this.commitModelDocument(repoId, path, expectedRevision, value),
+    };
+  }
+
   async createDockerSpace(
     repoId: string,
     options?: { private?: boolean; hardware?: string; sleepTimeSeconds?: number },

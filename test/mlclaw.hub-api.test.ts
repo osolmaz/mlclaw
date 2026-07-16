@@ -31,6 +31,27 @@ describe("HubApi Space commits", () => {
     expect(lines[0]?.value.parentCommit).toBe(parent);
   });
 
+  it("uses one owner-scoped store for first deployment claims", async () => {
+    const requests: string[] = [];
+    const parent = "a".repeat(40);
+    const hub = new HubApi({
+      token: "hf_test_token",
+      fetch: async (url) => {
+        const value = String(url);
+        requests.push(value);
+        if (value.endsWith("/api/whoami-v2")) return Response.json({ name: "alice" });
+        if (value.endsWith("/api/repos/create")) return Response.json({});
+        if (value.includes("/api/models/")) return Response.json({ sha: parent });
+        if (value.includes("/resolve/")) return new Response("missing", { status: 404 });
+        throw new Error(`unexpected request ${value}`);
+      },
+    });
+
+    const store = await hub.deploymentClaimStore("alice");
+    await expect(store.read()).resolves.toEqual({ value: null, revision: parent });
+    expect(requests.some((url) => url.includes("/api/models/alice/mlclaw-control-claims"))).toBe(true);
+  });
+
   it("lists owned buckets across Hub pagination", async () => {
     const requests: string[] = [];
     const hub = new HubApi({

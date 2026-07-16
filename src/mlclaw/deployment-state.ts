@@ -199,6 +199,13 @@ export async function writeCanonicalState(
   ]);
 }
 
+export async function writeDeploymentIdentity(
+  client: Pick<BucketClient, "uploadFiles">,
+  identity: DeploymentIdentity,
+): Promise<void> {
+  await client.uploadFiles([jsonBlob(DEPLOYMENT_PATH, identitySchema.parse(identity))]);
+}
+
 export function newOperation(manifest: DeploymentManifest, now: Date): DeploymentOperation {
   return operationSchema.parse({
     schemaVersion: 1,

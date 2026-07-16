@@ -14951,6 +14951,15 @@ var HubApi = class {
       compareAndSwap: async (expectedRevision, value) => await this.commitModelDocument(repoId, path17, expectedRevision, value)
     };
   }
+  async deploymentClaimStore(owner) {
+    const repoId = `${owner}/mlclaw-control-claims`;
+    await this.ensurePrivateModelRepo(repoId);
+    const path17 = "control-lease.json";
+    return {
+      read: async () => await this.readModelDocument(repoId, path17),
+      compareAndSwap: async (expectedRevision, value) => await this.commitModelDocument(repoId, path17, expectedRevision, value)
+    };
+  }
   async createDockerSpace(repoId, options) {
     const [owner, name] = splitRepoId(repoId);
     const me2 = await this.whoami();
@@ -20048,6 +20057,9 @@ async function writeCanonicalState(client, identity, desired) {
     jsonBlob(DESIRED_STATE_PATH, desiredStateSchema.parse(desired))
   ]);
 }
+async function writeDeploymentIdentity(client, identity) {
+  await client.uploadFiles([jsonBlob(DEPLOYMENT_PATH, identitySchema.parse(identity))]);
+}
 function newOperation(manifest, now) {
   return operationSchema.parse({
     schemaVersion: 1,
@@ -20835,12 +20847,14 @@ async function bootstrap(opts, runtime) {
       });
     }
     try {
-      await createOrAdoptSpace({
-        hub,
-        spacePlan,
-        runtime,
-        ...paidHardware.kind === "explicit" ? { hardware: paidHardware.hardware } : {},
-        ...typeof paidHardware.sleepTime === "number" ? { sleepTime: paidHardware.sleepTime } : {}
+      await claimInitialBootstrap(activePlan, hub, runtime, async (assertLease) => {
+        await createOrAdoptSpace({
+          hub,
+          spacePlan,
+          runtime,
+          ...paidHardware.kind === "explicit" ? { hardware: paidHardware.hardware } : {},
+          ...typeof paidHardware.sleepTime === "number" ? { sleepTime: paidHardware.sleepTime } : {}
+        });
       });
     } catch (err) {
       if (!isHostedComputePaymentRequired(err) || spacePlan.exists) {
@@ -20861,7 +20875,6 @@ async function bootstrap(opts, runtime) {
       });
     }
     if (activePlan.gatewayLocation === "space") {
-      await createOrAdoptBucket({ hub, bucketPlan: activePlan.bucketPlan, runtime });
       await assertNoLiveForeignLease({
         hub,
         bucket: activePlan.bucket,
@@ -20910,13 +20923,13 @@ async function bootstrap(opts, runtime) {
           const secretsChanged = JSON.stringify(previousSecrets) !== JSON.stringify(activePlan.secrets);
           if (secretsChanged) {
             await assertLease();
-            await setSpaceGatewaySecrets(hub, activePlan.manifest.space, hfToken, activePlan.secrets);
+            await setSpaceGatewaySecrets(hub, activePlan.manifest.space, hfToken, activePlan.secrets, assertLease);
             if (canDeleteBroadTokenSecrets({
               model: activePlan.manifest.model,
               routerTokenPresent: hasBrokerOrRouterTokenSecretRecord(activePlan.secrets)
             })) {
               await assertLease();
-              await deleteStaleSpaceTokenSecrets(hub, activePlan.manifest.space);
+              await deleteStaleSpaceTokenSecrets(hub, activePlan.manifest.space, assertLease);
             }
             await assertLease();
             await writeLocalDeployment(runtime.configRoot, activePlan.manifest, activePlan.secrets);
@@ -20954,7 +20967,7 @@ async function bootstrap(opts, runtime) {
         runtime
       });
     }
-    await createOrAdoptBucket({ hub, bucketPlan: activePlan.bucketPlan, runtime });
+    await claimInitialBootstrap(activePlan, hub, runtime, async () => void 0);
     await assertNoLiveForeignLease({
       hub,
       bucket: activePlan.bucket,
@@ -21009,6 +21022,7 @@ async function reconcileDeployment(plan, hub, runtime, apply) {
     bucketPrefix: plan.bucketPrefix,
     visibility: plan.spacePlan?.visibility,
     credentialKey: requiredSecret(plan.secrets, "MLCLAW_CREDENTIAL_KEY"),
+    initialIdentityClaimed: !plan.hasExistingManifest,
     hub,
     runtime,
     apply: async ({ manifest, changed, assertLease }) => {
@@ -21018,9 +21032,57 @@ async function reconcileDeployment(plan, hub, runtime, apply) {
   });
   if (!result.waitingForApproval) plan.manifest = result.manifest;
 }
+async function claimInitialBootstrap(plan, hub, runtime, provision) {
+  if (plan.hasExistingManifest) {
+    await createOrAdoptBucket({ hub, bucketPlan: plan.bucketPlan, runtime });
+    await provision(async () => void 0);
+    return;
+  }
+  const control = await hub.deploymentClaimStore(plan.manifest.owner);
+  const operation = newOperation(plan.manifest, runtime.now());
+  const lease = await acquireControlLease(control, plan.manifest, operation, runtime.now());
+  const assertLease = async () => {
+    await assertControlLease(control, lease, runtime.now());
+  };
+  try {
+    await assertLease();
+    let identity = plan.bucketPlan.exists ? await readClaimedBootstrapIdentity(plan, hub) : null;
+    if (identity) {
+      assertBootstrapIdentityMatches(plan, identity);
+    }
+    await provision(assertLease);
+    await assertLease();
+    await createOrAdoptBucket({ hub, bucketPlan: plan.bucketPlan, runtime });
+    await assertLease();
+    const client = hub.bucket(plan.manifest.bucket);
+    identity ??= await readClaimedBootstrapIdentity(plan, hub);
+    if (identity) {
+      assertBootstrapIdentityMatches(plan, identity);
+    } else {
+      await writeDeploymentIdentity(client, deploymentIdentity(plan.manifest, plan.bucketPrefix));
+    }
+    await assertLease();
+  } finally {
+    await releaseControlLease(control, lease);
+  }
+}
+async function readClaimedBootstrapIdentity(plan, hub) {
+  const client = hub.bucket(plan.manifest.bucket);
+  const tombstone = await readDeploymentTombstone(client);
+  if (tombstone) {
+    throw new Error(`state bucket ${plan.manifest.bucket} was moved to ${tombstone.movedTo} and cannot be claimed`);
+  }
+  return await readDeploymentIdentity(client);
+}
+function assertBootstrapIdentityMatches(plan, identity) {
+  if (identity.deploymentId !== plan.manifest.deploymentId || identity.owner !== plan.manifest.owner || identity.agent !== plan.manifest.agent || identity.bucket !== plan.manifest.bucket) {
+    throw new Error(`bucket ${plan.manifest.bucket} has a different canonical deployment identity`);
+  }
+}
 async function reconcileManifest(params) {
   const { hub, runtime } = params;
-  return await withDeploymentLock(runtime.configRoot, params.manifest.deploymentId, async () => {
+  const localLockKey = createHash3("sha256").update(`${params.manifest.owner}\0${params.manifest.agent}`).digest("hex");
+  return await withDeploymentLock(runtime.configRoot, localLockKey, async () => {
     let requestedManifest = params.manifest;
     const client = hub.bucket(requestedManifest.bucket);
     const tombstone = await readDeploymentTombstone(client);
@@ -21052,7 +21114,7 @@ async function reconcileManifest(params) {
         requestedManifest.agent,
         requestedManifest.credentialKeySha256,
         params.credentialKey,
-        Boolean(currentIdentity) || !params.credentialKey
+        Boolean(currentIdentity) && !params.initialIdentityClaimed || !params.credentialKey
       );
     } else {
       const secrets = await ensureDeploymentCredentialKey(runtime, requestedManifest.agent);
@@ -21061,7 +21123,6 @@ async function reconcileManifest(params) {
         credentialKeySha256: createHash3("sha256").update(requiredSecret(secrets, "MLCLAW_CREDENTIAL_KEY")).digest("hex")
       };
     }
-    const control = await hub.deploymentControlStore(requestedManifest.owner, requestedManifest.deploymentId);
     const currentDesired = await readDesiredState(client);
     if (currentDesired && currentDesired.deploymentId !== requestedManifest.deploymentId) {
       throw new Error(`bucket ${requestedManifest.bucket} desired state belongs to another deployment`);
@@ -21087,6 +21148,7 @@ async function reconcileManifest(params) {
       updatedAt: runtime.now().toISOString()
     };
     let operation = interruptedOperation ?? await readResumableOperation(runtime.configRoot, manifest.deploymentId, manifest.desiredGeneration) ?? newOperation(manifest, runtime.now());
+    const control = currentIdentity ? await hub.deploymentControlStore(requestedManifest.owner, requestedManifest.deploymentId) : await hub.deploymentClaimStore(requestedManifest.owner);
     let lease = await acquireControlLease(control, manifest, operation, runtime.now());
     let renewalError;
     let renewal = Promise.resolve();
@@ -21107,6 +21169,14 @@ async function reconcileManifest(params) {
       if (renewalError) throw renewalError;
     };
     try {
+      const [claimedTombstone, claimedIdentity, claimedDesired] = await Promise.all([
+        readDeploymentTombstone(client),
+        readDeploymentIdentity(client),
+        readDesiredState(client)
+      ]);
+      if (JSON.stringify(claimedTombstone) !== JSON.stringify(tombstone) || JSON.stringify(claimedIdentity) !== JSON.stringify(currentIdentity) || JSON.stringify(claimedDesired) !== JSON.stringify(currentDesired)) {
+        throw new Error("canonical deployment state changed while acquiring control; rerun the command");
+      }
       await writeOperationState("planned");
       await writeOperationState("applying");
       await assertLease();
@@ -21699,20 +21769,25 @@ async function stateAdopt(agent, opts, runtime) {
         return;
       }
       await assertLease();
-      await setDeploymentVariables(hub, updated.space, {
-        OPENCLAW_HF_STATE_BUCKET: bucket,
-        MLCLAW_STATE_MOUNT_DIR: SPACE_STATE_MOUNT_DIR,
-        OPENCLAW_LIVE_DIR: SPACE_LIVE_DIR,
-        MLCLAW_RUNTIME_SETTINGS_FILE: `${SPACE_LIVE_DIR}/.mlclaw/settings.json`,
-        MLCLAW_GATEWAY_LOCATION: "space",
-        MLCLAW_RUNTIME_ID: spaceRuntimeId(updated.agent)
-      });
-      await ensureSpaceStateVolume(hub, updated.space, bucket);
+      await setDeploymentVariables(
+        hub,
+        updated.space,
+        {
+          OPENCLAW_HF_STATE_BUCKET: bucket,
+          MLCLAW_STATE_MOUNT_DIR: SPACE_STATE_MOUNT_DIR,
+          OPENCLAW_LIVE_DIR: SPACE_LIVE_DIR,
+          MLCLAW_RUNTIME_SETTINGS_FILE: `${SPACE_LIVE_DIR}/.mlclaw/settings.json`,
+          MLCLAW_GATEWAY_LOCATION: "space",
+          MLCLAW_RUNTIME_ID: spaceRuntimeId(updated.agent)
+        },
+        assertLease
+      );
+      await ensureSpaceStateVolume(hub, updated.space, bucket, { assertMutation: assertLease });
       if (canDeleteBroadTokenSecrets({
         model: updated.model,
         routerTokenPresent: hasBrokerOrRouterTokenSecretRecord(secrets)
       })) {
-        await deleteStaleSpaceTokenSecrets(hub, updated.space);
+        await deleteStaleSpaceTokenSecrets(hub, updated.space, assertLease);
       }
       await clearSpaceGatewayDisabled(hub, updated.space);
       if (bucketChanged || resumingBucketChange) {
@@ -22006,36 +22081,44 @@ async function deploySpaceGateway(params) {
   });
   const spaceRuntimeRef = params.templateRuntimeImage ?? bundledSpaceRuntimeRef(templateRev);
   await assertLease();
-  await setDeploymentVariables(hub, manifest.space, {
-    OPENCLAW_HF_STATE_BUCKET: manifest.bucket,
-    MLCLAW_STATE_MOUNT_DIR: SPACE_STATE_MOUNT_DIR,
-    OPENCLAW_LIVE_DIR: SPACE_LIVE_DIR,
-    MLCLAW_RUNTIME_SETTINGS_FILE: `${SPACE_LIVE_DIR}/.mlclaw/settings.json`,
-    ...secrets.OPENCLAW_HF_STATE_PREFIX ? { OPENCLAW_HF_STATE_PREFIX: secrets.OPENCLAW_HF_STATE_PREFIX } : {},
-    MLCLAW_TEMPLATE_REV: templateRev,
-    OPENCLAW_MODEL: manifest.model,
-    OPENCLAW_AGENT_NAME: manifest.agent,
-    MLCLAW_GATEWAY_LOCATION: "space",
-    MLCLAW_RUNTIME_IMAGE: spaceRuntimeRef,
-    MLCLAW_RUNTIME_ID: spaceRuntimeId(manifest.agent),
-    MLCLAW_ALLOWED_USERS: params.allowedUsers,
-    MLCLAW_ADMINS: params.allowedUsers,
-    MLCLAW_CANONICAL_SPACE_ID: DEFAULT_CANONICAL_TEMPLATE_SPACE,
-    MLCLAW_OPENCLAW_PORT: String(DEFAULT_SPACE_OPENCLAW_PORT),
-    OPENCLAW_GATEWAY_PORT: String(DEFAULT_SPACE_OPENCLAW_PORT)
-  });
+  await setDeploymentVariables(
+    hub,
+    manifest.space,
+    {
+      OPENCLAW_HF_STATE_BUCKET: manifest.bucket,
+      MLCLAW_STATE_MOUNT_DIR: SPACE_STATE_MOUNT_DIR,
+      OPENCLAW_LIVE_DIR: SPACE_LIVE_DIR,
+      MLCLAW_RUNTIME_SETTINGS_FILE: `${SPACE_LIVE_DIR}/.mlclaw/settings.json`,
+      ...secrets.OPENCLAW_HF_STATE_PREFIX ? { OPENCLAW_HF_STATE_PREFIX: secrets.OPENCLAW_HF_STATE_PREFIX } : {},
+      MLCLAW_TEMPLATE_REV: templateRev,
+      OPENCLAW_MODEL: manifest.model,
+      OPENCLAW_AGENT_NAME: manifest.agent,
+      MLCLAW_GATEWAY_LOCATION: "space",
+      MLCLAW_RUNTIME_IMAGE: spaceRuntimeRef,
+      MLCLAW_RUNTIME_ID: spaceRuntimeId(manifest.agent),
+      MLCLAW_ALLOWED_USERS: params.allowedUsers,
+      MLCLAW_ADMINS: params.allowedUsers,
+      MLCLAW_CANONICAL_SPACE_ID: DEFAULT_CANONICAL_TEMPLATE_SPACE,
+      MLCLAW_OPENCLAW_PORT: String(DEFAULT_SPACE_OPENCLAW_PORT),
+      OPENCLAW_GATEWAY_PORT: String(DEFAULT_SPACE_OPENCLAW_PORT)
+    },
+    assertLease
+  );
   await assertLease();
-  await ensureSpaceStateVolume(hub, manifest.space, manifest.bucket, { allowMissingVolumes: !params.spaceExists });
+  await ensureSpaceStateVolume(hub, manifest.space, manifest.bucket, {
+    allowMissingVolumes: !params.spaceExists,
+    assertMutation: assertLease
+  });
   await assertLease();
   await clearSpaceGatewayDisabled(hub, manifest.space);
   await assertLease();
-  await setSpaceGatewaySecrets(hub, manifest.space, hfToken, secrets);
+  await setSpaceGatewaySecrets(hub, manifest.space, hfToken, secrets, assertLease);
   if (canDeleteBroadTokenSecrets({
     model: manifest.model,
     routerTokenPresent: hasBrokerOrRouterTokenSecretRecord(secrets)
   })) {
     await assertLease();
-    await deleteStaleSpaceTokenSecrets(hub, manifest.space);
+    await deleteStaleSpaceTokenSecrets(hub, manifest.space, assertLease);
   } else {
     runtime.stdout.log("Keeping legacy broad Hub token secrets until an HF Broker or Router credential is configured");
   }
@@ -23539,33 +23622,40 @@ function formatRuntimeValue(value) {
   }
   return JSON.stringify(value);
 }
-async function setDeploymentVariables(hub, repoId, variables) {
+async function setDeploymentVariables(hub, repoId, variables, assertMutation = async () => void 0) {
   for (const [key, value] of Object.entries(variables)) {
+    await assertMutation();
     await hub.addSpaceVariable(repoId, key, value);
   }
 }
-async function setDeploymentSecrets(hub, repoId, secrets) {
+async function setDeploymentSecrets(hub, repoId, secrets, assertMutation = async () => void 0) {
   for (const [key, value] of Object.entries(secrets)) {
+    await assertMutation();
     await hub.addSpaceSecret(repoId, key, value);
   }
 }
-async function setSpaceGatewaySecrets(hub, repoId, hfToken, secrets) {
-  await setDeploymentSecrets(hub, repoId, {
-    MLCLAW_SESSION_SECRET: requiredSecret(secrets, "MLCLAW_SESSION_SECRET"),
-    MLCLAW_CREDENTIAL_KEY: requiredSecret(secrets, "MLCLAW_CREDENTIAL_KEY"),
-    MLCLAW_BROKER_HF_TOKEN: hfToken,
-    ...secrets.MLCLAW_ROUTER_TOKEN ? { MLCLAW_ROUTER_TOKEN: secrets.MLCLAW_ROUTER_TOKEN } : {},
-    ...secrets.TELEGRAM_BOT_TOKEN ? { TELEGRAM_BOT_TOKEN: secrets.TELEGRAM_BOT_TOKEN } : {},
-    ...secrets.TELEGRAM_ALLOWED_USERS ? { TELEGRAM_ALLOWED_USERS: secrets.TELEGRAM_ALLOWED_USERS } : {},
-    ...secrets.TELEGRAM_PROXY ? { TELEGRAM_PROXY: secrets.TELEGRAM_PROXY } : {},
-    ...secrets.TELEGRAM_API_ROOT ? { TELEGRAM_API_ROOT: secrets.TELEGRAM_API_ROOT } : {}
-  });
+async function setSpaceGatewaySecrets(hub, repoId, hfToken, secrets, assertMutation = async () => void 0) {
+  await setDeploymentSecrets(
+    hub,
+    repoId,
+    {
+      MLCLAW_SESSION_SECRET: requiredSecret(secrets, "MLCLAW_SESSION_SECRET"),
+      MLCLAW_CREDENTIAL_KEY: requiredSecret(secrets, "MLCLAW_CREDENTIAL_KEY"),
+      MLCLAW_BROKER_HF_TOKEN: hfToken,
+      ...secrets.MLCLAW_ROUTER_TOKEN ? { MLCLAW_ROUTER_TOKEN: secrets.MLCLAW_ROUTER_TOKEN } : {},
+      ...secrets.TELEGRAM_BOT_TOKEN ? { TELEGRAM_BOT_TOKEN: secrets.TELEGRAM_BOT_TOKEN } : {},
+      ...secrets.TELEGRAM_ALLOWED_USERS ? { TELEGRAM_ALLOWED_USERS: secrets.TELEGRAM_ALLOWED_USERS } : {},
+      ...secrets.TELEGRAM_PROXY ? { TELEGRAM_PROXY: secrets.TELEGRAM_PROXY } : {},
+      ...secrets.TELEGRAM_API_ROOT ? { TELEGRAM_API_ROOT: secrets.TELEGRAM_API_ROOT } : {}
+    },
+    assertMutation
+  );
 }
-async function deleteStaleSpaceTokenSecrets(hub, repoId) {
-  await Promise.all([
-    hub.deleteSpaceSecret(repoId, "HF_TOKEN"),
-    hub.deleteSpaceSecret(repoId, "HUGGINGFACE_HUB_TOKEN")
-  ]);
+async function deleteStaleSpaceTokenSecrets(hub, repoId, assertMutation = async () => void 0) {
+  for (const key of ["HF_TOKEN", "HUGGINGFACE_HUB_TOKEN"]) {
+    await assertMutation();
+    await hub.deleteSpaceSecret(repoId, key);
+  }
 }
 function canDeleteBroadTokenSecrets(params) {
   return params.routerTokenPresent || !isHuggingFaceRouterModel(params.model);
@@ -23588,8 +23678,10 @@ function assertDedicatedRouterToken(model, secrets) {
   }
 }
 async function ensureSpaceStateVolume(hub, repoId, bucket, opts = {}) {
+  await opts.assertMutation?.();
   const runtime = await hub.getSpaceRuntime(repoId);
   const volumes = Array.isArray(runtime.volumes) ? runtime.volumes : opts.allowMissingVolumes ? [] : requireRuntimeVolumes(runtime, repoId);
+  await opts.assertMutation?.();
   await hub.setSpaceVolumes(repoId, mergeStateVolume(volumes, bucket));
 }
 function requireRuntimeVolumes(runtime, repoId) {
