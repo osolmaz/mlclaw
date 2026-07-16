@@ -5039,6 +5039,18 @@ function validatedBrokerPayload(value, schema, label) {
   return parsed.data;
 }
 
+// src/mlclaw-space-runtime/local-access.ts
+import { createHmac, timingSafeEqual } from "node:crypto";
+var LOCAL_ACCESS_CONTEXT = "mlclaw-local-access-v1";
+function deriveLocalAccessToken(sessionSecret) {
+  return createHmac("sha256", sessionSecret).update(LOCAL_ACCESS_CONTEXT).digest("base64url");
+}
+function localAccessTokenMatches(candidate, expected) {
+  const left = Buffer.from(candidate);
+  const right = Buffer.from(expected);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
 // src/mlclaw-space-runtime/config.ts
 function loadConfig(env = process.env) {
   const port = integer(env.PORT ?? env.MLCLAW_SPACE_PORT, 7860);
@@ -5056,11 +5068,15 @@ function loadConfig(env = process.env) {
     spaceCreatorUserId
   });
   const owner = ownerFromSpaceId(spaceId);
+  const stateBucket = trim(env.OPENCLAW_HF_STATE_BUCKET);
+  const gatewayLocation = trim(env.MLCLAW_GATEWAY_LOCATION);
+  const localAccessUser = gatewayLocation === "local" ? trim(env.MLCLAW_LOCAL_ACCESS_USER) ?? ownerFromRepoId(stateBucket) : void 0;
   const configuredAllowedUsers = splitUsers(env.MLCLAW_ALLOWED_USERS ?? env.ALLOWED_USERS);
   const configuredAdmins = splitUsers(env.MLCLAW_ADMINS);
-  const resolvedAdmins = uniqueUsers(
-    configuredAdmins.length > 0 ? configuredAdmins : owner ? [owner] : configuredAllowedUsers.slice(0, 1)
-  );
+  const resolvedAdmins = uniqueUsers([
+    ...configuredAdmins.length > 0 ? configuredAdmins : owner ? [owner] : configuredAllowedUsers.slice(0, 1),
+    ...localAccessUser ? [localAccessUser] : []
+  ]);
   const allowedUsers = uniqueUsers([...configuredAllowedUsers, ...resolvedAdmins, ...owner ? [owner] : []]);
   const publicUrl = publicUrlFromEnv(env, port);
   const sessionSecret = trim(env.MLCLAW_SESSION_SECRET ?? env.SESSION_SECRET) ?? randomBytes(48).toString("base64url");
@@ -5095,6 +5111,7 @@ function loadConfig(env = process.env) {
     credentialKey,
     credentialKeyGenerated: !configuredCredentialKey,
     cookieSecure: env.MLCLAW_COOKIE_SECURE === "0" ? false : !publicUrl.startsWith("http://"),
+    sessionCookieName: gatewayLocation === "local" ? localSessionCookieName(publicUrl) : SESSION_COOKIE_PREFIX,
     spaceId,
     canonicalSpaceId,
     canonicalCreatorUserId,
@@ -5102,6 +5119,8 @@ function loadConfig(env = process.env) {
     allowedUsers,
     adminUsers: resolvedAdmins,
     allowAnySignedIn: env.MLCLAW_ALLOW_ANY_SIGNED_IN === "1" || env.MLCLAW_ALLOW_ANY_SIGNED_IN === "true",
+    localAccessUser,
+    localAccessToken: gatewayLocation === "local" && localAccessUser ? deriveLocalAccessToken(sessionSecret) : void 0,
     mode,
     hfToken: readOptionalSecret(trim(env.MLCLAW_TRUSTED_HF_TOKEN_FILE)) ?? trim(env.HF_TOKEN ?? env.HUGGINGFACE_HUB_TOKEN),
     routerToken: trim(env.MLCLAW_ROUTER_TOKEN ?? env.HF_ROUTER_TOKEN),
@@ -5127,16 +5146,22 @@ function loadConfig(env = process.env) {
     model,
     modelChoices: runtimeSettings2.modelChoices ?? parseModelChoicesEnv(env.MLCLAW_MODEL_CHOICES, model),
     routerModelsUrl: trim(env.MLCLAW_ROUTER_MODELS_URL) ?? "https://router.huggingface.co/v1/models",
-    stateBucket: trim(env.OPENCLAW_HF_STATE_BUCKET),
+    stateBucket,
     stateMountDir,
     statePrefix,
-    gatewayLocation: trim(env.MLCLAW_GATEWAY_LOCATION),
+    gatewayLocation,
     runtimeImage: trim(env.MLCLAW_RUNTIME_IMAGE),
     runtimeId: trim(env.MLCLAW_RUNTIME_ID),
     templateRev: trim(env.MLCLAW_TEMPLATE_REV),
     assetsDir: trim(env.MLCLAW_ASSETS_DIR) ?? "/app/assets",
     branding: resolveBranding(env, agentName)
   };
+}
+var SESSION_COOKIE_PREFIX = "mlclaw_session";
+function localSessionCookieName(publicUrl) {
+  const url = new URL(publicUrl);
+  const port = url.port || (url.protocol === "https:" ? "443" : "80");
+  return `${SESSION_COOKIE_PREFIX}_${port}`;
 }
 function readOptionalSecret(file) {
   if (!file) {
@@ -5172,6 +5197,14 @@ function resolveMode(params) {
   return params.canonicalCreatorUserId === params.spaceCreatorUserId ? "template" : "app";
 }
 function publicUrlFromEnv(env, port) {
+  const explicit = trim(env.MLCLAW_PUBLIC_URL);
+  if (explicit) {
+    const url = new URL(explicit);
+    if (url.protocol !== "http:" && url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+      throw new Error("MLCLAW_PUBLIC_URL must be one HTTP origin without credentials, path, query, or fragment");
+    }
+    return url.origin;
+  }
   const host = trim(env.SPACE_HOST);
   if (host) {
     return host.startsWith("http") ? host.replace(/\/+$/, "") : `https://${host.replace(/\/+$/, "")}`;
@@ -5179,7 +5212,10 @@ function publicUrlFromEnv(env, port) {
   return `http://127.0.0.1:${port}`;
 }
 function ownerFromSpaceId(spaceId) {
-  const owner = spaceId?.split("/")[0]?.trim();
+  return ownerFromRepoId(spaceId);
+}
+function ownerFromRepoId(repoId) {
+  const owner = repoId?.split("/")[0]?.trim();
   return owner || void 0;
 }
 function integer(value, fallback) {
@@ -7322,7 +7358,7 @@ var Hono2 = class extends Hono {
 };
 
 // src/mlclaw-space-runtime/csrf.ts
-import { createHmac, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
+import { createHmac as createHmac2, randomBytes as randomBytes2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
 var CSRF_TTL_SECONDS = 60 * 60;
 function createCsrfToken(params) {
   const now = params.now ?? Date.now();
@@ -7355,16 +7391,16 @@ function verifyCsrfToken(params) {
   return payload.username === params.username && typeof payload.exp === "number" && payload.exp > now && typeof payload.nonce === "string" && payload.nonce.length > 0;
 }
 function sign(value, secret) {
-  return createHmac("sha256", secret).update(value).digest("base64url");
+  return createHmac2("sha256", secret).update(value).digest("base64url");
 }
 function signatureMatches(a, b) {
   const left = Buffer.from(a);
   const right = Buffer.from(b);
-  return left.length === right.length && timingSafeEqual(left, right);
+  return left.length === right.length && timingSafeEqual2(left, right);
 }
 
 // src/mlclaw-space-runtime/delegated-brokerkit.ts
-import { createHash, createHmac as createHmac2, randomBytes as randomBytes4, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { createHash, createHmac as createHmac3, randomBytes as randomBytes4, timingSafeEqual as timingSafeEqual3 } from "node:crypto";
 
 // src/mlclaw-space-runtime/delegated-revisions.ts
 import { randomBytes as randomBytes3 } from "node:crypto";
@@ -7449,7 +7485,7 @@ var DelegatedBrokerKit = class {
     this.registry = registry;
     this.now = now;
     this.sourceDeadlineMs = sourceDeadlineMs;
-    this.key = createHmac2("sha256", sessionSecret).update("mlclaw/brokerkit-delegated-web/v1", "utf8").digest();
+    this.key = createHmac3("sha256", sessionSecret).update("mlclaw/brokerkit-delegated-web/v1", "utf8").digest();
   }
   key;
   handles = /* @__PURE__ */ new Map();
@@ -7666,7 +7702,7 @@ var DelegatedBrokerKit = class {
     this.handlesByIdentity.delete(requestIdentity(record.sourceId, record.requestId, record.revision));
   }
   sign(encoded) {
-    return createHmac2("sha256", this.key).update(encoded, "utf8").digest("base64url");
+    return createHmac3("sha256", this.key).update(encoded, "utf8").digest("base64url");
   }
 };
 async function decideWithRecovery(source, requestId, action, decision) {
@@ -7813,7 +7849,7 @@ function validTokenNonce(record) {
 function safeEqual(left, right) {
   const a = Buffer.from(left, "utf8");
   const b = Buffer.from(right, "utf8");
-  return a.length === b.length && timingSafeEqual2(a, b);
+  return a.length === b.length && timingSafeEqual3(a, b);
 }
 function safeSourceError(error) {
   const code = error instanceof BrokerOperatorError ? error.code : error instanceof DelegatedBrokerKitError ? error.code : void 0;
@@ -7973,7 +8009,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 // src/mlclaw-space-runtime/mcp-integrations.ts
-import { createHmac as createHmac3, timingSafeEqual as timingSafeEqual3 } from "node:crypto";
+import { createHmac as createHmac4, timingSafeEqual as timingSafeEqual4 } from "node:crypto";
 import http from "node:http";
 import { Readable } from "node:stream";
 var MAX_REQUEST_BYTES = 16 * 1024 * 1024;
@@ -8237,7 +8273,7 @@ var ResearchRpcError = class extends Error {
   }
 };
 function deriveInternalToken(secret) {
-  return createHmac3("sha256", secret).update("mlclaw:mcp-integrations:v1").digest("base64url");
+  return createHmac4("sha256", secret).update("mlclaw:mcp-integrations:v1").digest("base64url");
 }
 function managedMcpServerConfig(config2) {
   const headers = { [INTERNAL_HEADER]: deriveInternalToken(config2.sessionSecret) };
@@ -8467,7 +8503,7 @@ function validInternalToken(value, expected) {
   }
   const actualBuffer = Buffer.from(value);
   const expectedBuffer = Buffer.from(expected);
-  return actualBuffer.length === expectedBuffer.length && timingSafeEqual3(actualBuffer, expectedBuffer);
+  return actualBuffer.length === expectedBuffer.length && timingSafeEqual4(actualBuffer, expectedBuffer);
 }
 function requestHeader(headers, name) {
   const value = headers[name];
@@ -8860,7 +8896,9 @@ function validateOpenAiApiKey(value) {
 
 // src/mlclaw-space-runtime/pages.ts
 function templatePage(config2) {
-  return page("ML Claw", `
+  return page(
+    "ML Claw",
+    `
     <main>
       <img src="/assets/mlclaw.svg" alt="ML Claw" class="logo">
       <h1>ML Claw</h1>
@@ -8880,30 +8918,85 @@ function templatePage(config2) {
       <p class="muted">Manual duplication is for development or advanced setup only.</p>
       <p class="muted">Source Space: ${escapeHtml(config2.spaceId ?? config2.canonicalSpaceId)}</p>
     </main>
-  `);
+  `
+  );
 }
 function loginPage(config2, message, next = "/") {
   const oauthReady = Boolean(config2.oauthClientId && config2.oauthClientSecret);
   const loginPath = next === "/" ? "/oauth/login" : `/oauth/login?next=${encodeURIComponent(next)}`;
   const loginHref = new URL(loginPath, config2.publicUrl).toString();
-  return page(`${config2.branding.name} Login`, `
+  return page(
+    `${config2.branding.name} Login`,
+    `
     <main>
       <img src="/assets/hf-logo.svg" alt="Hugging Face" class="logo">
       <h1>${escapeHtml(config2.branding.name)}</h1>
       ${message ? `<p class="notice">${escapeHtml(message)}</p>` : ""}
       ${oauthReady ? `<a class="button" href="${escapeHtml(loginHref)}" target="_blank" rel="noopener">Sign in with Hugging Face</a>` : `<p class="notice">Hugging Face OAuth is not configured for this Space. Update the Space README metadata to include <code>hf_oauth: true</code>, then rebuild.</p>`}
     </main>
-  `);
+  `
+  );
+}
+function localLoginPage(config2) {
+  return page(
+    `${config2.branding.name} Local Access`,
+    `
+    <main>
+      <img src="/assets/mlclaw.svg" alt="ML Claw" class="logo">
+      <h1>${escapeHtml(config2.branding.name)}</h1>
+      <p class="muted">Use the private access link printed by the ML Claw CLI.</p>
+      <form id="local-login-form">
+        <label for="local-access-token">Local access code</label>
+        <input id="local-access-token" name="token" type="password" autocomplete="off" required>
+        <button class="button" type="submit">Open gateway</button>
+      </form>
+      <p id="local-login-status" class="notice" role="status"></p>
+    </main>
+    <script>
+      const form = document.getElementById("local-login-form");
+      const input = document.getElementById("local-access-token");
+      const status = document.getElementById("local-login-status");
+      const submit = async () => {
+        status.textContent = "Signing in...";
+        const response = await fetch("/mlclaw/api/local-session", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ token: input.value }),
+        });
+        input.value = "";
+        if (response.ok) {
+          location.replace("/");
+          return;
+        }
+        status.textContent = "The local access link is invalid. Run mlclaw gateway status again.";
+      };
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        submit().catch(() => { status.textContent = "The local gateway could not be reached."; });
+      });
+      const token = location.hash.slice(1);
+      if (token) {
+        history.replaceState(null, "", location.pathname);
+        input.value = token;
+        submit().catch(() => { status.textContent = "The local gateway could not be reached."; });
+      }
+    </script>
+  `
+  );
 }
 function unauthorizedPage(username) {
-  return page("ML Claw Access", `
+  return page(
+    "ML Claw Access",
+    `
     <main>
       <h1>Access not allowed</h1>
       <p>The signed-in Hugging Face account <strong>${escapeHtml(username)}</strong> is not allowed to operate this Space.</p>
       <p class="muted">Set <code>MLCLAW_ALLOWED_USERS</code> to a comma-separated list of usernames, then restart the Space.</p>
       <a class="button secondary" href="/mlclaw/logout">Sign out</a>
     </main>
-  `);
+  `
+  );
 }
 function page(title, body) {
   return `<!doctype html>
@@ -9120,7 +9213,7 @@ function positiveNumber2(value) {
 }
 
 // src/mlclaw-space-runtime/cookies.ts
-import { createHmac as createHmac4, randomBytes as randomBytes6, timingSafeEqual as timingSafeEqual4 } from "node:crypto";
+import { createHmac as createHmac5, randomBytes as randomBytes6, timingSafeEqual as timingSafeEqual5 } from "node:crypto";
 function createSignedCookie(options, payload) {
   const body = Buffer.from(JSON.stringify({
     ...payload,
@@ -9172,12 +9265,12 @@ function randomState() {
   return randomBytes6(24).toString("base64url");
 }
 function sign2(value, secret) {
-  return createHmac4("sha256", secret).update(value).digest("base64url");
+  return createHmac5("sha256", secret).update(value).digest("base64url");
 }
 function signatureMatches2(a, b) {
   const left = Buffer.from(a);
   const right = Buffer.from(b);
-  return left.length === right.length && timingSafeEqual4(left, right);
+  return left.length === right.length && timingSafeEqual5(left, right);
 }
 function parseCookies(header) {
   const cookies = /* @__PURE__ */ new Map();
@@ -9220,33 +9313,39 @@ var STATE_COOKIE = "mlclaw_oauth";
 var SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 var STATE_TTL_SECONDS = 60 * 10;
 function createSessionCookie(params) {
-  return createSignedCookie({
-    name: SESSION_COOKIE,
-    secret: params.sessionSecret,
-    maxAgeSeconds: SESSION_TTL_SECONDS,
-    secure: params.secure
-  }, { username: params.username });
+  return createSignedCookie(
+    {
+      name: params.cookieName ?? SESSION_COOKIE,
+      secret: params.sessionSecret,
+      maxAgeSeconds: SESSION_TTL_SECONDS,
+      secure: params.secure
+    },
+    { username: params.username }
+  );
 }
 function createOauthStateCookie(params) {
   const state = params.state ?? randomState();
   return {
     state,
-    cookie: createSignedCookie({
-      name: STATE_COOKIE,
-      secret: params.sessionSecret,
-      maxAgeSeconds: STATE_TTL_SECONDS,
-      secure: params.secure
-    }, { state, next: normalizeNext(params.next), intent: params.intent ?? "login" })
+    cookie: createSignedCookie(
+      {
+        name: STATE_COOKIE,
+        secret: params.sessionSecret,
+        maxAgeSeconds: STATE_TTL_SECONDS,
+        secure: params.secure
+      },
+      { state, next: normalizeNext(params.next), intent: params.intent ?? "login" }
+    )
   };
 }
-function clearSessionCookie(secure) {
-  return clearCookie(SESSION_COOKIE, secure);
+function clearSessionCookie(secure, cookieName = SESSION_COOKIE) {
+  return clearCookie(cookieName, secure);
 }
 function clearOauthStateCookie(secure) {
   return clearCookie(STATE_COOKIE, secure);
 }
-function readSession(cookieHeader, sessionSecret) {
-  return verifySignedCookie(cookieHeader, SESSION_COOKIE, sessionSecret);
+function readSession(cookieHeader, sessionSecret, cookieName = SESSION_COOKIE) {
+  return verifySignedCookie(cookieHeader, cookieName, sessionSecret);
 }
 function readOauthState(cookieHeader, sessionSecret) {
   return verifySignedCookie(cookieHeader, STATE_COOKIE, sessionSecret);
@@ -9564,6 +9663,7 @@ function createSpaceRuntimeApp(config2, controls) {
   const allowBrokerKitSummary = fixedWindowRateLimit(12, 6e4);
   const allowDelegatedEvents = fixedWindowRateLimit(60, 6e4);
   const allowSummaryEvents = fixedWindowRateLimit(60, 6e4);
+  const allowLocalLogin = fixedWindowRateLimit(10, 6e4);
   const openAiCredentials = new OpenAiCredentialStore(config2.openaiCredentialStoreFile, config2.credentialKey);
   app.get("/health", (c) => health(c, config2, controls));
   app.get("/healthz", (c) => health(c, config2, controls));
@@ -9599,6 +9699,53 @@ function createSpaceRuntimeApp(config2, controls) {
   );
   app.get("/oauth/login", (c) => handleOauthLogin(c, config2));
   app.get("/oauth/callback", (c) => handleOauthCallback(c, config2, controls));
+  app.get("/mlclaw/local-login", (c) => {
+    if (!config2.localAccessUser || !config2.localAccessToken || config2.gatewayLocation !== "local") {
+      return c.text("not found\n", 404);
+    }
+    c.header(
+      "content-security-policy",
+      "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+    );
+    c.header("cache-control", "no-store");
+    c.header("referrer-policy", "no-referrer");
+    return c.html(localLoginPage(config2));
+  });
+  app.post("/mlclaw/api/local-session", async (c) => {
+    if (!config2.localAccessUser || !config2.localAccessToken || config2.gatewayLocation !== "local") {
+      return c.json({ ok: false, error: "not found" }, 404);
+    }
+    if (c.req.header("origin") !== config2.publicUrl || !allowLocalLogin("local")) {
+      return c.json({ ok: false, error: "access denied" }, 403);
+    }
+    const contentLength = Number.parseInt(c.req.header("content-length") ?? "0", 10);
+    if (contentLength > 512 || !(c.req.header("content-type") ?? "").startsWith("application/json")) {
+      return c.json({ ok: false, error: "invalid request" }, 400);
+    }
+    const text = await c.req.text();
+    if (text.length > 512) {
+      return c.json({ ok: false, error: "invalid request" }, 400);
+    }
+    let token;
+    try {
+      token = JSON.parse(text).token;
+    } catch {
+      return c.json({ ok: false, error: "invalid request" }, 400);
+    }
+    if (typeof token !== "string" || !localAccessTokenMatches(token, config2.localAccessToken)) {
+      return c.json({ ok: false, error: "access denied" }, 403);
+    }
+    c.header(
+      "set-cookie",
+      createSessionCookie({
+        username: config2.localAccessUser,
+        sessionSecret: config2.sessionSecret,
+        secure: config2.cookieSecure,
+        cookieName: config2.sessionCookieName
+      })
+    );
+    return c.json({ ok: true });
+  });
   app.get("/login", (c) => c.html(loginPage(config2, void 0, normalizeNext(c.req.query("next") ?? "/"))));
   app.get("/logout", (c) => logoutResponse(config2, false));
   app.get("/mlclaw/logout", (c) => logoutResponse(config2, false));
@@ -9903,7 +10050,7 @@ function handleOauthLogin(c, config2) {
   if (!config2.oauthClientId || !config2.oauthClientSecret) {
     return c.html(loginPage(config2, "Hugging Face OAuth is not configured.", next));
   }
-  const session = readSession(c.req.header("cookie"), config2.sessionSecret);
+  const session = readSession(c.req.header("cookie"), config2.sessionSecret, config2.sessionCookieName);
   const integrationsRequested = c.req.query("intent") === "integrations";
   const intent = integrationsRequested && session && isAdmin(config2, session.username) ? "integrations" : "login";
   const { state, cookie } = createOauthStateCookie({
@@ -9948,7 +10095,7 @@ async function handleOauthCallback(c, config2, controls) {
     return c.html(loginPage(config2, "Hugging Face sign-in failed. Try again."), 401);
   }
   if (stateCookie.intent === "integrations") {
-    const session = readSession(c.req.header("cookie"), config2.sessionSecret);
+    const session = readSession(c.req.header("cookie"), config2.sessionSecret, config2.sessionCookieName);
     if (!session || !isAdmin(config2, session.username) || session.username !== identity.username) {
       return c.html(loginPage(config2, "Integration authorization requires the signed-in ML Claw administrator."), 403);
     }
@@ -9971,7 +10118,8 @@ async function handleOauthCallback(c, config2, controls) {
     createSessionCookie({
       username: identity.username,
       sessionSecret: config2.sessionSecret,
-      secure: config2.cookieSecure
+      secure: config2.cookieSecure,
+      cookieName: config2.sessionCookieName
     })
   );
   headers.append("set-cookie", clearOauthStateCookie(config2.cookieSecure));
@@ -10044,7 +10192,7 @@ function trustedBrokerKitHeaders(mode, origin) {
 }
 function logoutResponse(config2, json) {
   const headers = new Headers();
-  headers.append("set-cookie", clearSessionCookie(config2.cookieSecure));
+  headers.append("set-cookie", clearSessionCookie(config2.cookieSecure, config2.sessionCookieName));
   if (json) {
     headers.set("content-type", "application/json; charset=utf-8");
     return new Response(`${JSON.stringify({ ok: true })}
@@ -10054,7 +10202,7 @@ function logoutResponse(config2, json) {
   return new Response(null, { status: 302, headers });
 }
 function requireAllowed(c, config2) {
-  const session = readSession(c.req.header("cookie"), config2.sessionSecret);
+  const session = readSession(c.req.header("cookie"), config2.sessionSecret, config2.sessionCookieName);
   if (!session) {
     return unauthenticated(c, config2);
   }
@@ -10160,7 +10308,10 @@ function unauthenticated(c, config2) {
     return c.json({ ok: false, error: "authentication required" }, 401);
   }
   if (isBrowserNavigation(c)) {
-    return c.redirect(`/login?next=${encodeURIComponent(next)}`, 302);
+    return c.redirect(
+      config2.gatewayLocation === "local" ? "/mlclaw/local-login" : `/login?next=${encodeURIComponent(next)}`,
+      302
+    );
   }
   return c.html(loginPage(config2, void 0, next), 401);
 }
@@ -10934,7 +11085,7 @@ var SpaceRuntimeServer = class {
     server2.on("upgrade", (req, socket, head) => {
       const netSocket = socket;
       try {
-        const session = readSession(req.headers.cookie, this.config.sessionSecret);
+        const session = readSession(req.headers.cookie, this.config.sessionSecret, this.config.sessionCookieName);
         if (!session || !this.isAllowed(session.username)) {
           rejectWebSocket(netSocket);
           return;
@@ -11011,7 +11162,7 @@ var SpaceRuntimeServer = class {
         res.off("close", abortRequest);
       }
     }
-    const session = readSession(req.headers.cookie, this.config.sessionSecret);
+    const session = readSession(req.headers.cookie, this.config.sessionSecret, this.config.sessionCookieName);
     if (!session) {
       this.sendUnauthenticated(req, res, url);
       return;
@@ -11091,6 +11242,10 @@ var SpaceRuntimeServer = class {
   }
   sendUnauthenticated(req, res, url) {
     const next = normalizeNext(`${url.pathname}${url.search}`);
+    if (this.config.gatewayLocation === "local" && isBrowserNavigation2(req)) {
+      this.sendRedirect(res, "/mlclaw/local-login");
+      return;
+    }
     if (url.pathname === "/" && (req.method === "GET" || req.method === "HEAD")) {
       this.sendHtml(res, loginPage(this.config, void 0, next));
       return;

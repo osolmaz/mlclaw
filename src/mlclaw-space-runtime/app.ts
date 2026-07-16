@@ -31,6 +31,8 @@ import {
   writeEphemeralOpenAiCredential,
 } from "./openai-credentials.js";
 import { loginPage, templatePage, unauthorizedPage } from "./pages.js";
+import { localLoginPage } from "./pages.js";
+import { localAccessTokenMatches } from "./local-access.js";
 import { loadRouterModelChoices } from "./router-models.js";
 import {
   clearOauthStateCookie,
@@ -67,6 +69,7 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
   const allowBrokerKitSummary = fixedWindowRateLimit(12, 60_000);
   const allowDelegatedEvents = fixedWindowRateLimit(60, 60_000);
   const allowSummaryEvents = fixedWindowRateLimit(60, 60_000);
+  const allowLocalLogin = fixedWindowRateLimit(10, 60_000);
   const openAiCredentials = new OpenAiCredentialStore(config.openaiCredentialStoreFile, config.credentialKey);
 
   app.get("/health", (c) => health(c, config, controls));
@@ -102,6 +105,53 @@ export function createSpaceRuntimeApp(config: SpaceRuntimeConfig, controls: Runt
 
   app.get("/oauth/login", (c) => handleOauthLogin(c, config));
   app.get("/oauth/callback", (c) => handleOauthCallback(c, config, controls));
+  app.get("/mlclaw/local-login", (c) => {
+    if (!config.localAccessUser || !config.localAccessToken || config.gatewayLocation !== "local") {
+      return c.text("not found\n", 404);
+    }
+    c.header(
+      "content-security-policy",
+      "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    );
+    c.header("cache-control", "no-store");
+    c.header("referrer-policy", "no-referrer");
+    return c.html(localLoginPage(config));
+  });
+  app.post("/mlclaw/api/local-session", async (c) => {
+    if (!config.localAccessUser || !config.localAccessToken || config.gatewayLocation !== "local") {
+      return c.json({ ok: false, error: "not found" }, 404);
+    }
+    if (c.req.header("origin") !== config.publicUrl || !allowLocalLogin("local")) {
+      return c.json({ ok: false, error: "access denied" }, 403);
+    }
+    const contentLength = Number.parseInt(c.req.header("content-length") ?? "0", 10);
+    if (contentLength > 512 || !(c.req.header("content-type") ?? "").startsWith("application/json")) {
+      return c.json({ ok: false, error: "invalid request" }, 400);
+    }
+    const text = await c.req.text();
+    if (text.length > 512) {
+      return c.json({ ok: false, error: "invalid request" }, 400);
+    }
+    let token: unknown;
+    try {
+      token = (JSON.parse(text) as { token?: unknown }).token;
+    } catch {
+      return c.json({ ok: false, error: "invalid request" }, 400);
+    }
+    if (typeof token !== "string" || !localAccessTokenMatches(token, config.localAccessToken)) {
+      return c.json({ ok: false, error: "access denied" }, 403);
+    }
+    c.header(
+      "set-cookie",
+      createSessionCookie({
+        username: config.localAccessUser,
+        sessionSecret: config.sessionSecret,
+        secure: config.cookieSecure,
+        cookieName: config.sessionCookieName,
+      }),
+    );
+    return c.json({ ok: true });
+  });
   app.get("/login", (c) => c.html(loginPage(config, undefined, normalizeNext(c.req.query("next") ?? "/"))));
   app.get("/logout", (c) => logoutResponse(config, false));
   app.get("/mlclaw/logout", (c) => logoutResponse(config, false));
@@ -439,7 +489,7 @@ function handleOauthLogin(c: Context, config: SpaceRuntimeConfig): Response {
   if (!config.oauthClientId || !config.oauthClientSecret) {
     return c.html(loginPage(config, "Hugging Face OAuth is not configured.", next));
   }
-  const session = readSession(c.req.header("cookie"), config.sessionSecret);
+  const session = readSession(c.req.header("cookie"), config.sessionSecret, config.sessionCookieName);
   const integrationsRequested = c.req.query("intent") === "integrations";
   const intent = integrationsRequested && session && isAdmin(config, session.username) ? "integrations" : "login";
   const { state, cookie } = createOauthStateCookie({
@@ -496,7 +546,7 @@ async function handleOauthCallback(
     return c.html(loginPage(config, "Hugging Face sign-in failed. Try again."), 401);
   }
   if (stateCookie.intent === "integrations") {
-    const session = readSession(c.req.header("cookie"), config.sessionSecret);
+    const session = readSession(c.req.header("cookie"), config.sessionSecret, config.sessionCookieName);
     if (!session || !isAdmin(config, session.username) || session.username !== identity.username) {
       return c.html(loginPage(config, "Integration authorization requires the signed-in ML Claw administrator."), 403);
     }
@@ -519,6 +569,7 @@ async function handleOauthCallback(
       username: identity.username,
       sessionSecret: config.sessionSecret,
       secure: config.cookieSecure,
+      cookieName: config.sessionCookieName,
     }),
   );
   headers.append("set-cookie", clearOauthStateCookie(config.cookieSecure));
@@ -601,7 +652,7 @@ function trustedBrokerKitHeaders(mode: "launcher" | "popover" | "top-level" | "a
 
 function logoutResponse(config: SpaceRuntimeConfig, json: boolean): Response {
   const headers = new Headers();
-  headers.append("set-cookie", clearSessionCookie(config.cookieSecure));
+  headers.append("set-cookie", clearSessionCookie(config.cookieSecure, config.sessionCookieName));
   if (json) {
     headers.set("content-type", "application/json; charset=utf-8");
     return new Response(`${JSON.stringify({ ok: true })}\n`, { status: 200, headers });
@@ -611,7 +662,7 @@ function logoutResponse(config: SpaceRuntimeConfig, json: boolean): Response {
 }
 
 function requireAllowed(c: Context, config: SpaceRuntimeConfig): SessionPayload | Response {
-  const session = readSession(c.req.header("cookie"), config.sessionSecret);
+  const session = readSession(c.req.header("cookie"), config.sessionSecret, config.sessionCookieName);
   if (!session) {
     return unauthenticated(c, config);
   }
@@ -770,7 +821,10 @@ function unauthenticated(c: Context, config: SpaceRuntimeConfig): Response {
     return c.json({ ok: false, error: "authentication required" }, 401);
   }
   if (isBrowserNavigation(c)) {
-    return c.redirect(`/login?next=${encodeURIComponent(next)}`, 302);
+    return c.redirect(
+      config.gatewayLocation === "local" ? "/mlclaw/local-login" : `/login?next=${encodeURIComponent(next)}`,
+      302,
+    );
   }
   return c.html(loginPage(config, undefined, next), 401);
 }

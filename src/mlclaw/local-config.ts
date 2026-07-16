@@ -13,6 +13,7 @@ export type DeploymentManifest = {
   gatewayLocation: GatewayLocation;
   model: string;
   runtimeImage: string;
+  localPort?: number;
   localGateway?: LocalGatewayBinding;
   createdAt: string;
   updatedAt: string;

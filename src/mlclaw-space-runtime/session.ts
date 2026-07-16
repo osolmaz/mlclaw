@@ -21,13 +21,17 @@ export function createSessionCookie(params: {
   username: string;
   sessionSecret: string;
   secure: boolean;
+  cookieName?: string;
 }): string {
-  return createSignedCookie({
-    name: SESSION_COOKIE,
-    secret: params.sessionSecret,
-    maxAgeSeconds: SESSION_TTL_SECONDS,
-    secure: params.secure,
-  }, { username: params.username });
+  return createSignedCookie(
+    {
+      name: params.cookieName ?? SESSION_COOKIE,
+      secret: params.sessionSecret,
+      maxAgeSeconds: SESSION_TTL_SECONDS,
+      secure: params.secure,
+    },
+    { username: params.username },
+  );
 }
 
 export function createOauthStateCookie(params: {
@@ -40,25 +44,32 @@ export function createOauthStateCookie(params: {
   const state = params.state ?? randomState();
   return {
     state,
-    cookie: createSignedCookie({
-      name: STATE_COOKIE,
-      secret: params.sessionSecret,
-      maxAgeSeconds: STATE_TTL_SECONDS,
-      secure: params.secure,
-    }, { state, next: normalizeNext(params.next), intent: params.intent ?? "login" }),
+    cookie: createSignedCookie(
+      {
+        name: STATE_COOKIE,
+        secret: params.sessionSecret,
+        maxAgeSeconds: STATE_TTL_SECONDS,
+        secure: params.secure,
+      },
+      { state, next: normalizeNext(params.next), intent: params.intent ?? "login" },
+    ),
   };
 }
 
-export function clearSessionCookie(secure: boolean): string {
-  return clearCookie(SESSION_COOKIE, secure);
+export function clearSessionCookie(secure: boolean, cookieName = SESSION_COOKIE): string {
+  return clearCookie(cookieName, secure);
 }
 
 export function clearOauthStateCookie(secure: boolean): string {
   return clearCookie(STATE_COOKIE, secure);
 }
 
-export function readSession(cookieHeader: string | undefined, sessionSecret: string): SessionPayload | undefined {
-  return verifySignedCookie<SessionPayload>(cookieHeader, SESSION_COOKIE, sessionSecret);
+export function readSession(
+  cookieHeader: string | undefined,
+  sessionSecret: string,
+  cookieName = SESSION_COOKIE,
+): SessionPayload | undefined {
+  return verifySignedCookie<SessionPayload>(cookieHeader, cookieName, sessionSecret);
 }
 
 export function readOauthState(cookieHeader: string | undefined, sessionSecret: string): StatePayload | undefined {

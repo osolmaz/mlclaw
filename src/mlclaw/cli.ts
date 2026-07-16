@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
 import { realpathSync } from "node:fs";
+import os from "node:os";
 import process from "node:process";
 import { randomBytes } from "node:crypto";
 import { pathToFileURL } from "node:url";
@@ -14,6 +15,7 @@ import {
   CliPodmanRunner,
   containerNameFor,
   type ContainerEngine,
+  type ContainerInspect,
   type ContainerRuntimeProbe,
   type ContainerRunner,
   volumeNameFor,
@@ -32,6 +34,7 @@ import {
 } from "./lease.js";
 import { normalizeBucketPrefix } from "../hf-state-sync/paths.js";
 import { DEFAULT_MODEL as DEFAULT_ROUTER_MODEL } from "../mlclaw-space-runtime/model-default.js";
+import { deriveLocalAccessToken } from "../mlclaw-space-runtime/local-access.js";
 import {
   defaultConfigRoot,
   manifestExists,
@@ -67,6 +70,7 @@ export const SPACE_STATE_MOUNT_DIR = "/data/mlclaw-state";
 export const SPACE_LIVE_DIR = "/home/node/.local/share/mlclaw/live";
 export const SPACE_HANDOFF_TIMEOUT_MS = 120_000;
 export const SPACE_HANDOFF_POLL_MS = 5_000;
+export const LOCAL_START_SETTLE_MS = 500;
 
 type ContainerRuntimePreference = "auto" | ContainerEngine;
 type HostedFallbackChoice = "local" | "pro" | "cancel";
@@ -98,6 +102,7 @@ type BootstrapOptions = {
   routerTokenFile?: string;
   dockerContext?: string;
   containerRuntime?: string;
+  localPort?: number;
   allowLocalFallback?: boolean;
   pull?: boolean;
   takeover?: boolean;
@@ -134,6 +139,7 @@ type GatewayCommandOptions = {
   routerTokenFile?: string;
   dockerContext?: string;
   containerRuntime?: string;
+  localPort?: number;
   pull?: boolean;
   takeover?: boolean;
   publicSpace?: boolean;
@@ -209,6 +215,7 @@ type CliRuntime = {
   podmanRunner?: ContainerRunner;
   configRoot?: string;
   now?: () => Date;
+  sleep?: (milliseconds: number) => Promise<unknown>;
   prompt?: PromptRuntime;
 };
 
@@ -254,6 +261,7 @@ function createRuntime(overrides: CliRuntime = {}): Required<CliRuntime> {
     podmanRunner: overrides.podmanRunner ?? new CliPodmanRunner(),
     configRoot: overrides.configRoot ?? defaultConfigRoot(overrides.env ?? process.env),
     now: overrides.now ?? (() => new Date()),
+    sleep: overrides.sleep ?? delay,
     prompt: overrides.prompt ?? defaultPrompt,
   };
 }
@@ -295,6 +303,7 @@ export function createProgram(runtimeOverrides: CliRuntime = {}): Command {
     )
     .option("--docker-context <name>", "Docker context for local gateway mode")
     .option("--container-runtime <auto|docker|podman>", "Local container runtime", "auto")
+    .option("--local-port <port>", "Loopback port for a local gateway", parseLocalPort)
     .option(
       "--allow-local-fallback",
       "Allow non-interactive Space bootstrap to fall back to a ready local runtime",
@@ -357,6 +366,7 @@ export function createProgram(runtimeOverrides: CliRuntime = {}): Command {
     .command("start")
     .argument("<agent>", "Agent name")
     .option("--docker-context <name>", "Set Docker context only when the deployment has no pinned context")
+    .option("--local-port <port>", "Loopback port for the local gateway", parseLocalPort)
     .option("--no-pull", "Do not docker pull before starting a local gateway")
     .option("--takeover", "Start even if another live runtime lease is present", false)
     .action(async (agent: string, opts: GatewayCommandOptions) => {
@@ -374,6 +384,7 @@ export function createProgram(runtimeOverrides: CliRuntime = {}): Command {
     .command("restart")
     .argument("<agent>", "Agent name")
     .option("--no-pull", "Do not docker pull before starting a local gateway")
+    .option("--local-port <port>", "Loopback port for the local gateway", parseLocalPort)
     .option("--takeover", "Start even if another live runtime lease is present", false)
     .action(async (agent: string, opts: GatewayCommandOptions) => {
       await gatewayRestart(agent, opts, runtime);
@@ -410,6 +421,7 @@ export function createProgram(runtimeOverrides: CliRuntime = {}): Command {
     )
     .option("--docker-context <name>", "Docker context for local gateway startup when migrating to local")
     .option("--container-runtime <auto|docker|podman>", "Local container runtime", "auto")
+    .option("--local-port <port>", "Loopback port for the local gateway", parseLocalPort)
     .option("--no-pull", "Do not docker pull before starting a local gateway")
     .option("--takeover", "Start even if another live runtime lease is present", false)
     .option("--yes", "Confirm paid hardware prompts for automation", false)
@@ -639,6 +651,8 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
     runtime.stdout.log(`Agent URL: ${spacePageUrl(activePlan.names.space)}`);
   } else {
     runtime.stdout.log(`Local:  ${containerNameFor(agentName)}`);
+    runtime.stdout.log(`Gateway URL: ${localGatewayAccessUrl(activePlan.manifest, activePlan.secrets)}`);
+    runtime.stdout.log(localGatewayRemoteAccess(activePlan.manifest));
   }
   runtime.stdout.log(`Agent:  ${agentName}${bot ? ` (@${bot.username})` : ""}`);
   runtime.stdout.log(`Gateway: ${activePlan.gatewayLocation}`);
@@ -656,7 +670,11 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
     );
     runtime.prompt.outro("Bootstrap complete");
   } else {
-    runtime.prompt.outro("Local gateway start requested");
+    runtime.prompt.note(
+      `Open the gateway on this machine:\n\n${localGatewayAccessUrl(activePlan.manifest, activePlan.secrets)}\n\n${localGatewayRemoteAccess(activePlan.manifest)}`,
+      "HERE IS YOUR ML CLAW",
+    );
+    runtime.prompt.outro("Bootstrap complete");
   }
 }
 
@@ -706,6 +724,7 @@ async function resolveBootstrapPlan(params: {
   }
   const bucketPrefix = bootstrapBucketPrefix(existingManifest, existingSecrets, runtime);
   const localRuntimeId = existingManifest?.localRuntimeId ?? newLocalRuntimeId(agentName);
+  const localPort = opts.localPort ?? existingManifest?.localPort ?? DEFAULT_LOCAL_PORT;
   const localGateway =
     gatewayLocation === "local"
       ? await resolveLocalGatewayBinding({
@@ -749,6 +768,11 @@ async function resolveBootstrapPlan(params: {
     gatewayLocation,
     model,
     runtimeImage,
+    ...(gatewayLocation === "local"
+      ? { localPort }
+      : existingManifest?.localPort
+        ? { localPort: existingManifest.localPort }
+        : {}),
     ...(localGateway ? { localGateway } : {}),
     createdAt: existingManifest?.createdAt ?? now,
     updatedAt: now,
@@ -759,11 +783,13 @@ async function resolveBootstrapPlan(params: {
     ...(telegramUserId ? { telegramUserId } : {}),
     sessionSecret,
     credentialKey,
+    owner,
     bucket,
     model,
     agentName,
     runtimeImage,
     gatewayLocation,
+    localPort,
     runtimeId: gatewayLocation === "local" ? manifest.localRuntimeId : spaceRuntimeId(agentName),
     ...(bucketPrefix ? { bucketPrefix } : {}),
     ...(opts.telegramProxy ? { telegramProxy: opts.telegramProxy } : {}),
@@ -872,6 +898,7 @@ async function confirmBootstrapPlan(params: {
     }
   } else {
     lines.push(`Local runtime: ${containerNameFor(params.manifest.agent)} (${params.hardware})`);
+    lines.push(`Gateway URL: ${localGatewayUrl(params.manifest)}`);
   }
   if (params.bucketPlan.exists || params.spacePlan?.exists) {
     lines.push(`Fresh deployment: use a different name, for example --name ${params.manifest.agent}-2`);
@@ -1217,11 +1244,13 @@ function deploymentSecrets(params: {
   telegramUserId?: string;
   sessionSecret: string;
   credentialKey: string;
+  owner: string;
   bucket: string;
   model: string;
   agentName: string;
   runtimeImage: string;
   gatewayLocation: GatewayLocation;
+  localPort: number;
   runtimeId: string;
   bucketPrefix?: string;
   telegramProxy?: string;
@@ -1240,12 +1269,34 @@ function deploymentSecrets(params: {
     MLCLAW_CREDENTIAL_KEY: params.credentialKey,
     MLCLAW_OPENCLAW_PORT: String(DEFAULT_SPACE_OPENCLAW_PORT),
     OPENCLAW_GATEWAY_PORT: String(DEFAULT_SPACE_OPENCLAW_PORT),
+    ...(params.gatewayLocation === "local" ? localAccessSecrets(params.owner, params.localPort, {}) : {}),
     ...(params.telegramToken ? { TELEGRAM_BOT_TOKEN: params.telegramToken } : {}),
     ...(params.telegramUserId ? { TELEGRAM_ALLOWED_USERS: params.telegramUserId } : {}),
     ...(params.bucketPrefix ? { OPENCLAW_HF_STATE_PREFIX: params.bucketPrefix } : {}),
     ...(params.telegramProxy ? { TELEGRAM_PROXY: params.telegramProxy } : {}),
     ...(params.telegramApiRoot ? { TELEGRAM_API_ROOT: params.telegramApiRoot } : {}),
   };
+}
+
+function localAccessSecrets(owner: string, port: number, existing: Record<string, string>): Record<string, string> {
+  return {
+    MLCLAW_PUBLIC_URL: `http://127.0.0.1:${port}`,
+    MLCLAW_LOCAL_ACCESS_USER: owner,
+    MLCLAW_ALLOWED_USERS: appendCsvValue(existing.MLCLAW_ALLOWED_USERS, owner),
+    MLCLAW_ADMINS: appendCsvValue(existing.MLCLAW_ADMINS, owner),
+  };
+}
+
+function appendCsvValue(existing: string | undefined, value: string): string {
+  return [
+    ...new Set([
+      ...(existing ?? "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
+      value,
+    ]),
+  ].join(",");
 }
 
 async function writeLocalDeployment(
@@ -1351,19 +1402,30 @@ async function startLocalGateway(params: {
   pull: boolean;
   refresh?: boolean;
   resetVolume?: boolean;
+  existing?: ContainerInspect | null;
 }): Promise<void> {
   const { manifest, runtime } = params;
-  const secrets = await ensureDeploymentCredentialKey(runtime, manifest.agent);
+  let secrets = await ensureDeploymentCredentialKey(runtime, manifest.agent);
+  if (!secrets.MLCLAW_SESSION_SECRET) {
+    secrets = { ...secrets, MLCLAW_SESSION_SECRET: randomBytes(48).toString("base64url") };
+    await writeSecretEnv(runtime.configRoot, manifest.agent, secrets);
+  }
+  const accessSecrets = localAccessSecrets(manifest.owner, localGatewayPort(manifest), secrets);
+  if (Object.entries(accessSecrets).some(([key, value]) => secrets[key] !== value)) {
+    secrets = { ...secrets, ...accessSecrets };
+    await writeSecretEnv(runtime.configRoot, manifest.agent, secrets);
+  }
   assertDedicatedRouterToken(manifest.model, secrets);
   const containerName = containerNameFor(manifest.agent);
   const volumeName = volumeNameFor(manifest.agent);
   const runner = localRunnerFor(manifest, runtime);
   const connection = localConnectionFor(manifest);
-  const existing = await runner.inspect(containerName, connection);
+  const existing = "existing" in params ? params.existing : await runner.inspect(containerName, connection);
   const shouldRefresh = Boolean(params.refresh || params.resetVolume);
   if (existing?.running) {
     if (!shouldRefresh) {
       runtime.stdout.log(`Local gateway already running: ${containerName}`);
+      runtime.stdout.log(`Gateway URL: ${localGatewayAccessUrl(manifest, secrets)}`);
       return;
     }
   }
@@ -1389,9 +1451,18 @@ async function startLocalGateway(params: {
     volumeName,
     volumeMountPath: LOCAL_VOLUME_MOUNT_PATH,
     liveDir: LOCAL_LIVE_DIR,
+    hostAddress: "127.0.0.1",
+    hostPort: localGatewayPort(manifest),
+    containerPort: DEFAULT_LOCAL_PORT,
     ...(connection ? { context: connection } : {}),
   });
+  await runtime.sleep(LOCAL_START_SETTLE_MS);
+  const started = await runner.inspect(containerName, connection);
+  if (!started?.running) {
+    throw new Error(`local gateway exited during startup. Inspect it with \`mlclaw gateway logs ${manifest.agent}\``);
+  }
   runtime.stdout.log(`Local gateway created: ${containerName}`);
+  runtime.stdout.log(`Gateway URL: ${localGatewayAccessUrl(manifest, secrets)}`);
 }
 
 async function stopLocalGateway(manifest: DeploymentManifest, runtime: Required<CliRuntime>): Promise<void> {
@@ -1412,7 +1483,13 @@ async function stopLocalGateway(manifest: DeploymentManifest, runtime: Required<
 }
 
 async function gatewayStart(agent: string, opts: GatewayCommandOptions, runtime: Required<CliRuntime>): Promise<void> {
-  const manifest = await readDeploymentManifest(runtime, agent, { requestedDockerContext: opts.dockerContext });
+  const previousManifest = await readDeploymentManifest(runtime, agent, { requestedDockerContext: opts.dockerContext });
+  let manifest = previousManifest;
+  const requestedLocalPort = opts.localPort ?? localGatewayPort(manifest);
+  const localPortChanged = manifest.gatewayLocation === "local" && manifest.localPort !== requestedLocalPort;
+  if (localPortChanged) {
+    manifest = { ...manifest, localPort: requestedLocalPort, updatedAt: runtime.now().toISOString() };
+  }
   const bucketPrefix = await readDeploymentBucketPrefix(runtime, agent);
   const token = await runtime.readToken(runtime.env);
   const hub = runtime.hubFactory(token);
@@ -1424,7 +1501,44 @@ async function gatewayStart(agent: string, opts: GatewayCommandOptions, runtime:
     takeover: Boolean(opts.takeover),
   });
   if (manifest.gatewayLocation === "local") {
-    await startLocalGateway({ manifest, runtime, pull: shouldPull(opts) });
+    const previousSecrets = await readSecretEnv(runtime.configRoot, manifest.agent);
+    const accessSecrets = localAccessSecrets(manifest.owner, localGatewayPort(manifest), previousSecrets);
+    const accessSecretsChanged = Object.entries(accessSecrets).some(([key, value]) => previousSecrets[key] !== value);
+    const refresh = localPortChanged || accessSecretsChanged;
+    const previousContainer = refresh
+      ? await localRunnerFor(previousManifest, runtime).inspect(
+          containerNameFor(previousManifest.agent),
+          localConnectionFor(previousManifest),
+        )
+      : undefined;
+    if (accessSecretsChanged) {
+      await writeSecretEnv(runtime.configRoot, manifest.agent, { ...previousSecrets, ...accessSecrets });
+    }
+    try {
+      await startLocalGateway({
+        manifest,
+        runtime,
+        pull: shouldPull(opts),
+        refresh,
+        ...(refresh ? { existing: previousContainer ?? null } : {}),
+      });
+    } catch (error) {
+      if (accessSecretsChanged) {
+        await writeSecretEnv(runtime.configRoot, manifest.agent, previousSecrets);
+      }
+      if (previousContainer?.running) {
+        try {
+          await startLocalGateway({ manifest: previousManifest, runtime, pull: false, refresh: true });
+          runtime.stdout.log(`Previous local gateway restored: ${containerNameFor(previousManifest.agent)}`);
+        } catch (rollbackError) {
+          throw new AggregateError([error, rollbackError], "local gateway update and rollback both failed");
+        }
+      }
+      throw error;
+    }
+    if (refresh) {
+      await writeManifest(runtime.configRoot, manifest);
+    }
   } else {
     await clearSpaceGatewayDisabled(hub, manifest.space);
     await hub.restartSpace(manifest.space, true);
@@ -1465,6 +1579,7 @@ async function gatewayStatus(agent: string, runtime: Required<CliRuntime>): Prom
   runtime.stdout.log(`Bucket: ${manifest.bucket}`);
   runtime.stdout.log(`Space: ${manifest.space}`);
   if (manifest.gatewayLocation === "local") {
+    const secrets = await readSecretEnv(runtime.configRoot, manifest.agent).catch(() => ({}));
     if (manifest.localGateway) {
       runtime.stdout.log(`Container: ${localGatewayLabel(manifest.localGateway)}`);
       const endpoint = localGatewayEndpoint(manifest.localGateway);
@@ -1472,6 +1587,8 @@ async function gatewayStatus(agent: string, runtime: Required<CliRuntime>): Prom
         runtime.stdout.log(`Endpoint: ${endpoint}`);
       }
     }
+    runtime.stdout.log(`Gateway URL: ${localGatewayAccessUrl(manifest, secrets)}`);
+    runtime.stdout.log(localGatewayRemoteAccess(manifest));
     const inspect = await localRunnerFor(manifest, runtime).inspect(
       containerNameFor(manifest.agent),
       localConnectionFor(manifest),
@@ -1543,6 +1660,7 @@ async function gatewayMigrate(
     gatewayLocation: target,
     runtimeImage: resolveRuntimeImage(opts.runtimeImage ?? current.runtimeImage, runtime.env),
     updatedAt: runtime.now().toISOString(),
+    ...(target === "local" ? { localPort: opts.localPort ?? current.localPort ?? DEFAULT_LOCAL_PORT } : {}),
   };
   const routerToken = await resolveRouterToken({
     opts,
@@ -1634,6 +1752,7 @@ async function gatewayMigrate(
       MLCLAW_GATEWAY_LOCATION: "local",
       MLCLAW_RUNTIME_IMAGE: updated.runtimeImage,
       MLCLAW_RUNTIME_ID: updated.localRuntimeId,
+      ...localAccessSecrets(updated.owner, localGatewayPort(updated), secrets),
     });
     await startLocalGateway({ manifest: updated, runtime, pull: shouldPull(opts), resetVolume: true });
   }
@@ -1846,6 +1965,53 @@ function localGatewayLabel(binding: LocalGatewayBinding): string {
 
 function localGatewayEndpoint(binding: LocalGatewayBinding): string | undefined {
   return binding.engine === "docker" ? binding.dockerEndpoint : binding.podmanEndpoint;
+}
+
+function localGatewayPort(manifest: DeploymentManifest): number {
+  return manifest.localPort ?? DEFAULT_LOCAL_PORT;
+}
+
+function localGatewayUrl(manifest: DeploymentManifest): string {
+  return `http://127.0.0.1:${localGatewayPort(manifest)}`;
+}
+
+function localGatewayAccessUrl(manifest: DeploymentManifest, secrets: Record<string, string>): string {
+  const sessionSecret = secrets.MLCLAW_SESSION_SECRET;
+  if (!sessionSecret) {
+    return `${localGatewayUrl(manifest)}/mlclaw/local-login (run mlclaw gateway restart ${manifest.agent} to initialize local access)`;
+  }
+  const token = deriveLocalAccessToken(sessionSecret);
+  return `${localGatewayUrl(manifest)}/mlclaw/local-login#${token}`;
+}
+
+function localGatewayRemoteAccess(manifest: DeploymentManifest): string {
+  const command = localGatewayTunnelCommand(manifest);
+  return command
+    ? `Remote access: ${command}`
+    : `Remote access: forward 127.0.0.1:${localGatewayPort(manifest)} from the container host, then open the gateway URL above.`;
+}
+
+function localGatewayTunnelCommand(manifest: DeploymentManifest): string | undefined {
+  const port = localGatewayPort(manifest);
+  const endpoint = manifest.localGateway ? localGatewayEndpoint(manifest.localGateway) : undefined;
+  if (!endpoint || endpoint.startsWith("unix:") || endpoint.startsWith("npipe:") || endpointIsLoopback(endpoint)) {
+    return `ssh -N -L ${port}:127.0.0.1:${port} ${os.userInfo().username}@${os.hostname()}`;
+  }
+  if (!endpoint.startsWith("ssh://")) {
+    return undefined;
+  }
+  const target = new URL(endpoint);
+  const destination = `${target.username ? `${target.username}@` : ""}${target.hostname}`;
+  return `ssh ${target.port ? `-p ${target.port} ` : ""}-N -L ${port}:127.0.0.1:${port} ${destination}`;
+}
+
+function endpointIsLoopback(endpoint: string): boolean {
+  try {
+    const hostname = new URL(endpoint).hostname;
+    return hostname === "127.0.0.1" || hostname === "::1" || hostname === "localhost";
+  } catch {
+    return false;
+  }
 }
 
 async function probeExistingLocalGateway(
@@ -2830,6 +2996,17 @@ function parseInteger(value: string): number {
     throw new InvalidArgumentError("expected an integer");
   }
   return Number.parseInt(value, 10);
+}
+
+function parseLocalPort(value: string): number {
+  if (!/^\d+$/.test(value)) {
+    throw new InvalidArgumentError("expected an unprivileged port between 1024 and 65535");
+  }
+  const port = parseInteger(value);
+  if (port < 1024 || port > 65_535) {
+    throw new InvalidArgumentError("expected an unprivileged port between 1024 and 65535");
+  }
+  return port;
 }
 
 function isPaidHardware(hardware: string): boolean {

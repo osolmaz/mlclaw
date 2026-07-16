@@ -4,6 +4,7 @@ import { normalizeBucketPrefix } from "../hf-state-sync/paths.js";
 import { resolveBranding, type RuntimeBranding } from "./branding.js";
 import { DEFAULT_MODEL, normalizeModelChoices, parseModelChoicesEnv, type ModelChoice } from "./model-choices.js";
 import { loadOperatorBrokers, type OperatorBrokerConfig } from "./operator-brokers.js";
+import { deriveLocalAccessToken } from "./local-access.js";
 
 export type RuntimeMode = "template" | "app";
 
@@ -23,6 +24,7 @@ export type SpaceRuntimeConfig = {
   credentialKey: string;
   credentialKeyGenerated: boolean;
   cookieSecure: boolean;
+  sessionCookieName: string;
   spaceId: string | undefined;
   canonicalSpaceId: string;
   canonicalCreatorUserId: string | undefined;
@@ -30,6 +32,8 @@ export type SpaceRuntimeConfig = {
   allowedUsers: string[];
   adminUsers: string[];
   allowAnySignedIn: boolean;
+  localAccessUser: string | undefined;
+  localAccessToken: string | undefined;
   mode: RuntimeMode;
   hfToken: string | undefined;
   routerToken: string | undefined;
@@ -82,11 +86,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpaceRuntimeCo
     spaceCreatorUserId,
   });
   const owner = ownerFromSpaceId(spaceId);
+  const stateBucket = trim(env.OPENCLAW_HF_STATE_BUCKET);
+  const gatewayLocation = trim(env.MLCLAW_GATEWAY_LOCATION);
+  const localAccessUser =
+    gatewayLocation === "local" ? (trim(env.MLCLAW_LOCAL_ACCESS_USER) ?? ownerFromRepoId(stateBucket)) : undefined;
   const configuredAllowedUsers = splitUsers(env.MLCLAW_ALLOWED_USERS ?? env.ALLOWED_USERS);
   const configuredAdmins = splitUsers(env.MLCLAW_ADMINS);
-  const resolvedAdmins = uniqueUsers(
-    configuredAdmins.length > 0 ? configuredAdmins : owner ? [owner] : configuredAllowedUsers.slice(0, 1),
-  );
+  const resolvedAdmins = uniqueUsers([
+    ...(configuredAdmins.length > 0 ? configuredAdmins : owner ? [owner] : configuredAllowedUsers.slice(0, 1)),
+    ...(localAccessUser ? [localAccessUser] : []),
+  ]);
   const allowedUsers = uniqueUsers([...configuredAllowedUsers, ...resolvedAdmins, ...(owner ? [owner] : [])]);
   const publicUrl = publicUrlFromEnv(env, port);
   const sessionSecret = trim(env.MLCLAW_SESSION_SECRET ?? env.SESSION_SECRET) ?? randomBytes(48).toString("base64url");
@@ -131,6 +140,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpaceRuntimeCo
     credentialKey,
     credentialKeyGenerated: !configuredCredentialKey,
     cookieSecure: env.MLCLAW_COOKIE_SECURE === "0" ? false : !publicUrl.startsWith("http://"),
+    sessionCookieName: gatewayLocation === "local" ? localSessionCookieName(publicUrl) : SESSION_COOKIE_PREFIX,
     spaceId,
     canonicalSpaceId,
     canonicalCreatorUserId,
@@ -138,6 +148,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpaceRuntimeCo
     allowedUsers,
     adminUsers: resolvedAdmins,
     allowAnySignedIn: env.MLCLAW_ALLOW_ANY_SIGNED_IN === "1" || env.MLCLAW_ALLOW_ANY_SIGNED_IN === "true",
+    localAccessUser,
+    localAccessToken:
+      gatewayLocation === "local" && localAccessUser ? deriveLocalAccessToken(sessionSecret) : undefined,
     mode,
     hfToken:
       readOptionalSecret(trim(env.MLCLAW_TRUSTED_HF_TOKEN_FILE)) ?? trim(env.HF_TOKEN ?? env.HUGGINGFACE_HUB_TOKEN),
@@ -166,16 +179,24 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpaceRuntimeCo
     model,
     modelChoices: runtimeSettings.modelChoices ?? parseModelChoicesEnv(env.MLCLAW_MODEL_CHOICES, model),
     routerModelsUrl: trim(env.MLCLAW_ROUTER_MODELS_URL) ?? "https://router.huggingface.co/v1/models",
-    stateBucket: trim(env.OPENCLAW_HF_STATE_BUCKET),
+    stateBucket,
     stateMountDir,
     statePrefix,
-    gatewayLocation: trim(env.MLCLAW_GATEWAY_LOCATION),
+    gatewayLocation,
     runtimeImage: trim(env.MLCLAW_RUNTIME_IMAGE),
     runtimeId: trim(env.MLCLAW_RUNTIME_ID),
     templateRev: trim(env.MLCLAW_TEMPLATE_REV),
     assetsDir: trim(env.MLCLAW_ASSETS_DIR) ?? "/app/assets",
     branding: resolveBranding(env, agentName),
   };
+}
+
+const SESSION_COOKIE_PREFIX = "mlclaw_session";
+
+function localSessionCookieName(publicUrl: string): string {
+  const url = new URL(publicUrl);
+  const port = url.port || (url.protocol === "https:" ? "443" : "80");
+  return `${SESSION_COOKIE_PREFIX}_${port}`;
 }
 
 function readOptionalSecret(file: string | undefined): string | undefined {
@@ -222,6 +243,21 @@ function resolveMode(params: {
 }
 
 function publicUrlFromEnv(env: NodeJS.ProcessEnv, port: number): string {
+  const explicit = trim(env.MLCLAW_PUBLIC_URL);
+  if (explicit) {
+    const url = new URL(explicit);
+    if (
+      (url.protocol !== "http:" && url.protocol !== "https:") ||
+      url.username ||
+      url.password ||
+      url.pathname !== "/" ||
+      url.search ||
+      url.hash
+    ) {
+      throw new Error("MLCLAW_PUBLIC_URL must be one HTTP origin without credentials, path, query, or fragment");
+    }
+    return url.origin;
+  }
   const host = trim(env.SPACE_HOST);
   if (host) {
     return host.startsWith("http") ? host.replace(/\/+$/, "") : `https://${host.replace(/\/+$/, "")}`;
@@ -230,7 +266,11 @@ function publicUrlFromEnv(env: NodeJS.ProcessEnv, port: number): string {
 }
 
 function ownerFromSpaceId(spaceId?: string): string | undefined {
-  const owner = spaceId?.split("/")[0]?.trim();
+  return ownerFromRepoId(spaceId);
+}
+
+function ownerFromRepoId(repoId?: string): string | undefined {
+  const owner = repoId?.split("/")[0]?.trim();
   return owner || undefined;
 }
 

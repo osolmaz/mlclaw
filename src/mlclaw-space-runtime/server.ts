@@ -87,7 +87,7 @@ export class SpaceRuntimeServer {
     server.on("upgrade", (req, socket, head) => {
       const netSocket = socket as net.Socket;
       try {
-        const session = readSession(req.headers.cookie, this.config.sessionSecret);
+        const session = readSession(req.headers.cookie, this.config.sessionSecret, this.config.sessionCookieName);
         if (!session || !this.isAllowed(session.username)) {
           rejectWebSocket(netSocket);
           return;
@@ -167,7 +167,7 @@ export class SpaceRuntimeServer {
       }
     }
 
-    const session = readSession(req.headers.cookie, this.config.sessionSecret);
+    const session = readSession(req.headers.cookie, this.config.sessionSecret, this.config.sessionCookieName);
     if (!session) {
       this.sendUnauthenticated(req, res, url);
       return;
@@ -284,6 +284,10 @@ export class SpaceRuntimeServer {
 
   private sendUnauthenticated(req: http.IncomingMessage, res: http.ServerResponse, url: URL): void {
     const next = normalizeNext(`${url.pathname}${url.search}`);
+    if (this.config.gatewayLocation === "local" && isBrowserNavigation(req)) {
+      this.sendRedirect(res, "/mlclaw/local-login");
+      return;
+    }
     if (url.pathname === "/" && (req.method === "GET" || req.method === "HEAD")) {
       this.sendHtml(res, loginPage(this.config, undefined, next));
       return;

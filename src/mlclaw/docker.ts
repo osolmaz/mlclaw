@@ -40,6 +40,9 @@ export type ContainerRunParams = {
   volumeName: string;
   volumeMountPath: string;
   liveDir: string;
+  hostAddress: string;
+  hostPort: number;
+  containerPort: number;
   context?: string;
 };
 
@@ -122,6 +125,8 @@ export class CliDockerRunner implements ContainerRunner {
         params.envFile,
         "-e",
         `OPENCLAW_LIVE_DIR=${params.liveDir}`,
+        "-p",
+        `${params.hostAddress}:${params.hostPort}:${params.containerPort}`,
         "-v",
         `${params.volumeName}:${params.volumeMountPath}`,
         params.image,
@@ -251,6 +256,8 @@ export class CliPodmanRunner implements ContainerRunner {
         params.envFile,
         "-e",
         `OPENCLAW_LIVE_DIR=${params.liveDir}`,
+        "-p",
+        `${params.hostAddress}:${params.hostPort}:${params.containerPort}`,
         "-v",
         `${params.volumeName}:${params.volumeMountPath}`,
         params.image,

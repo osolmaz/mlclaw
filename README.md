@@ -161,6 +161,13 @@ npx mlclaw@latest bootstrap --gateway local --container-runtime docker
 npx mlclaw@latest bootstrap --gateway local --container-runtime podman
 ```
 
+The local control plane is published only on loopback. The default URL is
+`http://127.0.0.1:7860`; choose another unprivileged port with `--local-port`
+when needed. On a remote host, use the SSH forwarding command printed by the
+CLI, then open the same loopback URL in your local browser. The CLI prints a
+private fragment-based access link that is exchanged for an HTTP-only browser
+session; rerun `mlclaw gateway status <agent>` to retrieve it.
+
 Docker Desktop, OrbStack, Colima, Rancher Desktop, and other Docker-compatible
 engines are used through Docker contexts. On Windows, Podman machine
 connections are supported through the Podman CLI. Local mode avoids Hugging

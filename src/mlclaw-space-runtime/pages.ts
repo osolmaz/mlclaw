@@ -1,7 +1,9 @@
 import type { SpaceRuntimeConfig } from "./config.js";
 
 export function templatePage(config: SpaceRuntimeConfig): string {
-  return page("ML Claw", `
+  return page(
+    "ML Claw",
+    `
     <main>
       <img src="/assets/mlclaw.svg" alt="ML Claw" class="logo">
       <h1>ML Claw</h1>
@@ -21,51 +23,112 @@ export function templatePage(config: SpaceRuntimeConfig): string {
       <p class="muted">Manual duplication is for development or advanced setup only.</p>
       <p class="muted">Source Space: ${escapeHtml(config.spaceId ?? config.canonicalSpaceId)}</p>
     </main>
-  `);
+  `,
+  );
 }
 
 export function loginPage(config: SpaceRuntimeConfig, message?: string, next = "/"): string {
   const oauthReady = Boolean(config.oauthClientId && config.oauthClientSecret);
-  const loginPath = next === "/"
-    ? "/oauth/login"
-    : `/oauth/login?next=${encodeURIComponent(next)}`;
+  const loginPath = next === "/" ? "/oauth/login" : `/oauth/login?next=${encodeURIComponent(next)}`;
   const loginHref = new URL(loginPath, config.publicUrl).toString();
-  return page(`${config.branding.name} Login`, `
+  return page(
+    `${config.branding.name} Login`,
+    `
     <main>
       <img src="/assets/hf-logo.svg" alt="Hugging Face" class="logo">
       <h1>${escapeHtml(config.branding.name)}</h1>
       ${message ? `<p class="notice">${escapeHtml(message)}</p>` : ""}
-      ${oauthReady
-        ? `<a class="button" href="${escapeHtml(loginHref)}" target="_blank" rel="noopener">Sign in with Hugging Face</a>`
-        : `<p class="notice">Hugging Face OAuth is not configured for this Space. Update the Space README metadata to include <code>hf_oauth: true</code>, then rebuild.</p>`}
+      ${
+        oauthReady
+          ? `<a class="button" href="${escapeHtml(loginHref)}" target="_blank" rel="noopener">Sign in with Hugging Face</a>`
+          : `<p class="notice">Hugging Face OAuth is not configured for this Space. Update the Space README metadata to include <code>hf_oauth: true</code>, then rebuild.</p>`
+      }
     </main>
-  `);
+  `,
+  );
+}
+
+export function localLoginPage(config: SpaceRuntimeConfig): string {
+  return page(
+    `${config.branding.name} Local Access`,
+    `
+    <main>
+      <img src="/assets/mlclaw.svg" alt="ML Claw" class="logo">
+      <h1>${escapeHtml(config.branding.name)}</h1>
+      <p class="muted">Use the private access link printed by the ML Claw CLI.</p>
+      <form id="local-login-form">
+        <label for="local-access-token">Local access code</label>
+        <input id="local-access-token" name="token" type="password" autocomplete="off" required>
+        <button class="button" type="submit">Open gateway</button>
+      </form>
+      <p id="local-login-status" class="notice" role="status"></p>
+    </main>
+    <script>
+      const form = document.getElementById("local-login-form");
+      const input = document.getElementById("local-access-token");
+      const status = document.getElementById("local-login-status");
+      const submit = async () => {
+        status.textContent = "Signing in...";
+        const response = await fetch("/mlclaw/api/local-session", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ token: input.value }),
+        });
+        input.value = "";
+        if (response.ok) {
+          location.replace("/");
+          return;
+        }
+        status.textContent = "The local access link is invalid. Run mlclaw gateway status again.";
+      };
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        submit().catch(() => { status.textContent = "The local gateway could not be reached."; });
+      });
+      const token = location.hash.slice(1);
+      if (token) {
+        history.replaceState(null, "", location.pathname);
+        input.value = token;
+        submit().catch(() => { status.textContent = "The local gateway could not be reached."; });
+      }
+    </script>
+  `,
+  );
 }
 
 export function unauthorizedPage(username: string): string {
-  return page("ML Claw Access", `
+  return page(
+    "ML Claw Access",
+    `
     <main>
       <h1>Access not allowed</h1>
       <p>The signed-in Hugging Face account <strong>${escapeHtml(username)}</strong> is not allowed to operate this Space.</p>
       <p class="muted">Set <code>MLCLAW_ALLOWED_USERS</code> to a comma-separated list of usernames, then restart the Space.</p>
       <a class="button secondary" href="/mlclaw/logout">Sign out</a>
     </main>
-  `);
+  `,
+  );
 }
 
 export function adminRequiredPage(username: string): string {
-  return page("ML Claw Admin", `
+  return page(
+    "ML Claw Admin",
+    `
     <main>
       <h1>Admin required</h1>
       <p>The signed-in Hugging Face account <strong>${escapeHtml(username)}</strong> can use this Space, but cannot change credentials.</p>
       <p class="muted">Set <code>MLCLAW_ADMINS</code> to a comma-separated list of admin usernames.</p>
       <p><a href="/">Back to gateway</a></p>
     </main>
-  `);
+  `,
+  );
 }
 
 export function openAiPage(configured: boolean, persistent: boolean): string {
-  return page("OpenAI Credentials", `
+  return page(
+    "OpenAI Credentials",
+    `
     <main>
       <h1>OpenAI account</h1>
       <p class="muted">Store an OpenAI API key as a Hugging Face Space Secret. The key is never sent to the browser after submission.</p>
@@ -78,7 +141,8 @@ export function openAiPage(configured: boolean, persistent: boolean): string {
       <p class="${persistent ? "ok" : "notice"}">Space Secret: ${persistent ? "updated" : "not confirmed"}</p>
       <p><a href="/">Back to gateway</a></p>
     </main>
-  `);
+  `,
+  );
 }
 
 export function statusJson(params: {
@@ -86,27 +150,31 @@ export function statusJson(params: {
   openclawRunning: boolean;
   openAiConfigured: boolean;
 }): string {
-  return JSON.stringify({
-    ok: true,
-    mode: params.config.mode,
-    agent: params.config.agentName ?? null,
-    space: params.config.spaceId ?? null,
-    stateBucket: params.config.stateBucket ?? null,
-    runtimeImage: params.config.runtimeImage ?? null,
-    openclaw: {
-      running: params.openclawRunning,
-      host: params.config.openclawHost,
-      port: params.config.openclawPort,
+  return JSON.stringify(
+    {
+      ok: true,
+      mode: params.config.mode,
+      agent: params.config.agentName ?? null,
+      space: params.config.spaceId ?? null,
+      stateBucket: params.config.stateBucket ?? null,
+      runtimeImage: params.config.runtimeImage ?? null,
+      openclaw: {
+        running: params.openclawRunning,
+        host: params.config.openclawHost,
+        port: params.config.openclawPort,
+      },
+      auth: {
+        hfOAuthConfigured: Boolean(params.config.oauthClientId && params.config.oauthClientSecret),
+        allowedUsers: params.config.allowedUsers,
+        allowAnySignedIn: params.config.allowAnySignedIn,
+      },
+      openai: {
+        configured: params.openAiConfigured,
+      },
     },
-    auth: {
-      hfOAuthConfigured: Boolean(params.config.oauthClientId && params.config.oauthClientSecret),
-      allowedUsers: params.config.allowedUsers,
-      allowAnySignedIn: params.config.allowAnySignedIn,
-    },
-    openai: {
-      configured: params.openAiConfigured,
-    },
-  }, null, 2);
+    null,
+    2,
+  );
 }
 
 function page(title: string, body: string): string {
@@ -153,9 +221,5 @@ function page(title: string, body: string): string {
 }
 
 function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll("\"", "&quot;");
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 }

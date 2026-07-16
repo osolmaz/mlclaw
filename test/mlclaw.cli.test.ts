@@ -4,7 +4,13 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_MODEL, LOCAL_LIVE_DIR, LOCAL_VOLUME_MOUNT_PATH, main } from "../src/mlclaw/cli.js";
 import { DEFAULT_RUNTIME_IMAGE } from "../src/mlclaw/runtime-image.js";
-import { readManifest, readSecretEnv, writeManifest, writeSecretEnv, type DeploymentManifest } from "../src/mlclaw/local-config.js";
+import {
+  readManifest,
+  readSecretEnv,
+  writeManifest,
+  writeSecretEnv,
+  type DeploymentManifest,
+} from "../src/mlclaw/local-config.js";
 import { HubApiError, type HubApi, type SpaceRuntime, type SpaceVolume } from "../src/mlclaw/hub-api.js";
 import type { ContainerEngine, ContainerInspect, ContainerRunner, ContainerRunParams } from "../src/mlclaw/docker.js";
 import type { BucketEntry } from "../src/hf-bucket-client/client.js";
@@ -24,23 +30,25 @@ function createPrompt(answers: PromptAnswer[], interactive = true) {
       },
       text: async () => String(answers.shift() ?? ""),
       password: async () => String(answers.shift() ?? ""),
-      confirm: async () => answers.length === 0 ? true : Boolean(answers.shift()),
+      confirm: async () => (answers.length === 0 ? true : Boolean(answers.shift())),
       select: async () => String(answers.shift() ?? "cancel"),
       cancel: () => undefined,
     },
   };
 }
 
-function createFakeHub(opts: {
-  acknowledgeHandoff?: boolean;
-  ackCompletedAt?: string;
-  downloadFileError?: Error;
-  getSpaceRuntimeError?: Error;
-  spaceRuntime?: SpaceRuntime;
-  existingBuckets?: string[];
-  existingSpaces?: string[];
-  createDockerSpaceError?: Error;
-} = {}) {
+function createFakeHub(
+  opts: {
+    acknowledgeHandoff?: boolean;
+    ackCompletedAt?: string;
+    downloadFileError?: Error;
+    getSpaceRuntimeError?: Error;
+    spaceRuntime?: SpaceRuntime;
+    existingBuckets?: string[];
+    existingSpaces?: string[];
+    createDockerSpaceError?: Error;
+  } = {},
+) {
   const calls: Array<{ name: string; args: unknown[] }> = [];
   const variables = new Map<string, { value?: string }>();
   const secrets = new Map<string, { key: string }>();
@@ -57,15 +65,18 @@ function createFakeHub(opts: {
         if (file.path.endsWith("/runtime/handoff-request.json") && opts.acknowledgeHandoff !== false) {
           const prefix = file.path.slice(0, -"/runtime/handoff-request.json".length);
           const request = JSON.parse(text) as { requestId: string; agent: string; runtimeId: string };
-          bucketObjects.set(`${prefix}/runtime/handoff-ack.json`, JSON.stringify({
-            schemaVersion: 1,
-            requestId: request.requestId,
-            agent: request.agent,
-            runtimeId: request.runtimeId,
-            gatewayLocation: request.runtimeId.startsWith("local-") ? "local" : "space",
-            completedAt: opts.ackCompletedAt ?? "2026-06-16T00:00:01.000Z",
-            lastSnapshotId: `${prefix}/snapshots/state-test.tar.zst`,
-          }));
+          bucketObjects.set(
+            `${prefix}/runtime/handoff-ack.json`,
+            JSON.stringify({
+              schemaVersion: 1,
+              requestId: request.requestId,
+              agent: request.agent,
+              runtimeId: request.runtimeId,
+              gatewayLocation: request.runtimeId.startsWith("local-") ? "local" : "space",
+              completedAt: opts.ackCompletedAt ?? "2026-06-16T00:00:01.000Z",
+              lastSnapshotId: `${prefix}/snapshots/state-test.tar.zst`,
+            }),
+          );
         }
       }
     },
@@ -85,7 +96,11 @@ function createFakeHub(opts: {
     },
     async listFiles(prefix = "") {
       calls.push({ name: "bucket.listFiles", args: [prefix] });
-      return [...bucketObjects.keys()].map((path) => ({ path, size: 0, type: "file" as const })) satisfies BucketEntry[];
+      return [...bucketObjects.keys()].map((path) => ({
+        path,
+        size: 0,
+        type: "file" as const,
+      })) satisfies BucketEntry[];
     },
     async assertBucketAccessible() {
       calls.push({ name: "bucket.assertBucketAccessible", args: [] });
@@ -150,16 +165,19 @@ function createFakeHub(opts: {
       const agent = variables.get("OPENCLAW_AGENT_NAME")?.value ?? "research";
       const bucket = variables.get("OPENCLAW_HF_STATE_BUCKET")?.value ?? "alice/research-data";
       const prefix = variables.get("OPENCLAW_HF_STATE_PREFIX")?.value ?? "openclaw-state";
-      bucketObjects.set(`${prefix}/runtime/status.json`, JSON.stringify({
-        schemaVersion: 1,
-        agent,
-        runtimeId: variables.get("MLCLAW_RUNTIME_ID")?.value ?? `space-${agent}`,
-        gatewayLocation: variables.get("MLCLAW_GATEWAY_LOCATION")?.value ?? "space",
-        runtimeImage: variables.get("MLCLAW_RUNTIME_IMAGE")?.value ?? DEFAULT_RUNTIME_IMAGE,
-        startedAt: "2026-06-16T00:00:00.000Z",
-        lastHeartbeatAt: "2026-06-16T00:00:01.000Z",
-        lastSnapshotId: `${bucket}/snapshot.tar.zst`,
-      }));
+      bucketObjects.set(
+        `${prefix}/runtime/status.json`,
+        JSON.stringify({
+          schemaVersion: 1,
+          agent,
+          runtimeId: variables.get("MLCLAW_RUNTIME_ID")?.value ?? `space-${agent}`,
+          gatewayLocation: variables.get("MLCLAW_GATEWAY_LOCATION")?.value ?? "space",
+          runtimeImage: variables.get("MLCLAW_RUNTIME_IMAGE")?.value ?? DEFAULT_RUNTIME_IMAGE,
+          startedAt: "2026-06-16T00:00:00.000Z",
+          lastHeartbeatAt: "2026-06-16T00:00:01.000Z",
+          lastSnapshotId: `${bucket}/snapshot.tar.zst`,
+        }),
+      );
     },
     async pauseSpace(...args: unknown[]) {
       calls.push({ name: "pauseSpace", args });
@@ -170,7 +188,15 @@ function createFakeHub(opts: {
       if (opts.getSpaceRuntimeError) {
         throw opts.getSpaceRuntimeError;
       }
-      return opts.spaceRuntime ?? { stage: "RUNNING", hardware: "cpu-upgrade", requested_hardware: "cpu-upgrade", sleep_time: -1, volumes };
+      return (
+        opts.spaceRuntime ?? {
+          stage: "RUNNING",
+          hardware: "cpu-upgrade",
+          requested_hardware: "cpu-upgrade",
+          sleep_time: -1,
+          volumes,
+        }
+      );
     },
     async setSpaceVolumes(repoId: string, nextVolumes: typeof volumes) {
       calls.push({ name: "setSpaceVolumes", args: [repoId, nextVolumes] });
@@ -189,7 +215,12 @@ function createFakeHub(opts: {
     },
     async setSpaceSleepTime(...args: unknown[]) {
       calls.push({ name: "setSpaceSleepTime", args });
-      return { stage: "RUNNING", hardware: "cpu-upgrade", requested_hardware: "cpu-upgrade", sleep_time: args[1] as number };
+      return {
+        stage: "RUNNING",
+        hardware: "cpu-upgrade",
+        requested_hardware: "cpu-upgrade",
+        sleep_time: args[1] as number,
+      };
     },
   };
   return hub as typeof hub & HubApi;
@@ -197,19 +228,22 @@ function createFakeHub(opts: {
 
 function seedValidStateSnapshot(hub: ReturnType<typeof createFakeHub>, prefix = "openclaw-state") {
   const snapshotPath = `${prefix}/snapshots/state-adopted.tar.zst`;
-  hub.bucketObjects.set(`${prefix}/manifest.json`, JSON.stringify({
-    version: 1,
-    current: {
-      id: "state-adopted",
-      path: snapshotPath,
-      createdAt: "2026-06-16T00:00:00.000Z",
-      sha256: "a".repeat(64),
-      sizeBytes: 12,
-      runId: "run-adopted",
-      bootTime: "2026-06-16T00:00:00.000Z",
-    },
-    previous: [],
-  }) + "\n");
+  hub.bucketObjects.set(
+    `${prefix}/manifest.json`,
+    JSON.stringify({
+      version: 1,
+      current: {
+        id: "state-adopted",
+        path: snapshotPath,
+        createdAt: "2026-06-16T00:00:00.000Z",
+        sha256: "a".repeat(64),
+        sizeBytes: 12,
+        runId: "run-adopted",
+        bootTime: "2026-06-16T00:00:00.000Z",
+      },
+      previous: [],
+    }) + "\n",
+  );
   hub.bucketObjects.set(snapshotPath, "snapshot-bytes");
 }
 
@@ -234,6 +268,7 @@ async function createRuntime(hub: HubApi, prompt: ReturnType<typeof createPrompt
     podmanRunner: podman,
     configRoot,
     now: () => new Date("2026-06-16T00:00:00.000Z"),
+    sleep: async () => undefined,
     prompt,
   };
 }
@@ -243,21 +278,33 @@ function createFakeDocker(engine: ContainerEngine = "docker"): ContainerRunner &
   currentContextValue: string;
   contexts: Map<string, string>;
   inspectValue: ContainerInspect | null;
+  runErrors: Error[];
 } {
   return {
     engine,
     calls: [],
     currentContextValue: engine === "docker" ? "desktop-linux" : "local",
-    contexts: new Map(engine === "docker"
-      ? [["desktop-linux", "unix:///docker-desktop.sock"], ["colima", "unix:///colima.sock"]]
-      : [["local", "unix:///run/user/1000/podman/podman.sock"]]),
+    contexts: new Map(
+      engine === "docker"
+        ? [
+            ["desktop-linux", "unix:///docker-desktop.sock"],
+            ["colima", "unix:///colima.sock"],
+          ]
+        : [["local", "unix:///run/user/1000/podman/podman.sock"]],
+    ),
     inspectValue: null,
+    runErrors: [],
     async probe(context?: string) {
       const selected = context ?? this.currentContextValue;
       const endpoint = this.contexts.get(selected);
       return endpoint
         ? { engine: this.engine, status: "ready" as const, context: selected, endpoint, detail: `${this.engine} ready` }
-        : { engine: this.engine, status: "unavailable" as const, context: selected, detail: `${this.engine} unavailable` };
+        : {
+            engine: this.engine,
+            status: "unavailable" as const,
+            context: selected,
+            detail: `${this.engine} unavailable`,
+          };
     },
     async currentContext() {
       return this.currentContextValue;
@@ -273,6 +320,11 @@ function createFakeDocker(engine: ContainerEngine = "docker"): ContainerRunner &
     },
     async run(params: ContainerRunParams) {
       this.calls.push({ name: "run", args: [params] });
+      const error = this.runErrors.shift();
+      if (error) {
+        this.inspectValue = { exists: true, running: false, status: "created", image: params.image };
+        throw error;
+      }
       this.inspectValue = { exists: true, running: true, status: "running", image: params.image };
     },
     async start(...args: unknown[]) {
@@ -310,16 +362,29 @@ describe("mlclaw CLI", () => {
     const { prompt, notes } = createPrompt([]);
 
     const runtime = await createRuntime(hub, prompt);
-    const code = await main(["--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--no-pull"], runtime);
+    const code = await main(
+      ["--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--no-pull"],
+      runtime,
+    );
 
     expect(code).toBe(0);
-    expect(notes).toEqual([
+    expect(notes[0]).toEqual(
       expect.objectContaining({
         title: "Bootstrap plan",
         message: expect.stringContaining("Bucket: alice/research-data (will be created as private)"),
       }),
-    ]);
+    );
     expect(notes[0]?.message).toContain("Model: huggingface/zai-org/GLM-5.2:fireworks-ai");
+    expect(notes[0]?.message).toContain("Gateway URL: http://127.0.0.1:7860");
+    expect(notes).toContainEqual(
+      expect.objectContaining({
+        title: "HERE IS YOUR ML CLAW",
+        message: expect.stringContaining("http://127.0.0.1:7860"),
+      }),
+    );
+    expect(notes.find((item) => item.title === "HERE IS YOUR ML CLAW")?.message).toMatch(
+      /\/mlclaw\/local-login#[A-Za-z0-9_-]+/,
+    );
     expect(hub.calls).toContainEqual({ name: "createBucket", args: ["alice/research-data", true] });
     expect(hub.calls.some((call) => call.name === "createDockerSpace")).toBe(false);
     expect(runtime.dockerRunner.calls).toContainEqual({
@@ -330,10 +395,12 @@ describe("mlclaw CLI", () => {
           image: DEFAULT_RUNTIME_IMAGE,
           volumeMountPath: LOCAL_VOLUME_MOUNT_PATH,
           liveDir: LOCAL_LIVE_DIR,
+          hostAddress: "127.0.0.1",
+          hostPort: 7860,
+          containerPort: 7860,
         }),
       ],
     });
-    expect(runtime.dockerRunner.calls.find((call) => call.name === "run")?.args[0]).not.toHaveProperty("port");
     const manifest = await readManifest(runtime.configRoot, "research");
     expect(manifest.localRuntimeId).toMatch(/^local-research-[a-f0-9]{16}$/);
     await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
@@ -341,6 +408,95 @@ describe("mlclaw CLI", () => {
       MLCLAW_RUNTIME_ID: manifest.localRuntimeId,
       OPENCLAW_MODEL: DEFAULT_MODEL,
     });
+  });
+
+  it("publishes a requested local gateway port on loopback", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([]);
+    const runtime = await createRuntime(hub, prompt);
+
+    const code = await main(
+      [
+        "--gateway",
+        "local",
+        "--name",
+        "research",
+        "--local-port",
+        "17860",
+        "--gateway-token",
+        "gateway-token",
+        "--no-pull",
+      ],
+      runtime,
+    );
+
+    expect(code).toBe(0);
+    expect(runtime.dockerRunner.calls.find((call) => call.name === "run")).toEqual({
+      name: "run",
+      args: [
+        expect.objectContaining({
+          hostAddress: "127.0.0.1",
+          hostPort: 17860,
+          containerPort: 7860,
+        }),
+      ],
+    });
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({ localPort: 17860 });
+    await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
+      MLCLAW_PUBLIC_URL: "http://127.0.0.1:17860",
+      MLCLAW_LOCAL_ACCESS_USER: "alice",
+      MLCLAW_ALLOWED_USERS: "alice",
+      MLCLAW_ADMINS: "alice",
+    });
+  });
+
+  it("restores a running local gateway when a port change fails", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([]);
+    const stderr: string[] = [];
+    const runtime = await createRuntime(hub, prompt, stderr);
+
+    await expect(
+      main(["--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--no-pull"], runtime),
+    ).resolves.toBe(0);
+    runtime.dockerRunner.calls.length = 0;
+    runtime.dockerRunner.runErrors.push(new Error("port is already allocated"));
+
+    await expect(main(["gateway", "start", "research", "--local-port", "17860", "--no-pull"], runtime)).resolves.toBe(
+      1,
+    );
+
+    expect(stderr.join("\n")).toContain("port is already allocated");
+    expect(runtime.dockerRunner.inspectValue?.running).toBe(true);
+    expect(
+      runtime.dockerRunner.calls
+        .filter((call) => call.name === "run")
+        .map((call) => (call.args[0] as ContainerRunParams).hostPort),
+    ).toEqual([17860, 7860]);
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({ localPort: 7860 });
+    await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
+      MLCLAW_PUBLIC_URL: "http://127.0.0.1:7860",
+    });
+  });
+
+  it("fails bootstrap when the local container exits during startup", async () => {
+    const hub = createFakeHub();
+    const { prompt } = createPrompt([]);
+    const stderr: string[] = [];
+    const runtime = await createRuntime(hub, prompt, stderr);
+    runtime.dockerRunner.run = async (params) => {
+      runtime.dockerRunner.calls.push({ name: "run", args: [params] });
+      runtime.dockerRunner.inspectValue = { exists: true, running: false, status: "exited" };
+    };
+
+    const code = await main(
+      ["--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--no-pull"],
+      runtime,
+    );
+
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain("local gateway exited during startup");
+    expect(stderr.join("\n")).toContain("mlclaw gateway logs research");
   });
 
   it("pulls the runtime image by default for a new local gateway", async () => {
@@ -363,7 +519,10 @@ describe("mlclaw CLI", () => {
     const runtime = await createRuntime(hub, prompt);
     runtime.dockerRunner.currentContextValue = "colima";
 
-    const code = await main(["--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--no-pull"], runtime);
+    const code = await main(
+      ["--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--no-pull"],
+      runtime,
+    );
 
     expect(code).toBe(0);
     await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
@@ -388,17 +547,20 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([]);
     const runtime = await createRuntime(hub, prompt);
 
-    const code = await main([
-      "--gateway",
-      "local",
-      "--name",
-      "research",
-      "--docker-context",
-      "colima",
-      "--gateway-token",
-      "gateway-token",
-      "--no-pull",
-    ], runtime);
+    const code = await main(
+      [
+        "--gateway",
+        "local",
+        "--name",
+        "research",
+        "--docker-context",
+        "colima",
+        "--gateway-token",
+        "gateway-token",
+        "--no-pull",
+      ],
+      runtime,
+    );
 
     expect(code).toBe(0);
     await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
@@ -421,7 +583,7 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([]);
     const stdout: string[] = [];
     const runtime = {
-      ...await createRuntime(hub, prompt),
+      ...(await createRuntime(hub, prompt)),
       stdout: { log: (message: unknown) => stdout.push(String(message)) },
     };
     runtime.dockerRunner.currentContextValue = "colima";
@@ -446,7 +608,9 @@ describe("mlclaw CLI", () => {
 
     await expect(main(["gateway", "status", "research"], runtime)).resolves.toBe(0);
 
-    expect(stdout.join("\n")).toContain("Using Docker context desktop-linux from the deployment manifest. Current shell context is colima.");
+    expect(stdout.join("\n")).toContain(
+      "Using Docker context desktop-linux from the deployment manifest. Current shell context is colima.",
+    );
     expect(stdout.join("\n")).toContain("Container: Docker context desktop-linux");
     expect(runtime.dockerRunner.calls).toContainEqual({
       name: "inspect",
@@ -488,7 +652,7 @@ describe("mlclaw CLI", () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt([], false);
     const stderr: string[] = [];
-    const runtime = { ...await createRuntime(hub, prompt, stderr), env: {} };
+    const runtime = { ...(await createRuntime(hub, prompt, stderr)), env: {} };
     await writeManifest(runtime.configRoot, {
       version: 1,
       agent: "research",
@@ -521,17 +685,20 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([]);
     const runtime = await createRuntime(hub, prompt);
 
-    const code = await main([
-      "--gateway",
-      "local",
-      "--name",
-      "research",
-      "--bucket",
-      "alice/research-archive-data",
-      "--gateway-token",
-      "gateway-token",
-      "--no-pull",
-    ], runtime);
+    const code = await main(
+      [
+        "--gateway",
+        "local",
+        "--name",
+        "research",
+        "--bucket",
+        "alice/research-archive-data",
+        "--gateway-token",
+        "gateway-token",
+        "--no-pull",
+      ],
+      runtime,
+    );
 
     expect(code).toBe(0);
     expect(hub.calls).toContainEqual({ name: "createBucket", args: ["alice/research-archive-data", true] });
@@ -563,18 +730,21 @@ describe("mlclaw CLI", () => {
       updatedAt: "2026-06-15T00:00:00.000Z",
     });
 
-    const code = await main([
-      "bootstrap",
-      "--name",
-      "research",
-      "--telegram-token",
-      "telegram-token",
-      "--telegram-user-id",
-      "1234567890",
-      "--gateway-token",
-      "gateway-token",
-      "--no-pull",
-    ], runtime);
+    const code = await main(
+      [
+        "bootstrap",
+        "--name",
+        "research",
+        "--telegram-token",
+        "telegram-token",
+        "--telegram-user-id",
+        "1234567890",
+        "--gateway-token",
+        "gateway-token",
+        "--no-pull",
+      ],
+      runtime,
+    );
 
     expect(code).toBe(0);
     expect(hub.calls).toContainEqual({ name: "createBucket", args: ["alice/archive-data", true] });
@@ -609,20 +779,23 @@ describe("mlclaw CLI", () => {
     };
     await writeManifest(runtime.configRoot, original);
 
-    const code = await main([
-      "bootstrap",
-      "--name",
-      "research",
-      "--bucket",
-      "alice/new-data",
-      "--telegram-token",
-      "telegram-token",
-      "--telegram-user-id",
-      "1234567890",
-      "--gateway-token",
-      "gateway-token",
-      "--no-pull",
-    ], runtime);
+    const code = await main(
+      [
+        "bootstrap",
+        "--name",
+        "research",
+        "--bucket",
+        "alice/new-data",
+        "--telegram-token",
+        "telegram-token",
+        "--telegram-user-id",
+        "1234567890",
+        "--gateway-token",
+        "gateway-token",
+        "--no-pull",
+      ],
+      runtime,
+    );
 
     expect(code).toBe(1);
     expect(stderr.join("\n")).toContain("bootstrap confirmation required. Pass --yes to continue non-interactively.");
@@ -635,26 +808,27 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([]);
     const runtime = await createRuntime(hub, prompt);
 
-    await expect(main(["--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--no-pull"], runtime)).resolves.toBe(0);
+    await expect(
+      main(["--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--no-pull"], runtime),
+    ).resolves.toBe(0);
     const original = await readManifest(runtime.configRoot, "research");
-    hub.bucketObjects.set("openclaw-state/runtime/status.json", JSON.stringify({
-      schemaVersion: 1,
-      agent: "research",
-      runtimeId: original.localRuntimeId,
-      gatewayLocation: "local",
-      runtimeImage: DEFAULT_RUNTIME_IMAGE,
-      startedAt: new Date().toISOString(),
-      lastHeartbeatAt: new Date().toISOString(),
-    }) + "\n");
+    hub.bucketObjects.set(
+      "openclaw-state/runtime/status.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        agent: "research",
+        runtimeId: original.localRuntimeId,
+        gatewayLocation: "local",
+        runtimeImage: DEFAULT_RUNTIME_IMAGE,
+        startedAt: new Date().toISOString(),
+        lastHeartbeatAt: new Date().toISOString(),
+      }) + "\n",
+    );
     runtime.dockerRunner.calls.length = 0;
 
-    await expect(main([
-      "bootstrap",
-      "--name",
-      "research",
-      "--gateway-token",
-      "gateway-token",
-    ], runtime)).resolves.toBe(0);
+    await expect(main(["bootstrap", "--name", "research", "--gateway-token", "gateway-token"], runtime)).resolves.toBe(
+      0,
+    );
 
     const refreshed = await readManifest(runtime.configRoot, "research");
     expect(refreshed.localRuntimeId).toBe(original.localRuntimeId);
@@ -664,6 +838,7 @@ describe("mlclaw CLI", () => {
       "stop",
       "rm",
       "run",
+      "inspect",
     ]);
     await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
       MLCLAW_RUNTIME_ID: original.localRuntimeId,
@@ -672,15 +847,18 @@ describe("mlclaw CLI", () => {
 
   it("does not rewrite local config when bootstrap is blocked by a live Space lease", async () => {
     const hub = createFakeHub();
-    hub.bucketObjects.set("openclaw-state/runtime/status.json", JSON.stringify({
-      schemaVersion: 1,
-      agent: "research",
-      runtimeId: "space-someone-else",
-      gatewayLocation: "space",
-      runtimeImage: "example/runtime:old",
-      startedAt: new Date().toISOString(),
-      lastHeartbeatAt: new Date().toISOString(),
-    }) + "\n");
+    hub.bucketObjects.set(
+      "openclaw-state/runtime/status.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        agent: "research",
+        runtimeId: "space-someone-else",
+        gatewayLocation: "space",
+        runtimeImage: "example/runtime:old",
+        startedAt: new Date().toISOString(),
+        lastHeartbeatAt: new Date().toISOString(),
+      }) + "\n",
+    );
     const { prompt } = createPrompt([]);
     const stderr: string[] = [];
     const runtime = await createRuntime(hub, prompt, stderr);
@@ -699,18 +877,21 @@ describe("mlclaw CLI", () => {
     };
     await writeManifest(runtime.configRoot, original);
 
-    const code = await main([
-      "bootstrap",
-      "--name",
-      "research",
-      "--telegram-token",
-      "telegram-token",
-      "--telegram-user-id",
-      "1234567890",
-      "--gateway-token",
-      "gateway-token",
-      "--no-pull",
-    ], runtime);
+    const code = await main(
+      [
+        "bootstrap",
+        "--name",
+        "research",
+        "--telegram-token",
+        "telegram-token",
+        "--telegram-user-id",
+        "1234567890",
+        "--gateway-token",
+        "gateway-token",
+        "--no-pull",
+      ],
+      runtime,
+    );
 
     expect(code).toBe(1);
     expect(stderr.join("\n")).toContain("another gateway appears active");
@@ -720,31 +901,37 @@ describe("mlclaw CLI", () => {
 
   it("blocks Space bootstrap when a local gateway lease is live", async () => {
     const hub = createFakeHub({ existingBuckets: ["alice/research-data"] });
-    hub.bucketObjects.set("openclaw-state/runtime/status.json", JSON.stringify({
-      schemaVersion: 1,
-      agent: "research",
-      runtimeId: "local-research-existing",
-      gatewayLocation: "local",
-      runtimeImage: "example/runtime:old",
-      startedAt: new Date().toISOString(),
-      lastHeartbeatAt: new Date().toISOString(),
-    }) + "\n");
+    hub.bucketObjects.set(
+      "openclaw-state/runtime/status.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        agent: "research",
+        runtimeId: "local-research-existing",
+        gatewayLocation: "local",
+        runtimeImage: "example/runtime:old",
+        startedAt: new Date().toISOString(),
+        lastHeartbeatAt: new Date().toISOString(),
+      }) + "\n",
+    );
     const { prompt } = createPrompt([]);
     const stderr: string[] = [];
     const runtime = await createRuntime(hub, prompt, stderr);
 
-    const code = await main([
-      "bootstrap",
-      "--gateway",
-      "space",
-      "--telegram-token",
-      "telegram-token",
-      "--telegram-user-id",
-      "1234567890",
-      "--gateway-token",
-      "gateway-token",
-      "--yes",
-    ], runtime);
+    const code = await main(
+      [
+        "bootstrap",
+        "--gateway",
+        "space",
+        "--telegram-token",
+        "telegram-token",
+        "--telegram-user-id",
+        "1234567890",
+        "--gateway-token",
+        "gateway-token",
+        "--yes",
+      ],
+      runtime,
+    );
 
     expect(code).toBe(1);
     expect(stderr.join("\n")).toContain("another gateway appears active");
@@ -756,17 +943,20 @@ describe("mlclaw CLI", () => {
     const hub = createFakeHub();
     const { prompt, notes } = createPrompt([true]);
 
-    const code = await main([
-      "bootstrap",
-      "--gateway",
-      "space",
-      "--name",
-      "research",
-      "--telegram-token",
-      "telegram-token",
-      "--telegram-user-id",
-      "1234567890",
-    ], await createRuntime(hub, prompt));
+    const code = await main(
+      [
+        "bootstrap",
+        "--gateway",
+        "space",
+        "--name",
+        "research",
+        "--telegram-token",
+        "telegram-token",
+        "--telegram-user-id",
+        "1234567890",
+      ],
+      await createRuntime(hub, prompt),
+    );
 
     expect(code).toBe(0);
     expect(notes).toEqual([
@@ -780,7 +970,8 @@ describe("mlclaw CLI", () => {
       }),
       {
         title: "HERE IS YOUR ML CLAW",
-        message: "Your agent is deploying and will be available shortly.\n\nhttps://huggingface.co/spaces/alice/research",
+        message:
+          "Your agent is deploying and will be available shortly.\n\nhttps://huggingface.co/spaces/alice/research",
       },
     ]);
     expect(hub.calls).toContainEqual({ name: "createBucket", args: ["alice/research-data", true] });
@@ -815,17 +1006,20 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([], false);
     const stderr: string[] = [];
 
-    const code = await main([
-      "bootstrap",
-      "--gateway",
-      "space",
-      "--telegram-token",
-      "telegram-token",
-      "--telegram-user-id",
-      "1234567890",
-      "--gateway-token",
-      "gateway-token",
-    ], await createRuntime(hub, prompt, stderr));
+    const code = await main(
+      [
+        "bootstrap",
+        "--gateway",
+        "space",
+        "--telegram-token",
+        "telegram-token",
+        "--telegram-user-id",
+        "1234567890",
+        "--gateway-token",
+        "gateway-token",
+      ],
+      await createRuntime(hub, prompt, stderr),
+    );
 
     expect(code).toBe(1);
     expect(stderr.join("\n")).toContain("paid Hugging Face Space hardware requires explicit consent");
@@ -837,17 +1031,20 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([], false);
     const stderr: string[] = [];
 
-    const code = await main([
-      "bootstrap",
-      "--gateway",
-      "space",
-      "--telegram-token",
-      "telegram-token",
-      "--telegram-user-id",
-      "1234567890",
-      "--hardware",
-      "cpu-basic",
-    ], await createRuntime(hub, prompt, stderr));
+    const code = await main(
+      [
+        "bootstrap",
+        "--gateway",
+        "space",
+        "--telegram-token",
+        "telegram-token",
+        "--telegram-user-id",
+        "1234567890",
+        "--hardware",
+        "cpu-basic",
+      ],
+      await createRuntime(hub, prompt, stderr),
+    );
 
     expect(code).toBe(1);
     expect(stderr.join("\n")).toContain("Telegram requires upgraded paid Space hardware");
@@ -860,7 +1057,7 @@ describe("mlclaw CLI", () => {
     const stderr: string[] = [];
     const output: string[] = [];
     const runtime = {
-      ...await createRuntime(hub, prompt, stderr),
+      ...(await createRuntime(hub, prompt, stderr)),
       stdout: { log: (message: unknown) => output.push(String(message)) },
       prompt: {
         ...prompt,
@@ -868,19 +1065,16 @@ describe("mlclaw CLI", () => {
       },
     };
 
-    const code = await main([
-      "bootstrap",
-      "--name",
-      "research",
-      "--yes",
-    ], runtime);
+    const code = await main(["bootstrap", "--name", "research", "--yes"], runtime);
 
     expect(code).toBe(0);
     expect(stderr.join("\n")).toBe("");
-    expect(notes).toContainEqual(expect.objectContaining({
-      title: "Bootstrap plan",
-      message: expect.stringContaining("Hardware: default Space CPU"),
-    }));
+    expect(notes).toContainEqual(
+      expect.objectContaining({
+        title: "Bootstrap plan",
+        message: expect.stringContaining("Hardware: default Space CPU"),
+      }),
+    );
     expect(output.join("\n")).toContain("Agent URL: https://huggingface.co/spaces/alice/research");
     expect(output.join("\n")).toContain("Space deployment triggered: alice/research");
     expect(notes).toContainEqual({
@@ -891,8 +1085,9 @@ describe("mlclaw CLI", () => {
       name: "createDockerSpace",
       args: ["alice/research", { private: true }],
     });
-    expect(hub.calls.findIndex((call) => call.name === "createDockerSpace"))
-      .toBeLessThan(hub.calls.findIndex((call) => call.name === "createBucket"));
+    expect(hub.calls.findIndex((call) => call.name === "createDockerSpace")).toBeLessThan(
+      hub.calls.findIndex((call) => call.name === "createBucket"),
+    );
     expect(hub.calls.some((call) => call.name === "requestSpaceHardware")).toBe(false);
     expect(hub.calls.some((call) => call.name === "restartSpace")).toBe(false);
     expect(hub.calls).toContainEqual({
@@ -913,17 +1108,26 @@ describe("mlclaw CLI", () => {
     });
     expect(hub.calls).toContainEqual({
       name: "setSpaceVolumes",
-      args: ["alice/research", [
-        { type: "bucket", source: "alice/research-data", mountPath: "/data/mlclaw-state", readOnly: false },
-      ]],
+      args: [
+        "alice/research",
+        [{ type: "bucket", source: "alice/research-data", mountPath: "/data/mlclaw-state", readOnly: false }],
+      ],
     });
-    expect(hub.calls.some((call) =>
-      call.name === "addSpaceSecret" && ["HF_TOKEN", "HUGGINGFACE_HUB_TOKEN"].includes(String(call.args[1]))
-    )).toBe(false);
-    expect(hub.calls).toContainEqual({ name: "addSpaceSecret", args: ["alice/research", "MLCLAW_ROUTER_TOKEN", "hf_router_test"] });
+    expect(
+      hub.calls.some(
+        (call) =>
+          call.name === "addSpaceSecret" && ["HF_TOKEN", "HUGGINGFACE_HUB_TOKEN"].includes(String(call.args[1])),
+      ),
+    ).toBe(false);
+    expect(hub.calls).toContainEqual({
+      name: "addSpaceSecret",
+      args: ["alice/research", "MLCLAW_ROUTER_TOKEN", "hf_router_test"],
+    });
     expect(hub.calls).toContainEqual({ name: "deleteSpaceSecret", args: ["alice/research", "HF_TOKEN"] });
     expect(hub.calls).toContainEqual({ name: "deleteSpaceSecret", args: ["alice/research", "HUGGINGFACE_HUB_TOKEN"] });
-    expect(hub.calls.some((call) => call.name === "addSpaceSecret" && call.args[1] === "TELEGRAM_BOT_TOKEN")).toBe(false);
+    expect(hub.calls.some((call) => call.name === "addSpaceSecret" && call.args[1] === "TELEGRAM_BOT_TOKEN")).toBe(
+      false,
+    );
   });
 
   it("offers a ready local runtime when Docker Space creation requires PRO", async () => {
@@ -936,10 +1140,12 @@ describe("mlclaw CLI", () => {
     const code = await main(["bootstrap", "--name", "research", "--no-pull"], runtime);
 
     expect(code).toBe(0);
-    expect(notes).toContainEqual(expect.objectContaining({
-      title: "Hosted gateway unavailable",
-      message: expect.stringContaining("Docker context desktop-linux is ready"),
-    }));
+    expect(notes).toContainEqual(
+      expect.objectContaining({
+        title: "Hosted gateway unavailable",
+        message: expect.stringContaining("Docker context desktop-linux is ready"),
+      }),
+    );
     expect(hub.calls).toContainEqual({ name: "createBucket", args: ["alice/research-data", true] });
     expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(true);
     await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
@@ -969,14 +1175,10 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([], false);
     const runtime = await createRuntime(hub, prompt);
 
-    const code = await main([
-      "bootstrap",
-      "--name",
-      "research",
-      "--yes",
-      "--allow-local-fallback",
-      "--no-pull",
-    ], runtime);
+    const code = await main(
+      ["bootstrap", "--name", "research", "--yes", "--allow-local-fallback", "--no-pull"],
+      runtime,
+    );
 
     expect(code).toBe(0);
     expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(true);
@@ -1006,17 +1208,10 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([], false);
     const runtime = await createRuntime(hub, prompt);
 
-    const code = await main([
-      "bootstrap",
-      "--gateway",
-      "local",
-      "--container-runtime",
-      "podman",
-      "--name",
-      "research",
-      "--yes",
-      "--no-pull",
-    ], runtime);
+    const code = await main(
+      ["bootstrap", "--gateway", "local", "--container-runtime", "podman", "--name", "research", "--yes", "--no-pull"],
+      runtime,
+    );
 
     expect(code).toBe(0);
     expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(false);
@@ -1037,18 +1232,21 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([], false);
     const stderr: string[] = [];
 
-    const code = await main([
-      "bootstrap",
-      "--gateway",
-      "local",
-      "--container-runtime",
-      "podman",
-      "--docker-context",
-      "desktop-linux",
-      "--name",
-      "research",
-      "--yes",
-    ], await createRuntime(hub, prompt, stderr));
+    const code = await main(
+      [
+        "bootstrap",
+        "--gateway",
+        "local",
+        "--container-runtime",
+        "podman",
+        "--docker-context",
+        "desktop-linux",
+        "--name",
+        "research",
+        "--yes",
+      ],
+      await createRuntime(hub, prompt, stderr),
+    );
 
     expect(code).toBe(1);
     expect(stderr.join("\n")).toContain("--docker-context cannot be used with --container-runtime podman");
@@ -1060,16 +1258,11 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([], false);
     const stderr: string[] = [];
     const runtime = {
-      ...await createRuntime(hub, prompt, stderr),
+      ...(await createRuntime(hub, prompt, stderr)),
       env: {},
     };
 
-    const code = await main([
-      "bootstrap",
-      "--name",
-      "research",
-      "--yes",
-    ], runtime);
+    const code = await main(["bootstrap", "--name", "research", "--yes"], runtime);
 
     expect(code).toBe(0);
     expect(stderr.join("\n")).toBe("");
@@ -1084,21 +1277,24 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([], false);
     const stderr: string[] = [];
     const runtime = {
-      ...await createRuntime(hub, prompt, stderr),
+      ...(await createRuntime(hub, prompt, stderr)),
       env: {},
     };
 
-    const code = await main([
-      "bootstrap",
-      "--gateway",
-      "local",
-      "--name",
-      "research",
-      "--gateway-token",
-      "gateway-token",
-      "--no-pull",
-      "--yes",
-    ], runtime);
+    const code = await main(
+      [
+        "bootstrap",
+        "--gateway",
+        "local",
+        "--name",
+        "research",
+        "--gateway-token",
+        "gateway-token",
+        "--no-pull",
+        "--yes",
+      ],
+      runtime,
+    );
 
     expect(code).toBe(0);
     expect(stderr.join("\n")).toBe("");
@@ -1113,7 +1309,7 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([], false);
     const stderr: string[] = [];
     const runtime = {
-      ...await createRuntime(hub, prompt, stderr),
+      ...(await createRuntime(hub, prompt, stderr)),
       env: {},
     };
     await writeSecretEnv(runtime.configRoot, "research", {
@@ -1128,12 +1324,7 @@ describe("mlclaw CLI", () => {
       MLCLAW_ROUTER_TOKEN: "hf_router_saved",
     });
 
-    const code = await main([
-      "bootstrap",
-      "--name",
-      "research",
-      "--yes",
-    ], runtime);
+    const code = await main(["bootstrap", "--name", "research", "--yes"], runtime);
 
     expect(code).toBe(0);
     expect(stderr.join("\n")).toBe("");
@@ -1155,12 +1346,7 @@ describe("mlclaw CLI", () => {
     const stderr: string[] = [];
     const runtime = await createRuntime(hub, prompt, stderr);
 
-    const code = await main([
-      "bootstrap",
-      "--name",
-      "research",
-      "--yes",
-    ], runtime);
+    const code = await main(["bootstrap", "--name", "research", "--yes"], runtime);
 
     expect(code).toBe(1);
     expect(stderr.join("\n")).toContain("runtime metadata unavailable");
@@ -1176,12 +1362,7 @@ describe("mlclaw CLI", () => {
     const stderr: string[] = [];
     const runtime = await createRuntime(hub, prompt, stderr);
 
-    const code = await main([
-      "bootstrap",
-      "--name",
-      "research",
-      "--yes",
-    ], runtime);
+    const code = await main(["bootstrap", "--name", "research", "--yes"], runtime);
 
     expect(code).toBe(1);
     expect(stderr.join("\n")).toContain("did not include volumes");
@@ -1196,20 +1377,16 @@ describe("mlclaw CLI", () => {
     const stderr: string[] = [];
     const runtime = await createRuntime(hub, prompt, stderr);
 
-    const code = await main([
-      "bootstrap",
-      "--name",
-      "research",
-      "--yes",
-    ], runtime);
+    const code = await main(["bootstrap", "--name", "research", "--yes"], runtime);
 
     expect(code).toBe(0);
     expect(stderr.join("\n")).toBe("");
     expect(hub.calls).toContainEqual({
       name: "setSpaceVolumes",
-      args: ["alice/research", [
-        { type: "bucket", source: "alice/research-data", mountPath: "/data/mlclaw-state", readOnly: false },
-      ]],
+      args: [
+        "alice/research",
+        [{ type: "bucket", source: "alice/research-data", mountPath: "/data/mlclaw-state", readOnly: false }],
+      ],
     });
   });
 
@@ -1218,44 +1395,53 @@ describe("mlclaw CLI", () => {
       existingBuckets: ["alice/mlclaw-data"],
       existingSpaces: ["alice/mlclaw"],
     });
-    hub.bucketObjects.set("openclaw-state/runtime/status.json", JSON.stringify({
-      schemaVersion: 1,
-      agent: "mlclaw",
-      runtimeId: "space-mlclaw",
-      gatewayLocation: "space",
-      runtimeImage: DEFAULT_RUNTIME_IMAGE,
-      startedAt: "2026-06-16T00:00:00.000Z",
-      lastHeartbeatAt: "2026-06-16T00:00:01.000Z",
-    }) + "\n");
+    hub.bucketObjects.set(
+      "openclaw-state/runtime/status.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        agent: "mlclaw",
+        runtimeId: "space-mlclaw",
+        gatewayLocation: "space",
+        runtimeImage: DEFAULT_RUNTIME_IMAGE,
+        startedAt: "2026-06-16T00:00:00.000Z",
+        lastHeartbeatAt: "2026-06-16T00:00:01.000Z",
+      }) + "\n",
+    );
     const { prompt, notes } = createPrompt([]);
     const stdout: string[] = [];
 
-    const code = await main([
-      "bootstrap",
-      "--name",
-      "mlclaw",
-    ], {
-      ...await createRuntime(hub, prompt),
+    const code = await main(["bootstrap", "--name", "mlclaw"], {
+      ...(await createRuntime(hub, prompt)),
       stdout: { log: (message: unknown) => stdout.push(String(message)) },
     });
 
     expect(code).toBe(0);
-    expect(notes).toContainEqual(expect.objectContaining({
-      title: "Bootstrap plan",
-      message: expect.stringContaining("Bucket: alice/mlclaw-data (exists; keeping 1 object(s))"),
-    }));
-    expect(notes).toContainEqual(expect.objectContaining({
-      title: "Bootstrap plan",
-      message: expect.stringContaining("Space: alice/mlclaw (exists; files, variables, secrets, and runtime will be updated)"),
-    }));
-    expect(notes).toContainEqual(expect.objectContaining({
-      title: "Bootstrap plan",
-      message: expect.stringContaining("Hardware: unchanged Space hardware"),
-    }));
-    expect(notes).toContainEqual(expect.objectContaining({
-      title: "Bootstrap plan",
-      message: expect.stringContaining("Fresh deployment: use a different name, for example --name mlclaw-2"),
-    }));
+    expect(notes).toContainEqual(
+      expect.objectContaining({
+        title: "Bootstrap plan",
+        message: expect.stringContaining("Bucket: alice/mlclaw-data (exists; keeping 1 object(s))"),
+      }),
+    );
+    expect(notes).toContainEqual(
+      expect.objectContaining({
+        title: "Bootstrap plan",
+        message: expect.stringContaining(
+          "Space: alice/mlclaw (exists; files, variables, secrets, and runtime will be updated)",
+        ),
+      }),
+    );
+    expect(notes).toContainEqual(
+      expect.objectContaining({
+        title: "Bootstrap plan",
+        message: expect.stringContaining("Hardware: unchanged Space hardware"),
+      }),
+    );
+    expect(notes).toContainEqual(
+      expect.objectContaining({
+        title: "Bootstrap plan",
+        message: expect.stringContaining("Fresh deployment: use a different name, for example --name mlclaw-2"),
+      }),
+    );
     expect(stdout.join("\n")).toContain("Using existing private bucket alice/mlclaw-data");
     expect(stdout.join("\n")).toContain("Updating existing Space alice/mlclaw");
     expect(hub.calls).toContainEqual({ name: "bucketExists", args: ["alice/mlclaw-data"] });
@@ -1273,21 +1459,21 @@ describe("mlclaw CLI", () => {
     const { prompt, notes } = createPrompt(["mlclaw-fresh"]);
     const runtime = await createRuntime(hub, prompt);
 
-    const code = await main([
-      "bootstrap",
-      "--name",
-      "mlclaw",
-    ], runtime);
+    const code = await main(["bootstrap", "--name", "mlclaw"], runtime);
 
     expect(code).toBe(0);
-    expect(notes).toContainEqual(expect.objectContaining({
-      title: "Existing resources",
-      message: expect.stringContaining("Enter another name for a fresh deployment"),
-    }));
-    expect(notes).toContainEqual(expect.objectContaining({
-      title: "Bootstrap plan",
-      message: expect.stringContaining("Agent: mlclaw-fresh"),
-    }));
+    expect(notes).toContainEqual(
+      expect.objectContaining({
+        title: "Existing resources",
+        message: expect.stringContaining("Enter another name for a fresh deployment"),
+      }),
+    );
+    expect(notes).toContainEqual(
+      expect.objectContaining({
+        title: "Bootstrap plan",
+        message: expect.stringContaining("Agent: mlclaw-fresh"),
+      }),
+    );
     expect(hub.calls).toContainEqual({ name: "bucketExists", args: ["alice/mlclaw-data"] });
     expect(hub.calls).toContainEqual({ name: "spaceExists", args: ["alice/mlclaw"] });
     expect(hub.calls).toContainEqual({ name: "bucketExists", args: ["alice/mlclaw-fresh-data"] });
@@ -1309,13 +1495,10 @@ describe("mlclaw CLI", () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt([], false);
 
-    const code = await main([
-      "bootstrap",
-      "--name",
-      "research",
-      "--public-space",
-      "--yes",
-    ], await createRuntime(hub, prompt));
+    const code = await main(
+      ["bootstrap", "--name", "research", "--public-space", "--yes"],
+      await createRuntime(hub, prompt),
+    );
 
     expect(code).toBe(0);
     expect(hub.calls).toContainEqual({
@@ -1329,14 +1512,10 @@ describe("mlclaw CLI", () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt([], false);
 
-    const code = await main([
-      "bootstrap",
-      "--name",
-      "research",
-      "--owner",
-      "research-org",
-      "--yes",
-    ], await createRuntime(hub, prompt));
+    const code = await main(
+      ["bootstrap", "--name", "research", "--owner", "research-org", "--yes"],
+      await createRuntime(hub, prompt),
+    );
 
     expect(code).toBe(0);
     expect(hub.calls).toContainEqual({
@@ -1358,15 +1537,10 @@ describe("mlclaw CLI", () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt([]);
 
-    const code = await main([
-      "settings",
-      "alice/research",
-      "--hardware",
-      "cpu-upgrade",
-      "--sleep-time",
-      "-1",
-      "--yes",
-    ], await createRuntime(hub, prompt));
+    const code = await main(
+      ["settings", "alice/research", "--hardware", "cpu-upgrade", "--sleep-time", "-1", "--yes"],
+      await createRuntime(hub, prompt),
+    );
 
     expect(code).toBe(0);
     expect(hub.calls).toContainEqual({
@@ -1380,25 +1554,24 @@ describe("mlclaw CLI", () => {
       existingBuckets: ["alice/research-data"],
       existingSpaces: ["alice/research"],
     });
-    hub.bucketObjects.set("openclaw-state/runtime/status.json", JSON.stringify({
-      schemaVersion: 1,
-      agent: "research",
-      runtimeId: "space-research",
-      gatewayLocation: "space",
-      runtimeImage: DEFAULT_RUNTIME_IMAGE,
-      startedAt: "2026-06-16T00:00:00.000Z",
-      lastHeartbeatAt: "2026-06-16T00:00:01.000Z",
-    }) + "\n");
+    hub.bucketObjects.set(
+      "openclaw-state/runtime/status.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        agent: "research",
+        runtimeId: "space-research",
+        gatewayLocation: "space",
+        runtimeImage: DEFAULT_RUNTIME_IMAGE,
+        startedAt: "2026-06-16T00:00:00.000Z",
+        lastHeartbeatAt: "2026-06-16T00:00:01.000Z",
+      }) + "\n",
+    );
     const { prompt } = createPrompt([], false);
 
-    const code = await main([
-      "bootstrap",
-      "--name",
-      "research",
-      "--hardware",
-      "cpu-upgrade",
-      "--yes",
-    ], await createRuntime(hub, prompt));
+    const code = await main(
+      ["bootstrap", "--name", "research", "--hardware", "cpu-upgrade", "--yes"],
+      await createRuntime(hub, prompt),
+    );
 
     expect(code).toBe(0);
     expect(hub.calls.some((call) => call.name === "createDockerSpace")).toBe(false);
@@ -1413,25 +1586,24 @@ describe("mlclaw CLI", () => {
       existingBuckets: ["alice/research-data"],
       existingSpaces: ["alice/research"],
     });
-    hub.bucketObjects.set("openclaw-state/runtime/status.json", JSON.stringify({
-      schemaVersion: 1,
-      agent: "research",
-      runtimeId: "space-research",
-      gatewayLocation: "space",
-      runtimeImage: DEFAULT_RUNTIME_IMAGE,
-      startedAt: "2026-06-16T00:00:00.000Z",
-      lastHeartbeatAt: "2026-06-16T00:00:01.000Z",
-    }) + "\n");
+    hub.bucketObjects.set(
+      "openclaw-state/runtime/status.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        agent: "research",
+        runtimeId: "space-research",
+        gatewayLocation: "space",
+        runtimeImage: DEFAULT_RUNTIME_IMAGE,
+        startedAt: "2026-06-16T00:00:00.000Z",
+        lastHeartbeatAt: "2026-06-16T00:00:01.000Z",
+      }) + "\n",
+    );
     const { prompt } = createPrompt([], false);
 
-    const code = await main([
-      "bootstrap",
-      "--name",
-      "research",
-      "--sleep-time",
-      "-1",
-      "--yes",
-    ], await createRuntime(hub, prompt));
+    const code = await main(
+      ["bootstrap", "--name", "research", "--sleep-time", "-1", "--yes"],
+      await createRuntime(hub, prompt),
+    );
 
     expect(code).toBe(0);
     expect(hub.calls.some((call) => call.name === "createDockerSpace")).toBe(false);
@@ -1447,12 +1619,7 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([]);
     const stderr: string[] = [];
 
-    const code = await main([
-      "settings",
-      "research",
-      "--gateway",
-      "local",
-    ], await createRuntime(hub, prompt, stderr));
+    const code = await main(["settings", "research", "--gateway", "local"], await createRuntime(hub, prompt, stderr));
 
     expect(code).toBe(1);
     expect(stderr.join("\n")).toContain("gateway location changes must use `mlclaw gateway migrate`");
@@ -1493,15 +1660,15 @@ describe("mlclaw CLI", () => {
       name: "addSpaceVariable",
       args: ["alice/research", "MLCLAW_RUNTIME_ID", "space-research"],
     });
-    const allowedUsersIndex = hub.calls.findIndex((call) =>
-      call.name === "addSpaceVariable" &&
-      call.args[0] === "alice/research" &&
-      call.args[1] === "MLCLAW_ALLOWED_USERS"
+    const allowedUsersIndex = hub.calls.findIndex(
+      (call) =>
+        call.name === "addSpaceVariable" &&
+        call.args[0] === "alice/research" &&
+        call.args[1] === "MLCLAW_ALLOWED_USERS",
     );
-    const adminsIndex = hub.calls.findIndex((call) =>
-      call.name === "addSpaceVariable" &&
-      call.args[0] === "alice/research" &&
-      call.args[1] === "MLCLAW_ADMINS"
+    const adminsIndex = hub.calls.findIndex(
+      (call) =>
+        call.name === "addSpaceVariable" && call.args[0] === "alice/research" && call.args[1] === "MLCLAW_ADMINS",
     );
     expect(allowedUsersIndex).toBeGreaterThanOrEqual(0);
     expect(adminsIndex).toBeGreaterThanOrEqual(0);
@@ -1564,12 +1731,7 @@ describe("mlclaw CLI", () => {
       MLCLAW_ROUTER_TOKEN: "hf_router_revoked",
     });
 
-    const code = await main([
-      "update",
-      "alice/research",
-      "--router-token",
-      "hf_router_replacement",
-    ], runtime);
+    const code = await main(["update", "alice/research", "--router-token", "hf_router_replacement"], runtime);
 
     expect(code).toBe(0);
     expect(hub.calls).toContainEqual({
@@ -1669,11 +1831,14 @@ describe("mlclaw CLI", () => {
       name: "addSpaceVariable",
       args: ["alice/mlclaw-template", "MLCLAW_GATEWAY_LOCATION", "space"],
     });
-    expect(hub.calls.some((call) =>
-      call.name === "addSpaceVariable" &&
-      call.args[0] === "alice/mlclaw-template" &&
-      (call.args[1] === "MLCLAW_ALLOWED_USERS" || call.args[1] === "MLCLAW_ADMINS")
-    )).toBe(false);
+    expect(
+      hub.calls.some(
+        (call) =>
+          call.name === "addSpaceVariable" &&
+          call.args[0] === "alice/mlclaw-template" &&
+          (call.args[1] === "MLCLAW_ALLOWED_USERS" || call.args[1] === "MLCLAW_ADMINS"),
+      ),
+    ).toBe(false);
     expect(hub.calls).not.toContainEqual({
       name: "assertBucketAccessible",
       args: [expect.anything()],
@@ -1690,7 +1855,7 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([]);
     const output: string[] = [];
     const runtime = {
-      ...await createRuntime(hub, prompt),
+      ...(await createRuntime(hub, prompt)),
       env: { MLCLAW_CANONICAL_SPACE_ID: "alice/mlclaw-template" },
       stdout: { log: (message: unknown) => output.push(String(message)) },
     };
@@ -1725,7 +1890,7 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([]);
     const output: string[] = [];
     const runtime = {
-      ...await createRuntime(hub, prompt),
+      ...(await createRuntime(hub, prompt)),
       stdout: { log: (message: unknown) => output.push(String(message)) },
     };
 
@@ -1751,9 +1916,10 @@ describe("mlclaw CLI", () => {
     });
     expect(hub.calls).toContainEqual({
       name: "setSpaceVolumes",
-      args: ["alice/research", [
-        { type: "bucket", source: "alice/research-data", mountPath: "/data/mlclaw-state", readOnly: false },
-      ]],
+      args: [
+        "alice/research",
+        [{ type: "bucket", source: "alice/research-data", mountPath: "/data/mlclaw-state", readOnly: false }],
+      ],
     });
   });
 
@@ -1777,7 +1943,11 @@ describe("mlclaw CLI", () => {
     await hub.addSpaceVariable("alice/research", "OPENCLAW_HF_STATE_BUCKET", "alice/research-data");
     await hub.addSpaceVariable("alice/research", "MLCLAW_STATE_MOUNT_DIR", "/data/mlclaw-state");
     await hub.addSpaceVariable("alice/research", "OPENCLAW_LIVE_DIR", "/home/node/.local/share/mlclaw/live");
-    await hub.addSpaceVariable("alice/research", "MLCLAW_RUNTIME_SETTINGS_FILE", "/home/node/.local/share/mlclaw/live/.mlclaw/settings.json");
+    await hub.addSpaceVariable(
+      "alice/research",
+      "MLCLAW_RUNTIME_SETTINGS_FILE",
+      "/home/node/.local/share/mlclaw/live/.mlclaw/settings.json",
+    );
     await hub.addSpaceVariable("alice/research", "MLCLAW_TEMPLATE_REV", "test-template");
     await hub.addSpaceVariable("alice/research", "MLCLAW_GATEWAY_LOCATION", "space");
     await hub.addSpaceVariable("alice/research", "MLCLAW_RUNTIME_IMAGE", DEFAULT_RUNTIME_IMAGE);
@@ -1793,7 +1963,7 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([]);
     const output: string[] = [];
     const runtime = {
-      ...await createRuntime(hub, prompt),
+      ...(await createRuntime(hub, prompt)),
       stdout: { log: (message: unknown) => output.push(String(message)) },
     };
 
@@ -1823,7 +1993,7 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([]);
     const output: string[] = [];
     const runtime = {
-      ...await createRuntime(hub, prompt),
+      ...(await createRuntime(hub, prompt)),
       stdout: { log: (message: unknown) => output.push(String(message)) },
     };
 
@@ -1868,25 +2038,24 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt(["telegram-token", "1234567890"]);
     const runtime = await createRuntime(hub, prompt);
 
-    await expect(main(["bootstrap", "--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--no-pull"], runtime)).resolves.toBe(0);
+    await expect(
+      main(
+        ["bootstrap", "--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--no-pull"],
+        runtime,
+      ),
+    ).resolves.toBe(0);
     hub.calls.length = 0;
     runtime.dockerRunner.calls.length = 0;
 
-    await expect(main([
-      "gateway",
-      "migrate",
-      "research",
-      "--to",
-      "space",
-      "--yes",
-    ], runtime)).resolves.toBe(0);
+    await expect(main(["gateway", "migrate", "research", "--to", "space", "--yes"], runtime)).resolves.toBe(0);
 
     const disableRestartIndex = runtime.dockerRunner.calls.findIndex((call) => call.name === "disableRestart");
     const stopIndex = runtime.dockerRunner.calls.findIndex((call) => call.name === "stop");
-    const localHandoffIndex = hub.calls.findIndex((call) =>
-      call.name === "bucket.uploadFiles" &&
-      Array.isArray(call.args[0]) &&
-      call.args[0].includes("openclaw-state/runtime/handoff-request.json")
+    const localHandoffIndex = hub.calls.findIndex(
+      (call) =>
+        call.name === "bucket.uploadFiles" &&
+        Array.isArray(call.args[0]) &&
+        call.args[0].includes("openclaw-state/runtime/handoff-request.json"),
     );
     const createSpaceIndex = hub.calls.findIndex((call) => call.name === "createDockerSpace");
     expect(disableRestartIndex).toBeGreaterThanOrEqual(0);
@@ -1900,24 +2069,16 @@ describe("mlclaw CLI", () => {
     hub.calls.length = 0;
     runtime.dockerRunner.calls.length = 0;
 
-    await expect(main([
-      "gateway",
-      "migrate",
-      "research",
-      "--to",
-      "local",
-      "--no-pull",
-    ], runtime)).resolves.toBe(0);
+    await expect(main(["gateway", "migrate", "research", "--to", "local", "--no-pull"], runtime)).resolves.toBe(0);
 
-    const disableIndex = hub.calls.findIndex((call) =>
-      call.name === "addSpaceVariable" &&
-      call.args[1] === "MLCLAW_GATEWAY_DISABLED" &&
-      call.args[2] === "1"
+    const disableIndex = hub.calls.findIndex(
+      (call) => call.name === "addSpaceVariable" && call.args[1] === "MLCLAW_GATEWAY_DISABLED" && call.args[2] === "1",
     );
-    const handoffIndex = hub.calls.findIndex((call) =>
-      call.name === "bucket.uploadFiles" &&
-      Array.isArray(call.args[0]) &&
-      call.args[0].includes("openclaw-state/runtime/handoff-request.json")
+    const handoffIndex = hub.calls.findIndex(
+      (call) =>
+        call.name === "bucket.uploadFiles" &&
+        Array.isArray(call.args[0]) &&
+        call.args[0].includes("openclaw-state/runtime/handoff-request.json"),
     );
     const pauseIndex = hub.calls.findIndex((call) => call.name === "pauseSpace");
     const removeIndex = runtime.dockerRunner.calls.findIndex((call) => call.name === "rm");
@@ -1938,7 +2099,7 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([], false);
     const stderr: string[] = [];
     const runtime = {
-      ...await createRuntime(hub, prompt, stderr),
+      ...(await createRuntime(hub, prompt, stderr)),
       env: {},
     };
     await writeManifest(runtime.configRoot, {
@@ -1966,14 +2127,7 @@ describe("mlclaw CLI", () => {
       MLCLAW_ROUTER_TOKEN: "hf_router_saved",
     });
 
-    const code = await main([
-      "gateway",
-      "migrate",
-      "research",
-      "--to",
-      "space",
-      "--yes",
-    ], runtime);
+    const code = await main(["gateway", "migrate", "research", "--to", "space", "--yes"], runtime);
 
     expect(code).toBe(0);
     expect(stderr.join("\n")).toBe("");
@@ -1993,24 +2147,20 @@ describe("mlclaw CLI", () => {
     const stderr: string[] = [];
     const runtime = await createRuntime(hub, prompt, stderr);
 
-    await expect(main(["bootstrap", "--gateway", "local", "--name", "research", "--no-pull"], runtime)).resolves.toBe(0);
+    await expect(main(["bootstrap", "--gateway", "local", "--name", "research", "--no-pull"], runtime)).resolves.toBe(
+      0,
+    );
     await writeSecretEnv(runtime.configRoot, "research", {
-      ...await readSecretEnv(runtime.configRoot, "research"),
+      ...(await readSecretEnv(runtime.configRoot, "research")),
       TELEGRAM_BOT_TOKEN: "telegram-token",
       TELEGRAM_ALLOWED_USERS: "1234567890",
     });
     hub.calls.length = 0;
     runtime.dockerRunner.calls.length = 0;
 
-    await expect(main([
-      "gateway",
-      "migrate",
-      "research",
-      "--to",
-      "space",
-      "--hardware",
-      "cpu-basic",
-    ], runtime)).resolves.toBe(1);
+    await expect(
+      main(["gateway", "migrate", "research", "--to", "space", "--hardware", "cpu-basic"], runtime),
+    ).resolves.toBe(1);
 
     expect(stderr.join("\n")).toContain("Telegram requires upgraded paid Space hardware");
     expect(hub.calls.some((call) => call.name === "createDockerSpace")).toBe(false);
@@ -2022,20 +2172,15 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([]);
     const runtime = await createRuntime(hub, prompt);
 
-    await expect(main(["bootstrap", "--gateway", "local", "--name", "research", "--no-pull"], runtime)).resolves.toBe(0);
+    await expect(main(["bootstrap", "--gateway", "local", "--name", "research", "--no-pull"], runtime)).resolves.toBe(
+      0,
+    );
     hub.calls.length = 0;
     runtime.dockerRunner.calls.length = 0;
 
-    await expect(main([
-      "gateway",
-      "migrate",
-      "research",
-      "--to",
-      "space",
-      "--hardware",
-      "cpu-upgrade",
-      "--yes",
-    ], runtime)).resolves.toBe(0);
+    await expect(
+      main(["gateway", "migrate", "research", "--to", "space", "--hardware", "cpu-upgrade", "--yes"], runtime),
+    ).resolves.toBe(0);
 
     expect(hub.calls).toContainEqual({ name: "spaceExists", args: ["alice/research"] });
     expect(hub.calls).toContainEqual({
@@ -2080,16 +2225,9 @@ describe("mlclaw CLI", () => {
       MLCLAW_RUNTIME_ID: "space-research",
     });
 
-    await expect(main([
-      "gateway",
-      "migrate",
-      "research",
-      "--to",
-      "local",
-      "--docker-context",
-      "colima",
-      "--no-pull",
-    ], runtime)).resolves.toBe(0);
+    await expect(
+      main(["gateway", "migrate", "research", "--to", "local", "--docker-context", "colima", "--no-pull"], runtime),
+    ).resolves.toBe(0);
 
     const runCall = runtime.dockerRunner.calls.find((call) => call.name === "run");
     expect(runCall).toEqual({
@@ -2128,17 +2266,20 @@ describe("mlclaw CLI", () => {
       updatedAt: "2026-06-16T00:00:00.000Z",
     });
 
-    const code = await main([
-      "gateway",
-      "migrate",
-      "research",
-      "--to",
-      "local",
-      "--container-runtime",
-      "podman",
-      "--docker-context",
-      "colima",
-    ], runtime);
+    const code = await main(
+      [
+        "gateway",
+        "migrate",
+        "research",
+        "--to",
+        "local",
+        "--container-runtime",
+        "podman",
+        "--docker-context",
+        "colima",
+      ],
+      runtime,
+    );
 
     expect(code).toBe(1);
     expect(stderr.join("\n")).toContain("--docker-context cannot be used with --container-runtime podman");
@@ -2152,20 +2293,19 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt(["telegram-token", "1234567890"]);
     const runtime = await createRuntime(hub, prompt);
 
-    await expect(main(["bootstrap", "--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--no-pull"], runtime)).resolves.toBe(0);
+    await expect(
+      main(
+        ["bootstrap", "--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--no-pull"],
+        runtime,
+      ),
+    ).resolves.toBe(0);
     seedValidStateSnapshot(hub);
     hub.calls.length = 0;
     runtime.dockerRunner.calls.length = 0;
 
-    await expect(main([
-      "state",
-      "adopt",
-      "research",
-      "--bucket",
-      "alice/research-archive-data",
-      "--yes",
-      "--no-pull",
-    ], runtime)).resolves.toBe(0);
+    await expect(
+      main(["state", "adopt", "research", "--bucket", "alice/research-archive-data", "--yes", "--no-pull"], runtime),
+    ).resolves.toBe(0);
 
     await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
       bucket: "alice/research-archive-data",
@@ -2189,7 +2329,7 @@ describe("mlclaw CLI", () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt([], false);
     const stderr: string[] = [];
-    const runtime = { ...await createRuntime(hub, prompt, stderr), env: {} };
+    const runtime = { ...(await createRuntime(hub, prompt, stderr)), env: {} };
     await writeManifest(runtime.configRoot, {
       version: 1,
       agent: "research",
@@ -2210,15 +2350,10 @@ describe("mlclaw CLI", () => {
     });
     runtime.dockerRunner.inspectValue = { exists: true, running: true, status: "running" };
 
-    const code = await main([
-      "state",
-      "adopt",
-      "research",
-      "--bucket",
-      "alice/research-archive-data",
-      "--yes",
-      "--no-pull",
-    ], runtime);
+    const code = await main(
+      ["state", "adopt", "research", "--bucket", "alice/research-archive-data", "--yes", "--no-pull"],
+      runtime,
+    );
 
     expect(code).toBe(1);
     expect(stderr.join("\n")).toContain("dedicated inference token");
@@ -2255,14 +2390,9 @@ describe("mlclaw CLI", () => {
       updatedAt: "2026-06-16T00:00:00.000Z",
     });
 
-    await expect(main([
-      "gateway",
-      "rebind",
-      "research",
-      "--docker-context",
-      "colima",
-      "--no-pull",
-    ], runtime)).resolves.toBe(0);
+    await expect(
+      main(["gateway", "rebind", "research", "--docker-context", "colima", "--no-pull"], runtime),
+    ).resolves.toBe(0);
 
     const disableRestartIndex = runtime.dockerRunner.calls.findIndex((call) => call.name === "disableRestart");
     const stopIndex = runtime.dockerRunner.calls.findIndex((call) => call.name === "stop");
@@ -2290,11 +2420,14 @@ describe("mlclaw CLI", () => {
         }),
       ],
     });
-    expect(hub.calls.some((call) =>
-      call.name === "bucket.uploadFiles" &&
-      Array.isArray(call.args[0]) &&
-      call.args[0].includes("openclaw-state/runtime/handoff-request.json")
-    )).toBe(true);
+    expect(
+      hub.calls.some(
+        (call) =>
+          call.name === "bucket.uploadFiles" &&
+          Array.isArray(call.args[0]) &&
+          call.args[0].includes("openclaw-state/runtime/handoff-request.json"),
+      ),
+    ).toBe(true);
     await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
       localGateway: {
         dockerContext: "colima",
@@ -2327,23 +2460,20 @@ describe("mlclaw CLI", () => {
       updatedAt: "2026-06-16T00:00:00.000Z",
     });
 
-    await expect(main([
-      "gateway",
-      "rebind",
-      "research",
-      "--docker-context",
-      "colima",
-      "--takeover",
-      "--no-pull",
-    ], runtime)).resolves.toBe(0);
+    await expect(
+      main(["gateway", "rebind", "research", "--docker-context", "colima", "--takeover", "--no-pull"], runtime),
+    ).resolves.toBe(0);
 
     expect(runtime.dockerRunner.calls.some((call) => call.name === "disableRestart")).toBe(false);
     expect(runtime.dockerRunner.calls.some((call) => call.name === "stop")).toBe(false);
-    expect(hub.calls.some((call) =>
-      call.name === "bucket.uploadFiles" &&
-      Array.isArray(call.args[0]) &&
-      call.args[0].includes("openclaw-state/runtime/handoff-request.json")
-    )).toBe(false);
+    expect(
+      hub.calls.some(
+        (call) =>
+          call.name === "bucket.uploadFiles" &&
+          Array.isArray(call.args[0]) &&
+          call.args[0].includes("openclaw-state/runtime/handoff-request.json"),
+      ),
+    ).toBe(false);
     const runCall = runtime.dockerRunner.calls.find((call) => call.name === "run");
     expect(runCall).toEqual({
       name: "run",
@@ -2393,14 +2523,9 @@ describe("mlclaw CLI", () => {
       await originalRun(params);
     };
 
-    await expect(main([
-      "gateway",
-      "rebind",
-      "research",
-      "--docker-context",
-      "colima",
-      "--no-pull",
-    ], runtime)).resolves.toBe(1);
+    await expect(
+      main(["gateway", "rebind", "research", "--docker-context", "colima", "--no-pull"], runtime),
+    ).resolves.toBe(1);
     await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
       localGateway: {
         dockerContext: "desktop-linux",
@@ -2409,14 +2534,9 @@ describe("mlclaw CLI", () => {
 
     failRun = false;
     runtime.dockerRunner.calls.length = 0;
-    await expect(main([
-      "gateway",
-      "rebind",
-      "research",
-      "--docker-context",
-      "colima",
-      "--no-pull",
-    ], runtime)).resolves.toBe(0);
+    await expect(
+      main(["gateway", "rebind", "research", "--docker-context", "colima", "--no-pull"], runtime),
+    ).resolves.toBe(0);
 
     expect(runtime.dockerRunner.calls.find((call) => call.name === "run")).toEqual({
       name: "run",
@@ -2467,15 +2587,9 @@ describe("mlclaw CLI", () => {
       throw new Error("handoff setup failed");
     };
 
-    await expect(main([
-      "gateway",
-      "rebind",
-      "research",
-      "--docker-context",
-      "colima",
-      "--takeover",
-      "--no-pull",
-    ], runtime)).resolves.toBe(0);
+    await expect(
+      main(["gateway", "rebind", "research", "--docker-context", "colima", "--takeover", "--no-pull"], runtime),
+    ).resolves.toBe(0);
 
     const stopIndex = runtime.dockerRunner.calls.findIndex((call) => call.name === "stop");
     const runIndex = runtime.dockerRunner.calls.findIndex((call) => call.name === "run");
@@ -2500,7 +2614,7 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([]);
     const stdout: string[] = [];
     const runtime = {
-      ...await createRuntime(hub, prompt),
+      ...(await createRuntime(hub, prompt)),
       stdout: { log: (message: unknown) => stdout.push(String(message)) },
     };
     await writeManifest(runtime.configRoot, {
@@ -2519,15 +2633,18 @@ describe("mlclaw CLI", () => {
     await writeSecretEnv(runtime.configRoot, "research", {
       OPENCLAW_HF_STATE_PREFIX: "custom/prefix",
     });
-    hub.bucketObjects.set("custom/prefix/runtime/status.json", JSON.stringify({
-      schemaVersion: 1,
-      agent: "research",
-      runtimeId: "local-research-existing",
-      gatewayLocation: "local",
-      runtimeImage: DEFAULT_RUNTIME_IMAGE,
-      startedAt: "2026-06-16T00:00:00.000Z",
-      lastHeartbeatAt: "2026-06-16T00:00:01.000Z",
-    }) + "\n");
+    hub.bucketObjects.set(
+      "custom/prefix/runtime/status.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        agent: "research",
+        runtimeId: "local-research-existing",
+        gatewayLocation: "local",
+        runtimeImage: DEFAULT_RUNTIME_IMAGE,
+        startedAt: "2026-06-16T00:00:00.000Z",
+        lastHeartbeatAt: "2026-06-16T00:00:01.000Z",
+      }) + "\n",
+    );
 
     await expect(main(["gateway", "status", "research"], runtime)).resolves.toBe(0);
 
@@ -2543,7 +2660,7 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([]);
     const stdout: string[] = [];
     const runtime = {
-      ...await createRuntime(hub, prompt),
+      ...(await createRuntime(hub, prompt)),
       env: { OPENCLAW_HF_STATE_PREFIX: "wrong/prefix" },
       stdout: { log: (message: unknown) => stdout.push(String(message)) },
     };
@@ -2560,15 +2677,18 @@ describe("mlclaw CLI", () => {
       createdAt: "2026-06-16T00:00:00.000Z",
       updatedAt: "2026-06-16T00:00:00.000Z",
     });
-    hub.bucketObjects.set("openclaw-state/runtime/status.json", JSON.stringify({
-      schemaVersion: 1,
-      agent: "research",
-      runtimeId: "local-research-existing",
-      gatewayLocation: "local",
-      runtimeImage: DEFAULT_RUNTIME_IMAGE,
-      startedAt: "2026-06-16T00:00:00.000Z",
-      lastHeartbeatAt: "2026-06-16T00:00:01.000Z",
-    }) + "\n");
+    hub.bucketObjects.set(
+      "openclaw-state/runtime/status.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        agent: "research",
+        runtimeId: "local-research-existing",
+        gatewayLocation: "local",
+        runtimeImage: DEFAULT_RUNTIME_IMAGE,
+        startedAt: "2026-06-16T00:00:00.000Z",
+        lastHeartbeatAt: "2026-06-16T00:00:01.000Z",
+      }) + "\n",
+    );
 
     await expect(main(["gateway", "status", "research"], runtime)).resolves.toBe(0);
 
@@ -2588,32 +2708,34 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt(["telegram-token", "1234567890"]);
     const runtime = await createRuntime(hub, prompt);
 
-    await expect(main(["bootstrap", "--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--no-pull"], runtime)).resolves.toBe(0);
+    await expect(
+      main(
+        ["bootstrap", "--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--no-pull"],
+        runtime,
+      ),
+    ).resolves.toBe(0);
     await writeSecretEnv(runtime.configRoot, "research", {
-      ...await readSecretEnv(runtime.configRoot, "research"),
+      ...(await readSecretEnv(runtime.configRoot, "research")),
       OPENCLAW_HF_STATE_PREFIX: "custom/prefix",
     });
     hub.calls.length = 0;
     runtime.dockerRunner.calls.length = 0;
 
-    await expect(main([
-      "gateway",
-      "migrate",
-      "research",
-      "--to",
-      "space",
-      "--yes",
-    ], runtime)).resolves.toBe(0);
+    await expect(main(["gateway", "migrate", "research", "--to", "space", "--yes"], runtime)).resolves.toBe(0);
 
-    expect(hub.calls.some((call) =>
-      call.name === "bucket.uploadFiles" &&
-      Array.isArray(call.args[0]) &&
-      call.args[0].includes("custom/prefix/runtime/handoff-request.json")
-    )).toBe(true);
-    expect(hub.calls.some((call) =>
-      call.name === "bucket.downloadFile" &&
-      call.args[0] === "openclaw-state/runtime/handoff-ack.json"
-    )).toBe(false);
+    expect(
+      hub.calls.some(
+        (call) =>
+          call.name === "bucket.uploadFiles" &&
+          Array.isArray(call.args[0]) &&
+          call.args[0].includes("custom/prefix/runtime/handoff-request.json"),
+      ),
+    ).toBe(true);
+    expect(
+      hub.calls.some(
+        (call) => call.name === "bucket.downloadFile" && call.args[0] === "openclaw-state/runtime/handoff-ack.json",
+      ),
+    ).toBe(false);
     expect(hub.calls).toContainEqual({
       name: "addSpaceVariable",
       args: ["alice/research", "OPENCLAW_HF_STATE_PREFIX", "custom/prefix"],
@@ -2628,27 +2750,28 @@ describe("mlclaw CLI", () => {
     const stderr: string[] = [];
     const runtime = await createRuntime(hub, prompt, stderr);
 
-    await expect(main(["bootstrap", "--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--no-pull"], runtime)).resolves.toBe(0);
+    await expect(
+      main(
+        ["bootstrap", "--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--no-pull"],
+        runtime,
+      ),
+    ).resolves.toBe(0);
     hub.calls.length = 0;
     runtime.dockerRunner.calls.length = 0;
-    hub.bucketObjects.set("openclaw-state/runtime/status.json", JSON.stringify({
-      schemaVersion: 1,
-      agent: "research",
-      runtimeId: "space-someone-else",
-      gatewayLocation: "space",
-      runtimeImage: DEFAULT_RUNTIME_IMAGE,
-      startedAt: new Date().toISOString(),
-      lastHeartbeatAt: new Date().toISOString(),
-    }) + "\n");
+    hub.bucketObjects.set(
+      "openclaw-state/runtime/status.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        agent: "research",
+        runtimeId: "space-someone-else",
+        gatewayLocation: "space",
+        runtimeImage: DEFAULT_RUNTIME_IMAGE,
+        startedAt: new Date().toISOString(),
+        lastHeartbeatAt: new Date().toISOString(),
+      }) + "\n",
+    );
 
-    await expect(main([
-      "gateway",
-      "migrate",
-      "research",
-      "--to",
-      "space",
-      "--yes",
-    ], runtime)).resolves.toBe(1);
+    await expect(main(["gateway", "migrate", "research", "--to", "space", "--yes"], runtime)).resolves.toBe(1);
 
     expect(stderr.join("\n")).toContain("another gateway appears active");
     expect(runtime.dockerRunner.calls.some((call) => call.name === "stop")).toBe(false);
@@ -2661,41 +2784,34 @@ describe("mlclaw CLI", () => {
     const stderr: string[] = [];
     const runtime = await createRuntime(hub, prompt, stderr);
 
-    await expect(main(["bootstrap", "--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--no-pull"], runtime)).resolves.toBe(0);
-    await expect(main([
-      "gateway",
-      "migrate",
-      "research",
-      "--to",
-      "space",
-      "--yes",
-    ], runtime)).resolves.toBe(0);
+    await expect(
+      main(
+        ["bootstrap", "--gateway", "local", "--name", "research", "--gateway-token", "gateway-token", "--no-pull"],
+        runtime,
+      ),
+    ).resolves.toBe(0);
+    await expect(main(["gateway", "migrate", "research", "--to", "space", "--yes"], runtime)).resolves.toBe(0);
     hub.calls.length = 0;
     runtime.dockerRunner.calls.length = 0;
-    hub.bucketObjects.set("openclaw-state/runtime/status.json", JSON.stringify({
-      schemaVersion: 1,
-      agent: "research",
-      runtimeId: "space-someone-else",
-      gatewayLocation: "space",
-      runtimeImage: DEFAULT_RUNTIME_IMAGE,
-      startedAt: new Date().toISOString(),
-      lastHeartbeatAt: new Date().toISOString(),
-    }) + "\n");
+    hub.bucketObjects.set(
+      "openclaw-state/runtime/status.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        agent: "research",
+        runtimeId: "space-someone-else",
+        gatewayLocation: "space",
+        runtimeImage: DEFAULT_RUNTIME_IMAGE,
+        startedAt: new Date().toISOString(),
+        lastHeartbeatAt: new Date().toISOString(),
+      }) + "\n",
+    );
 
-    await expect(main([
-      "gateway",
-      "migrate",
-      "research",
-      "--to",
-      "local",
-      "--no-pull",
-    ], runtime)).resolves.toBe(1);
+    await expect(main(["gateway", "migrate", "research", "--to", "local", "--no-pull"], runtime)).resolves.toBe(1);
 
     expect(stderr.join("\n")).toContain("another gateway appears active");
-    expect(hub.calls.some((call) =>
-      call.name === "addSpaceVariable" &&
-      call.args[1] === "MLCLAW_GATEWAY_DISABLED"
-    )).toBe(false);
+    expect(
+      hub.calls.some((call) => call.name === "addSpaceVariable" && call.args[1] === "MLCLAW_GATEWAY_DISABLED"),
+    ).toBe(false);
     expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(false);
   });
 
@@ -2726,17 +2842,25 @@ describe("mlclaw CLI", () => {
       name: "addSpaceVariable",
       args: ["alice/research", "MLCLAW_GATEWAY_DISABLED", "1"],
     });
-    expect(hub.calls.some((call) =>
-      call.name === "bucket.uploadFiles" &&
-      Array.isArray(call.args[0]) &&
-      call.args[0].includes("openclaw-state/runtime/handoff-request.json")
-    )).toBe(false);
+    expect(
+      hub.calls.some(
+        (call) =>
+          call.name === "bucket.uploadFiles" &&
+          Array.isArray(call.args[0]) &&
+          call.args[0].includes("openclaw-state/runtime/handoff-request.json"),
+      ),
+    ).toBe(false);
     expect(hub.calls).toContainEqual({ name: "pauseSpace", args: ["alice/research"] });
   });
 
   it("waits for a final Space snapshot while the Space is RUNNING_BUILDING", async () => {
     const hub = createFakeHub({
-      spaceRuntime: { stage: "RUNNING_BUILDING", hardware: "cpu-upgrade", requested_hardware: "cpu-upgrade", sleep_time: -1 },
+      spaceRuntime: {
+        stage: "RUNNING_BUILDING",
+        hardware: "cpu-upgrade",
+        requested_hardware: "cpu-upgrade",
+        sleep_time: -1,
+      },
     });
     const { prompt } = createPrompt([]);
     const runtime = await createRuntime(hub, prompt);
@@ -2753,26 +2877,29 @@ describe("mlclaw CLI", () => {
       createdAt: "2026-06-16T00:00:00.000Z",
       updatedAt: "2026-06-16T00:00:00.000Z",
     });
-    hub.bucketObjects.set("openclaw-state/runtime/status.json", JSON.stringify({
-      schemaVersion: 1,
-      agent: "research",
-      runtimeId: "space-research",
-      gatewayLocation: "space",
-      runtimeImage: DEFAULT_RUNTIME_IMAGE,
-      startedAt: "2026-06-16T00:00:00.000Z",
-      lastHeartbeatAt: "2026-06-16T00:00:01.000Z",
-    }) + "\n");
+    hub.bucketObjects.set(
+      "openclaw-state/runtime/status.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        agent: "research",
+        runtimeId: "space-research",
+        gatewayLocation: "space",
+        runtimeImage: DEFAULT_RUNTIME_IMAGE,
+        startedAt: "2026-06-16T00:00:00.000Z",
+        lastHeartbeatAt: "2026-06-16T00:00:01.000Z",
+      }) + "\n",
+    );
 
     await expect(main(["gateway", "stop", "research"], runtime)).resolves.toBe(0);
 
-    const disableIndex = hub.calls.findIndex((call) =>
-      call.name === "addSpaceVariable" &&
-      call.args[1] === "MLCLAW_GATEWAY_DISABLED"
+    const disableIndex = hub.calls.findIndex(
+      (call) => call.name === "addSpaceVariable" && call.args[1] === "MLCLAW_GATEWAY_DISABLED",
     );
-    const handoffIndex = hub.calls.findIndex((call) =>
-      call.name === "bucket.uploadFiles" &&
-      Array.isArray(call.args[0]) &&
-      call.args[0].includes("openclaw-state/runtime/handoff-request.json")
+    const handoffIndex = hub.calls.findIndex(
+      (call) =>
+        call.name === "bucket.uploadFiles" &&
+        Array.isArray(call.args[0]) &&
+        call.args[0].includes("openclaw-state/runtime/handoff-request.json"),
     );
     const pauseIndex = hub.calls.findIndex((call) => call.name === "pauseSpace");
     expect(disableIndex).toBeGreaterThanOrEqual(0);
@@ -2813,14 +2940,14 @@ describe("mlclaw CLI", () => {
 
     await expect(main(["gateway", "migrate", "research", "--to", "local", "--no-pull"], runtime)).resolves.toBe(0);
 
-    const handoffIndex = hub.calls.findIndex((call) =>
-      call.name === "bucket.uploadFiles" &&
-      Array.isArray(call.args[0]) &&
-      call.args[0].includes("openclaw-state/runtime/handoff-request.json")
+    const handoffIndex = hub.calls.findIndex(
+      (call) =>
+        call.name === "bucket.uploadFiles" &&
+        Array.isArray(call.args[0]) &&
+        call.args[0].includes("openclaw-state/runtime/handoff-request.json"),
     );
-    const disableIndex = hub.calls.findIndex((call) =>
-      call.name === "addSpaceVariable" &&
-      call.args[1] === "MLCLAW_GATEWAY_DISABLED"
+    const disableIndex = hub.calls.findIndex(
+      (call) => call.name === "addSpaceVariable" && call.args[1] === "MLCLAW_GATEWAY_DISABLED",
     );
     const pauseIndex = hub.calls.findIndex((call) => call.name === "pauseSpace");
     const startIndex = runtime.dockerRunner.calls.findIndex((call) => call.name === "run");
@@ -2852,10 +2979,9 @@ describe("mlclaw CLI", () => {
     await expect(main(["gateway", "stop", "research"], runtime)).resolves.toBe(1);
 
     expect(stderr.join("\n")).toContain("bucket read failed");
-    expect(hub.calls.some((call) =>
-      call.name === "addSpaceVariable" &&
-      call.args[1] === "MLCLAW_GATEWAY_DISABLED"
-    )).toBe(false);
+    expect(
+      hub.calls.some((call) => call.name === "addSpaceVariable" && call.args[1] === "MLCLAW_GATEWAY_DISABLED"),
+    ).toBe(false);
     expect(hub.calls.some((call) => call.name === "pauseSpace")).toBe(false);
   });
 });

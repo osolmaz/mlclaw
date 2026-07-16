@@ -154,7 +154,7 @@ CONFIG_PATH="$OPENCLAW_CONFIG_PATH"
 # silently start fresh then snapshot over a bucket that still holds data).
 echo "[hf-state-sync] starting restore"
 RESTORE_TIMEOUT_SECONDS="${MLCLAW_RESTORE_TIMEOUT_SECONDS:-180}"
-node /app/hf-state-sync.js prepare-restore
+env MLCLAW_STATE_HF_TOKEN="$STATE_HF_TOKEN" node /app/hf-state-sync.js prepare-restore
 if command -v timeout >/dev/null 2>&1; then
   env MLCLAW_STATE_HF_TOKEN="$STATE_HF_TOKEN" timeout "${RESTORE_TIMEOUT_SECONDS}s" gosu "$OPENCLAW_IDENTITY" node /app/hf-state-sync.js restore
 else

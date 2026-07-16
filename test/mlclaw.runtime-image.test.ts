@@ -112,6 +112,9 @@ describe("runtime image Dockerfile", () => {
     expect(entrypoint).not.toContain("HF_BROKER_BIND_ADDR=");
     expect(entrypoint).not.toContain("HF_BROKER_OPERATOR_BIND_ADDR=");
     expect(entrypoint).toContain('env MLCLAW_STATE_HF_TOKEN="$STATE_HF_TOKEN" timeout');
+    expect(entrypoint).toContain(
+      'env MLCLAW_STATE_HF_TOKEN="$STATE_HF_TOKEN" node /app/hf-state-sync.js prepare-restore',
+    );
     expect(entrypoint).toContain('export MLCLAW_STATE_HF_TOKEN="$STATE_HF_TOKEN"');
     expect(entrypoint).toContain("! -name .mlclaw-protected");
     expect(entrypoint.indexOf("node /app/hf-state-sync.js prepare-restore")).toBeLessThan(

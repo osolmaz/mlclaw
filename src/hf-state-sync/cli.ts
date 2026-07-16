@@ -34,6 +34,10 @@ async function main(argv: string[]): Promise<number> {
     return runStageWorker(liveDir);
   }
   const config = resolveSyncConfig();
+  if (argv[0] === "prepare-restore") {
+    await prepareRestore(config);
+    return 0;
+  }
   const hub = makeHub(config);
   if (!hub) {
     logError("OPENCLAW_HF_STATE_BUCKET is not set; state will NOT survive restarts");
@@ -41,9 +45,6 @@ async function main(argv: string[]): Promise<number> {
   const mode = argv[0];
 
   switch (mode) {
-    case "prepare-restore":
-      await prepareRestore(config);
-      return 0;
     case "restore": {
       if (!hub) {
         return 0;
