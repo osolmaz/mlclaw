@@ -22218,35 +22218,43 @@ async function deployLocalBootstrap(plan, opts, runtime, desiredChanged = true, 
     }
     try {
       if (networkAccessChanged && plan.manifest.networkAccess) {
+        await assertLease();
         await disableNetworkAccess(plan.manifest, runtime);
       }
       if (previousSecrets) {
+        await assertLease();
         await writeSecretEnv(runtime.configRoot, plan.agentName, previousSecrets);
       } else {
+        await assertLease();
         await fs16.rm(secretEnvPath(runtime.configRoot, plan.agentName), { force: true });
       }
       if (previousContainer?.running && previousManifest) {
-        await startLocalGateway({ manifest: previousManifest, runtime, pull: false, refresh: true });
+        await startLocalGateway({ manifest: previousManifest, runtime, pull: false, refresh: true, assertLease });
         runtime.stdout.log(`Previous local gateway restored: ${containerNameFor(previousManifest.agent)}`);
       } else if (previousContainer && previousManifest && startupAttempted) {
-        await startLocalGateway({ manifest: previousManifest, runtime, pull: false, refresh: true });
+        await startLocalGateway({ manifest: previousManifest, runtime, pull: false, refresh: true, assertLease });
+        await assertLease();
         await localRunnerFor(previousManifest, runtime).stop(
           containerNameFor(previousManifest.agent),
           localConnectionFor(previousManifest)
         );
         if (previousNetworkState !== "owned") {
+          await assertLease();
           await disableNetworkAccess(previousManifest, runtime);
         }
         runtime.stdout.log(`Previous stopped local gateway restored: ${containerNameFor(previousManifest.agent)}`);
       } else {
         if (startupAttempted) {
+          await assertLease();
           await removeFailedBootstrapContainer(plan.manifest, runtime, !previousManifest);
         }
       }
       if (previousNetworkState === "owned" && previousManifest?.networkAccess) {
+        await assertLease();
         await runtime.tailscaleRunner.ensureMapping(networkAccessMapping(previousManifest.networkAccess));
       }
       if (!previousManifest) {
+        await assertLease();
         await fs16.rm(manifestPath(runtime.configRoot, plan.agentName), { force: true });
       }
     } catch (rollbackError) {
@@ -23531,6 +23539,11 @@ async function ensureUpdateCredentials(params) {
     );
   }
   const localManifest = await readManifest(params.runtime.configRoot, params.agentName);
+  if (localManifest.space !== params.repoId) {
+    throw new Error(
+      `local deployment ${params.agentName} belongs to ${localManifest.space}, not ${params.repoId}; specify the matching deployment before updating`
+    );
+  }
   const localSecrets = await readSecretEnv(params.runtime.configRoot, params.agentName).catch(
     () => ({})
   );
@@ -24069,10 +24082,29 @@ async function credentialsRepair(requestedAgent, opts, runtime) {
     const coordinationHub = runtime.hubFactory(coordinationToken);
     const control = await coordinationHub.deploymentControlStore(manifest.owner, manifest.deploymentId);
     const operation = newOperation(manifest, runtime.now());
-    const lease = await acquireControlLease(control, manifest, operation, runtime.now());
+    let lease = await acquireControlLease(control, manifest, operation, runtime.now());
+    let renewalError;
+    let renewal = Promise.resolve();
+    const renewalTimer = setInterval(() => {
+      renewal = renewal.then(async () => {
+        if (renewalError) return;
+        try {
+          lease = await renewControlLease(control, lease, runtime.now());
+        } catch (error) {
+          renewalError = error;
+        }
+      });
+    }, 45e3);
+    const assertLease = async () => {
+      await renewal;
+      if (renewalError) throw renewalError;
+      await assertControlLease(control, lease, runtime.now());
+      if (renewalError) throw renewalError;
+    };
     try {
+      await assertLease();
       if (manifest.gatewayLocation === "local") {
-        await applyLocalCredentialRepair(manifest, updatedManifest, secrets, updatedSecrets, runtime);
+        await applyLocalCredentialRepair(manifest, updatedManifest, secrets, updatedSecrets, runtime, assertLease);
       } else {
         await applySpaceCredentialRepair(
           manifest,
@@ -24081,10 +24113,14 @@ async function credentialsRepair(requestedAgent, opts, runtime) {
           updatedSecrets,
           oldToken,
           coordinationHub,
-          runtime
+          runtime,
+          assertLease
         );
       }
+      await assertLease();
     } finally {
+      clearInterval(renewalTimer);
+      await renewal;
       await releaseControlLease(control, lease);
     }
     runtime.stdout.log(`HF Broker credential repaired: ${manifest.agent}`);
@@ -24108,11 +24144,18 @@ async function credentialRepairAccount(manifest, oldToken, runtime) {
   const provisioningToken = await runtime.readToken(runtime.env);
   return (await runtime.hubFactory(provisioningToken).whoami()).name;
 }
-async function applyLocalCredentialRepair(previousManifest, updatedManifest, previousSecrets, updatedSecrets, runtime) {
+async function applyLocalCredentialRepair(previousManifest, updatedManifest, previousSecrets, updatedSecrets, runtime, assertLease) {
   const runner = localRunnerFor(previousManifest, runtime);
   const existing = await runner.inspect(containerNameFor(previousManifest.agent), localConnectionFor(previousManifest));
   if (!existing?.running) {
-    await replaceLocalCredentialFiles(previousManifest, updatedManifest, previousSecrets, updatedSecrets, runtime);
+    await replaceLocalCredentialFiles(
+      previousManifest,
+      updatedManifest,
+      previousSecrets,
+      updatedSecrets,
+      runtime,
+      assertLease
+    );
     return;
   }
   const bucketPrefix = await readDeploymentBucketPrefix(runtime, previousManifest.agent);
@@ -24131,37 +24174,55 @@ async function applyLocalCredentialRepair(previousManifest, updatedManifest, pre
     },
     { pull: false },
     runtime,
-    true
+    true,
+    assertLease
   );
 }
-async function replaceLocalCredentialFiles(previousManifest, updatedManifest, previousSecrets, updatedSecrets, runtime) {
+async function replaceLocalCredentialFiles(previousManifest, updatedManifest, previousSecrets, updatedSecrets, runtime, assertLease) {
   try {
+    await assertLease();
     await writeSecretEnv(runtime.configRoot, updatedManifest.agent, updatedSecrets);
+    await assertLease();
     await writeManifest(runtime.configRoot, updatedManifest);
   } catch (error) {
+    await assertLease();
     await writeSecretEnv(runtime.configRoot, previousManifest.agent, previousSecrets);
+    await assertLease();
     await writeManifest(runtime.configRoot, previousManifest);
     throw error;
   }
 }
-async function applySpaceCredentialRepair(previousManifest, updatedManifest, previousSecrets, updatedSecrets, oldToken, hub, runtime) {
+async function applySpaceCredentialRepair(previousManifest, updatedManifest, previousSecrets, updatedSecrets, oldToken, hub, runtime, assertLease) {
   try {
+    await assertLease();
     await hub.addSpaceSecret(
       previousManifest.space,
       "MLCLAW_BROKER_HF_TOKEN",
       requiredSecret(updatedSecrets, "MLCLAW_BROKER_HF_TOKEN")
     );
+    await assertLease();
     await hub.restartSpace(previousManifest.space, true);
-    await replaceLocalCredentialFiles(previousManifest, updatedManifest, previousSecrets, updatedSecrets, runtime);
+    await replaceLocalCredentialFiles(
+      previousManifest,
+      updatedManifest,
+      previousSecrets,
+      updatedSecrets,
+      runtime,
+      assertLease
+    );
   } catch (error) {
     try {
+      await assertLease();
       if (oldToken) {
         await hub.addSpaceSecret(previousManifest.space, "MLCLAW_BROKER_HF_TOKEN", oldToken);
       } else {
         await hub.deleteSpaceSecret(previousManifest.space, "MLCLAW_BROKER_HF_TOKEN");
       }
+      await assertLease();
       await hub.restartSpace(previousManifest.space, true);
+      await assertLease();
       await writeSecretEnv(runtime.configRoot, previousManifest.agent, previousSecrets);
+      await assertLease();
       await writeManifest(runtime.configRoot, previousManifest);
     } catch (rollbackError) {
       throw new Error(

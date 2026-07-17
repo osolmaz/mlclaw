@@ -3162,6 +3162,28 @@ describe("mlclaw CLI", () => {
     expect(hub.calls.some((call) => call.name === "addSpaceVariable")).toBe(false);
   });
 
+  it("does not copy a same-named deployment credential into another Space", async () => {
+    const hub = createFakeHub();
+    await hub.addSpaceVariable("research-org/research", "OPENCLAW_HF_TEMPLATE_REV", "old-template");
+    await hub.addSpaceVariable("research-org/research", "OPENCLAW_AGENT_NAME", "research");
+    const stderr: string[] = [];
+    const runtime = await createRuntime(hub, createPrompt([], false).prompt, stderr);
+    await seedDedicatedCredentialDeployment(runtime);
+    let pushed = false;
+    runtime.pushTemplateToSpace = async () => {
+      pushed = true;
+      return { templateRev: "test-template" };
+    };
+    hub.calls.length = 0;
+
+    await expect(main(["update", "research-org/research"], runtime)).resolves.toBe(1);
+
+    expect(stderr.join("\n")).toContain("belongs to alice/research, not research-org/research");
+    expect(pushed).toBe(false);
+    expect(hub.calls.some((call) => call.name === "addSpaceSecret")).toBe(false);
+    expect(hub.calls.some((call) => call.name === "addSpaceVariable")).toBe(false);
+  });
+
   it("replaces an existing Router token when update receives an explicit override", async () => {
     const hub = createFakeHub();
     await hub.addSpaceVariable("alice/research", "OPENCLAW_HF_TEMPLATE_REV", "old-template");
