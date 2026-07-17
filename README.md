@@ -47,11 +47,22 @@ flow, and resumes after sign-in. Non-interactive runs never install software and
 still require a token up front. You never paste that token into someone else's
 app; the bootstrapper runs locally.
 
-ML Claw places the active Hugging Face token behind an in-container HF Broker.
-The broker owns the real token; OpenClaw receives only a separate agent
-credential that can call the broker's typed, policy-checked routes. It cannot
-read the token or use the admin-only operator API. Existing dedicated inference
-tokens remain supported through `MLCLAW_ROUTER_TOKEN`, `HF_ROUTER_TOKEN`, or
+ML Claw checks whether the credential assigned to HF Broker exposes enough
+permission metadata for the broker's operation catalog. When the active CLI
+login is an opaque OAuth credential or is missing permissions, interactive
+bootstrap can open Hugging Face's fine-grained token form with BrokerKit fields
+preselected. You name and create the token on Hugging Face, then paste it into a
+hidden local prompt. This does not replace or modify the active `hf` CLI login.
+For automation, pass a `0600` file through `--broker-hf-token-file`; ML Claw
+does not accept the token as a command-line value.
+
+The broker owns the selected credential; OpenClaw receives only a separate
+agent credential that can call the broker's typed, policy-checked routes. It
+cannot read the token or use the admin-only operator API. Rerunning bootstrap
+preserves and rechecks an existing broker token. You may continue with an
+unverified credential, but individual broker operations can then fail with a
+Hugging Face permission error. Existing dedicated inference tokens remain
+supported through `MLCLAW_ROUTER_TOKEN`, `HF_ROUTER_TOKEN`, or
 `--router-token-file` during migration.
 
 ## Default Flow

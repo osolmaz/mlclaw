@@ -37,6 +37,27 @@ type SpaceInfo = {
 export type HubCommitFile = { path: string; content: Uint8Array | Buffer };
 type ModelInfo = { sha?: string };
 
+export type HubFineGrainedScope = {
+  entity: { type: string; name?: string };
+  permissions: string[];
+};
+
+export type HubIdentity = {
+  name: string;
+  organizations: string[];
+  auth?: {
+    type?: string;
+    accessToken?: {
+      role?: string;
+      fineGrained?: {
+        global: string[];
+        scoped: HubFineGrainedScope[];
+        canReadGatedRepos: boolean;
+      };
+    };
+  };
+};
+
 export class HubApi {
   private readonly hubUrl: string;
   private readonly token: string;
@@ -52,8 +73,8 @@ export class HubApi {
     return new BucketClient({ bucket, accessToken: this.token, hubUrl: this.hubUrl, fetch: this.fetchImpl });
   }
 
-  async whoami(): Promise<{ name: string }> {
-    return await this.requestJson<{ name: string }>("/api/whoami-v2");
+  async whoami(): Promise<HubIdentity> {
+    return parseHubIdentity(await this.requestJson("/api/whoami-v2"));
   }
 
   async createBucket(bucketId: string, privateBucket = true): Promise<void> {
@@ -506,6 +527,70 @@ export class HubApi {
     }
     return response;
   }
+}
+
+export function parseHubIdentity(value: unknown): HubIdentity {
+  const root = record(value);
+  const name = stringValue(root.name);
+  if (!name) {
+    throw new Error("Hugging Face identity response omitted the account name");
+  }
+
+  const organizations = Array.isArray(root.orgs)
+    ? root.orgs.map((entry) => stringValue(record(entry).name)).filter((entry): entry is string => Boolean(entry))
+    : [];
+  const auth = record(root.auth);
+  const accessToken = record(auth.accessToken);
+  const fineGrained = record(accessToken.fineGrained);
+  const authType = stringValue(auth.type);
+  const accessTokenRole = stringValue(accessToken.role);
+  const scoped = Array.isArray(fineGrained.scoped)
+    ? fineGrained.scoped.map(parseFineGrainedScope).filter((entry): entry is HubFineGrainedScope => Boolean(entry))
+    : [];
+  const global = stringArray(fineGrained.global);
+  const canReadGatedRepos = fineGrained.canReadGatedRepos === true;
+  const parsedAccessToken = {
+    ...(accessTokenRole ? { role: accessTokenRole } : {}),
+    ...(Object.keys(fineGrained).length > 0 ? { fineGrained: { global, scoped, canReadGatedRepos } } : {}),
+  };
+  const parsedAuth = {
+    ...(authType ? { type: authType } : {}),
+    ...(Object.keys(parsedAccessToken).length > 0 ? { accessToken: parsedAccessToken } : {}),
+  };
+
+  return {
+    name,
+    organizations: [...new Set(organizations)].sort(),
+    ...(Object.keys(parsedAuth).length > 0 ? { auth: parsedAuth } : {}),
+  };
+}
+
+function parseFineGrainedScope(value: unknown): HubFineGrainedScope | undefined {
+  const scope = record(value);
+  const entity = record(scope.entity);
+  const type = stringValue(entity.type);
+  if (!type) return undefined;
+  const name = stringValue(entity.name);
+  return {
+    entity: { type, ...(name ? { name } : {}) },
+    permissions: stringArray(scope.permissions),
+  };
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? [...new Set(value.filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim())))]
+        .map((entry) => entry.trim())
+        .sort()
+    : [];
 }
 
 export function splitRepoId(repoId: string): [string, string] {

@@ -12,7 +12,13 @@ import {
   writeSecretEnv,
   type DeploymentManifest,
 } from "../src/mlclaw/local-config.js";
-import { HubApiError, type HubApi, type SpaceRuntime, type SpaceVolume } from "../src/mlclaw/hub-api.js";
+import {
+  HubApiError,
+  type HubApi,
+  type HubIdentity,
+  type SpaceRuntime,
+  type SpaceVolume,
+} from "../src/mlclaw/hub-api.js";
 import type { ContainerEngine, ContainerInspect, ContainerRunner, ContainerRunParams } from "../src/mlclaw/docker.js";
 import type { BucketEntry } from "../src/hf-bucket-client/client.js";
 import type {
@@ -22,6 +28,7 @@ import type {
   TailscaleServeState,
 } from "../src/mlclaw/tailscale.js";
 import { TailscaleApprovalRequiredError } from "../src/mlclaw/tailscale.js";
+import { BROKER_GLOBAL_PERMISSIONS, BROKER_PERSONAL_PERMISSIONS } from "../src/mlclaw/hf-broker-credential.js";
 
 type PromptAnswer = string | boolean;
 
@@ -58,6 +65,7 @@ function createFakeHub(
     createDockerSpaceError?: Error;
     failFirstTombstoneUpload?: boolean;
     onDeploymentClaimAcquired?: (bucketObjects: Map<string, string>) => void;
+    identity?: HubIdentity;
   } = {},
 ) {
   const calls: Array<{ name: string; args: unknown[] }> = [];
@@ -143,7 +151,13 @@ function createFakeHub(
     },
     async whoami() {
       calls.push({ name: "whoami", args: [] });
-      return { name: "alice" };
+      return (
+        opts.identity ?? {
+          name: "alice",
+          organizations: [],
+          auth: { type: "access_token", accessToken: { role: "write" } },
+        }
+      );
     },
     async createBucket(...args: unknown[]) {
       calls.push({ name: "createBucket", args });
@@ -2093,6 +2107,199 @@ describe("mlclaw CLI", () => {
     });
   });
 
+  it("guides an interactive OAuth login to a verified dedicated broker token", async () => {
+    const loginHub = createFakeHub({
+      identity: { name: "alice", organizations: [], auth: { type: "oauth" } },
+    });
+    const brokerHub = createFakeHub({ identity: completeFineGrainedIdentity() });
+    const { prompt, notes } = createPrompt(["create", "hf_broker_complete"]);
+    const openedUrls: string[] = [];
+    const runtime = {
+      ...(await createRuntime(loginHub, prompt)),
+      hubFactory: (token: string) => (token === "hf_broker_complete" ? brokerHub : loginHub),
+      hfCli: {
+        findExecutable: async () => "/usr/bin/hf",
+        install: async () => undefined,
+        login: async () => undefined,
+        openUrl: async (url: string) => {
+          openedUrls.push(url);
+          return true;
+        },
+      },
+    };
+
+    const code = await main(
+      [
+        "bootstrap",
+        "--gateway",
+        "local",
+        "--name",
+        "research",
+        "--gateway-token",
+        "gateway-token",
+        "--tailscale",
+        "off",
+        "--no-pull",
+        "--yes",
+      ],
+      runtime,
+    );
+
+    expect(code).toBe(0);
+    expect(openedUrls).toHaveLength(1);
+    expect(openedUrls[0]).toContain("tokenType=fineGrained");
+    expect(openedUrls[0]).not.toContain("hf_broker_complete");
+    expect(notes).toContainEqual(expect.objectContaining({ title: "HF Broker credential ready" }));
+    await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
+      MLCLAW_BROKER_HF_TOKEN: "hf_broker_complete",
+    });
+  });
+
+  it("keeps an opaque credential in non-interactive mode and warns about limited coverage", async () => {
+    const hub = createFakeHub({ identity: { name: "alice", organizations: [], auth: { type: "oauth" } } });
+    const { prompt } = createPrompt([], false);
+    const stderr: string[] = [];
+    const runtime = await createRuntime(hub, prompt, stderr);
+
+    const code = await main(
+      [
+        "bootstrap",
+        "--gateway",
+        "local",
+        "--name",
+        "research",
+        "--gateway-token",
+        "gateway-token",
+        "--no-pull",
+        "--yes",
+      ],
+      runtime,
+    );
+
+    expect(code).toBe(0);
+    expect(stderr.join("\n")).toContain("does not expose permission details");
+    await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
+      MLCLAW_BROKER_HF_TOKEN: "hf_test_token",
+    });
+  });
+
+  it("reuses and verifies an existing broker token instead of replacing it with the login token", async () => {
+    const loginHub = createFakeHub();
+    const savedHub = createFakeHub();
+    const { prompt } = createPrompt([], false);
+    const runtime = {
+      ...(await createRuntime(loginHub, prompt)),
+      hubFactory: (token: string) => (token === "hf_saved_broker" ? savedHub : loginHub),
+    };
+    await writeSecretEnv(runtime.configRoot, "research", {
+      MLCLAW_BROKER_HF_TOKEN: "hf_saved_broker",
+    });
+
+    const code = await main(
+      [
+        "bootstrap",
+        "--gateway",
+        "local",
+        "--name",
+        "research",
+        "--gateway-token",
+        "gateway-token",
+        "--no-pull",
+        "--yes",
+      ],
+      runtime,
+    );
+
+    expect(code).toBe(0);
+    expect(savedHub.calls).toContainEqual({ name: "whoami", args: [] });
+    await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
+      MLCLAW_BROKER_HF_TOKEN: "hf_saved_broker",
+    });
+  });
+
+  it("loads an automation broker token from a file without putting it in command arguments", async () => {
+    const loginHub = createFakeHub();
+    const fileHub = createFakeHub();
+    const { prompt } = createPrompt([], false);
+    const runtime = {
+      ...(await createRuntime(loginHub, prompt)),
+      hubFactory: (token: string) => (token === "hf_file_broker" ? fileHub : loginHub),
+    };
+    const tokenFile = path.join(runtime.configRoot, "broker-token.env");
+    await fs.writeFile(tokenFile, "MLCLAW_BROKER_HF_TOKEN=hf_file_broker\n", { mode: 0o600 });
+
+    const code = await main(
+      [
+        "bootstrap",
+        "--gateway",
+        "local",
+        "--name",
+        "research",
+        "--gateway-token",
+        "gateway-token",
+        "--broker-hf-token-file",
+        tokenFile,
+        "--no-pull",
+        "--yes",
+      ],
+      runtime,
+    );
+
+    expect(code).toBe(0);
+    await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
+      MLCLAW_BROKER_HF_TOKEN: "hf_file_broker",
+    });
+  });
+
+  it("rejects a pasted broker token from another account without replacing the current credential", async () => {
+    const loginHub = createFakeHub({
+      identity: { name: "alice", organizations: [], auth: { type: "oauth" } },
+    });
+    const otherHub = createFakeHub({
+      identity: {
+        name: "mallory",
+        organizations: [],
+        auth: { type: "access_token", accessToken: { role: "write" } },
+      },
+    });
+    const { prompt, notes } = createPrompt(["create", "hf_other_account", false]);
+    const runtime = {
+      ...(await createRuntime(loginHub, prompt)),
+      hubFactory: (token: string) => (token === "hf_other_account" ? otherHub : loginHub),
+      hfCli: {
+        findExecutable: async () => "/usr/bin/hf",
+        install: async () => undefined,
+        login: async () => undefined,
+        openUrl: async () => true,
+      },
+    };
+
+    const code = await main(
+      [
+        "bootstrap",
+        "--gateway",
+        "local",
+        "--name",
+        "research",
+        "--gateway-token",
+        "gateway-token",
+        "--tailscale",
+        "off",
+        "--no-pull",
+        "--yes",
+      ],
+      runtime,
+    );
+
+    expect(code).toBe(0);
+    expect(notes).toContainEqual(
+      expect.objectContaining({ title: "Broker token was not accepted", message: expect.stringContaining("mallory") }),
+    );
+    await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
+      MLCLAW_BROKER_HF_TOKEN: "hf_test_token",
+    });
+  });
+
   it("uses the active broad token behind HF Broker for a non-interactive local gateway", async () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt([], false);
@@ -2276,9 +2483,24 @@ describe("mlclaw CLI", () => {
     const hub = createFakeHub({
       existingBuckets: ["alice/mlclaw-data"],
       existingSpaces: ["alice/mlclaw"],
+      identity: { name: "alice", organizations: [], auth: { type: "oauth" } },
     });
-    const { prompt, notes } = createPrompt(["mlclaw-fresh"]);
-    const runtime = await createRuntime(hub, prompt);
+    const brokerHub = createFakeHub({ identity: completeFineGrainedIdentity() });
+    const { prompt, notes } = createPrompt(["create", "hf_broker_complete", "mlclaw-fresh"]);
+    const openedUrls: string[] = [];
+    const runtime = {
+      ...(await createRuntime(hub, prompt)),
+      hubFactory: (token: string) => (token === "hf_broker_complete" ? brokerHub : hub),
+      hfCli: {
+        findExecutable: async () => "/usr/bin/hf",
+        install: async () => undefined,
+        login: async () => undefined,
+        openUrl: async (url: string) => {
+          openedUrls.push(url);
+          return true;
+        },
+      },
+    };
 
     const code = await main(["bootstrap", "--name", "mlclaw"], runtime);
 
@@ -2289,6 +2511,7 @@ describe("mlclaw CLI", () => {
         message: expect.stringContaining("Enter another name for a fresh deployment"),
       }),
     );
+    expect(openedUrls).toHaveLength(1);
     expect(notes).toContainEqual(
       expect.objectContaining({
         title: "Bootstrap plan",
@@ -2309,6 +2532,9 @@ describe("mlclaw CLI", () => {
       agent: "mlclaw-fresh",
       bucket: "alice/mlclaw-fresh-data",
       space: "alice/mlclaw-fresh",
+    });
+    await expect(readSecretEnv(runtime.configRoot, "mlclaw-fresh")).resolves.toMatchObject({
+      MLCLAW_BROKER_HF_TOKEN: "hf_broker_complete",
     });
   });
 
@@ -4218,3 +4444,26 @@ describe("mlclaw CLI", () => {
     expect(hub.calls.some((call) => call.name === "pauseSpace")).toBe(false);
   });
 });
+
+function completeFineGrainedIdentity(): HubIdentity {
+  return {
+    name: "alice",
+    organizations: [],
+    auth: {
+      type: "access_token",
+      accessToken: {
+        role: "fineGrained",
+        fineGrained: {
+          global: [...BROKER_GLOBAL_PERMISSIONS],
+          canReadGatedRepos: true,
+          scoped: [
+            {
+              entity: { type: "user", name: "alice" },
+              permissions: [...BROKER_PERSONAL_PERMISSIONS],
+            },
+          ],
+        },
+      },
+    },
+  };
+}

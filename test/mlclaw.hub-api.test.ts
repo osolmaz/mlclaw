@@ -2,6 +2,61 @@ import { describe, expect, it } from "vitest";
 import { HubApi } from "../src/mlclaw/hub-api.js";
 
 describe("HubApi Space commits", () => {
+  it("validates and preserves Hugging Face credential metadata", async () => {
+    const hub = new HubApi({
+      token: "hf_test_token",
+      fetch: async () =>
+        Response.json({
+          name: "alice",
+          orgs: [{ name: "research-org" }, { name: "research-org" }, { invalid: true }],
+          auth: {
+            type: "access_token",
+            accessToken: {
+              role: "fineGrained",
+              fineGrained: {
+                global: ["post.write", "post.write", 42],
+                canReadGatedRepos: true,
+                scoped: [
+                  {
+                    entity: { type: "org", name: "research-org" },
+                    permissions: ["repo.write", "repo.write", null],
+                  },
+                  { entity: {}, permissions: ["ignored"] },
+                ],
+              },
+            },
+          },
+        }),
+    });
+
+    await expect(hub.whoami()).resolves.toEqual({
+      name: "alice",
+      organizations: ["research-org"],
+      auth: {
+        type: "access_token",
+        accessToken: {
+          role: "fineGrained",
+          fineGrained: {
+            global: ["post.write"],
+            canReadGatedRepos: true,
+            scoped: [
+              {
+                entity: { type: "org", name: "research-org" },
+                permissions: ["repo.write"],
+              },
+            ],
+          },
+        },
+      },
+    });
+  });
+
+  it("rejects a malformed Hugging Face identity response", async () => {
+    const hub = new HubApi({ token: "hf_test_token", fetch: async () => Response.json({ auth: {} }) });
+
+    await expect(hub.whoami()).rejects.toThrow("omitted the account name");
+  });
+
   it("uses parent-commit compare-and-swap for deployment control", async () => {
     const requests: Array<{ url: string; init: RequestInit }> = [];
     const parent = "a".repeat(40);

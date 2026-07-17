@@ -10056,10 +10056,10 @@ function parsePodmanConnections(raw) {
     if (!value || typeof value !== "object") {
       return [];
     }
-    const record = value;
-    const name = record.Name ?? record.name;
-    const uri = record.URI ?? record.uri;
-    const isDefault = record.Default ?? record.default;
+    const record2 = value;
+    const name = record2.Name ?? record2.name;
+    const uri = record2.URI ?? record2.uri;
+    const isDefault = record2.Default ?? record2.default;
     if (typeof name !== "string" || !name.trim()) {
       return [];
     }
@@ -14900,7 +14900,7 @@ var HubApi = class {
     return new BucketClient({ bucket, accessToken: this.token, hubUrl: this.hubUrl, fetch: this.fetchImpl });
   }
   async whoami() {
-    return await this.requestJson("/api/whoami-v2");
+    return parseHubIdentity(await this.requestJson("/api/whoami-v2"));
   }
   async createBucket(bucketId, privateBucket = true) {
     const [namespace, name] = splitRepoId(bucketId);
@@ -15285,6 +15285,55 @@ var HubApi = class {
     return response;
   }
 };
+function parseHubIdentity(value) {
+  const root = record(value);
+  const name = stringValue(root.name);
+  if (!name) {
+    throw new Error("Hugging Face identity response omitted the account name");
+  }
+  const organizations = Array.isArray(root.orgs) ? root.orgs.map((entry) => stringValue(record(entry).name)).filter((entry) => Boolean(entry)) : [];
+  const auth = record(root.auth);
+  const accessToken = record(auth.accessToken);
+  const fineGrained = record(accessToken.fineGrained);
+  const authType = stringValue(auth.type);
+  const accessTokenRole = stringValue(accessToken.role);
+  const scoped = Array.isArray(fineGrained.scoped) ? fineGrained.scoped.map(parseFineGrainedScope).filter((entry) => Boolean(entry)) : [];
+  const global2 = stringArray(fineGrained.global);
+  const canReadGatedRepos = fineGrained.canReadGatedRepos === true;
+  const parsedAccessToken = {
+    ...accessTokenRole ? { role: accessTokenRole } : {},
+    ...Object.keys(fineGrained).length > 0 ? { fineGrained: { global: global2, scoped, canReadGatedRepos } } : {}
+  };
+  const parsedAuth = {
+    ...authType ? { type: authType } : {},
+    ...Object.keys(parsedAccessToken).length > 0 ? { accessToken: parsedAccessToken } : {}
+  };
+  return {
+    name,
+    organizations: [...new Set(organizations)].sort(),
+    ...Object.keys(parsedAuth).length > 0 ? { auth: parsedAuth } : {}
+  };
+}
+function parseFineGrainedScope(value) {
+  const scope = record(value);
+  const entity = record(scope.entity);
+  const type = stringValue(entity.type);
+  if (!type) return void 0;
+  const name = stringValue(entity.name);
+  return {
+    entity: { type, ...name ? { name } : {} },
+    permissions: stringArray(scope.permissions)
+  };
+}
+function record(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+function stringValue(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : void 0;
+}
+function stringArray(value) {
+  return Array.isArray(value) ? [...new Set(value.filter((entry) => typeof entry === "string" && Boolean(entry.trim())))].map((entry) => entry.trim()).sort() : [];
+}
 function splitRepoId(repoId) {
   const parts = repoId.split("/");
   if (parts.length !== 2 || !parts[0] || !parts[1]) {
@@ -16178,15 +16227,15 @@ var makeIssue = (params) => {
       message: issueData.message
     };
   }
-  let errorMessage = "";
+  let errorMessage2 = "";
   const maps = errorMaps.filter((m2) => !!m2).slice().reverse();
   for (const map of maps) {
-    errorMessage = map(fullIssue, { data, defaultError: errorMessage }).message;
+    errorMessage2 = map(fullIssue, { data, defaultError: errorMessage2 }).message;
   }
   return {
     ...issueData,
     path: fullPath,
-    message: errorMessage
+    message: errorMessage2
   };
 };
 var EMPTY_PATH = [];
@@ -20279,6 +20328,128 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// src/mlclaw/hf-broker-credential.ts
+var HF_TOKEN_CREATE_URL = "https://huggingface.co/settings/tokens/new";
+var BROKER_PERSONAL_PERMISSIONS = [
+  "collection.read",
+  "collection.write",
+  "discussion.write",
+  "inference.endpoints.infer.write",
+  "inference.endpoints.write",
+  "inference.serverless.write",
+  "job.write",
+  "repo.access.read",
+  "repo.content.read",
+  "repo.write",
+  "resourceGroup.write",
+  "sql-console.embed.write",
+  "user.billing.read",
+  "user.mcp.read",
+  "user.notifications.read",
+  "user.notifications.write",
+  "user.papers.write",
+  "user.preferences.write",
+  "user.settings.notifications.write",
+  "user.social.likes.write",
+  "user.webhooks.read",
+  "user.webhooks.write"
+];
+var BROKER_GLOBAL_PERMISSIONS = ["discussion.write", "post.write"];
+var BROKER_ORGANIZATION_PERMISSIONS = [
+  "collection.read",
+  "collection.write",
+  "discussion.write",
+  "inference.endpoints.infer.write",
+  "inference.endpoints.write",
+  "inference.serverless.write",
+  "job.write",
+  "org.auditLog.write",
+  "org.billing.read",
+  "org.members.read",
+  "org.members.write",
+  "org.networkSecurity.read",
+  "org.networkSecurity.write",
+  "org.read",
+  "org.repos.read",
+  "org.serviceAccounts.read",
+  "org.serviceAccounts.write",
+  "org.write",
+  "repo.access.read",
+  "repo.content.read",
+  "repo.write",
+  "resourceGroup.write",
+  "sql-console.embed.write"
+];
+function buildBrokerTokenUrl(owner, accountName) {
+  const url = new URL(HF_TOKEN_CREATE_URL);
+  url.searchParams.set("tokenType", "fineGrained");
+  for (const permission of BROKER_PERSONAL_PERMISSIONS) {
+    url.searchParams.append("ownUserPermissions", permission);
+  }
+  for (const permission of BROKER_GLOBAL_PERMISSIONS) {
+    url.searchParams.append("globalPermissions", permission);
+  }
+  url.searchParams.set("canReadGatedRepos", "true");
+  if (owner !== accountName) {
+    url.searchParams.append("orgs", owner);
+    for (const permission of BROKER_ORGANIZATION_PERMISSIONS) {
+      url.searchParams.append("orgPermissions", permission);
+    }
+  }
+  return url.toString();
+}
+function assessBrokerCredential(identity, owner) {
+  const accessToken = identity.auth?.accessToken;
+  if (accessToken?.role === "write") {
+    return { status: "sufficient" };
+  }
+  if (accessToken?.role === "read") {
+    return { status: "insufficient", missing: requiredPermissions(owner, identity.name) };
+  }
+  if (accessToken?.role !== "fineGrained") {
+    return {
+      status: "unknown",
+      reason: "Hugging Face does not expose permission details for this login credential"
+    };
+  }
+  if (!accessToken.fineGrained) {
+    return { status: "unknown", reason: "Hugging Face omitted this fine-grained token's permission details" };
+  }
+  const personalAvailable = new Set(scopedPermissions(accessToken.fineGrained.scoped, "user", identity.name));
+  const globalAvailable = new Set(accessToken.fineGrained.global);
+  const missing = BROKER_PERSONAL_PERMISSIONS.filter((permission) => !personalAvailable.has(permission)).map(String);
+  missing.push(
+    ...BROKER_GLOBAL_PERMISSIONS.filter((permission) => !globalAvailable.has(permission)).map(
+      (permission) => `global:${permission}`
+    )
+  );
+  if (!accessToken.fineGrained.canReadGatedRepos) {
+    missing.push("canReadGatedRepos");
+  }
+  if (owner !== identity.name) {
+    const organizationAvailable = new Set(scopedPermissions(accessToken.fineGrained.scoped, "org", owner));
+    missing.push(
+      ...BROKER_ORGANIZATION_PERMISSIONS.filter((permission) => !organizationAvailable.has(permission)).map(
+        (permission) => `org:${permission}`
+      )
+    );
+  }
+  missing.sort();
+  return missing.length === 0 ? { status: "sufficient" } : { status: "insufficient", missing };
+}
+function scopedPermissions(scopes, type, name) {
+  if (!Array.isArray(scopes)) return [];
+  return scopes.filter((scope) => scope.entity.type === type && (!scope.entity.name || scope.entity.name === name)).flatMap((scope) => scope.permissions);
+}
+function requiredPermissions(owner, accountName) {
+  return [
+    ...BROKER_PERSONAL_PERMISSIONS,
+    ...BROKER_GLOBAL_PERMISSIONS.map((permission) => `global:${permission}`),
+    "canReadGatedRepos",
+    ...owner === accountName ? [] : BROKER_ORGANIZATION_PERMISSIONS.map((permission) => `org:${permission}`)
+  ].sort();
+}
+
 // src/mlclaw/tailscale.ts
 import { execFile as execFile3 } from "node:child_process";
 import { promisify as promisify3 } from "node:util";
@@ -20351,7 +20522,7 @@ function parseTailscaleStatus(value) {
     return { ready: false, reason: "Tailscale returned an invalid status" };
   }
   if (status.BackendState !== "Running") {
-    return { ready: false, reason: `Tailscale is ${stringValue(status.BackendState) ?? "not running"}` };
+    return { ready: false, reason: `Tailscale is ${stringValue2(status.BackendState) ?? "not running"}` };
   }
   const self = recordValue(status.Self);
   if (self?.Online === false) {
@@ -20361,8 +20532,8 @@ function parseTailscaleStatus(value) {
     (candidate) => typeof candidate === "string" && isTailscaleIpv4(candidate)
   );
   if (typeof ipv4 !== "string") return { ready: false, reason: "Tailscale IPv4 address is unavailable" };
-  const dnsName = normalizeTailscaleDnsName(stringValue(self?.DNSName));
-  const tailnet = stringValue(recordValue(status.CurrentTailnet)?.Name);
+  const dnsName = normalizeTailscaleDnsName(stringValue2(self?.DNSName));
+  const tailnet = stringValue2(recordValue(status.CurrentTailnet)?.Name);
   return { ready: true, ipv4, ...dnsName ? { dnsName } : {}, ...tailnet ? { tailnet } : {} };
 }
 var TailscaleApprovalRequiredError = class extends Error {
@@ -20469,7 +20640,7 @@ function commandErrorMessage(error) {
 function recordValue(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : void 0;
 }
-function stringValue(value) {
+function stringValue2(value) {
   return typeof value === "string" && value.trim() ? value.trim() : void 0;
 }
 function arrayValue(value) {
@@ -20541,7 +20712,7 @@ function createProgram(runtimeOverrides = {}) {
   program2.command("bootstrap", { isDefault: true }).alias("configure").description("Create or update a Hugging Face OpenClaw deployment").option("--owner <owner>", "Hugging Face user or organization").option("--name <name>", "Agent and runtime resource base name").option("--bucket <owner/bucket>", "State bucket to create or adopt").option("--gateway <local|space>", "Where the live gateway runs").option("--telegram-token <token>", "Optional Telegram bot token").option("--telegram-token-file <path>", "File containing TELEGRAM_BOT_TOKEN=... or a raw token").option("--telegram-user-id <id>", "Allowed Telegram user ID").option("--telegram-api-root <url>", "Telegram API root override").option("--telegram-proxy <url>", "Telegram proxy URL override").option("--hardware <flavor>", "Hugging Face Space hardware flavor").option("--sleep-time <seconds>", "Space sleep timeout in seconds; -1 means never sleep", parseInteger).option("--model <model>", "OpenClaw model identifier").option("--runtime-image <image>", "ML Claw runtime image").option("--bundled-runtime", "Generate a bundled Space runtime instead of using the prebuilt ML Claw image", false).option("--public-space", "Create the Hugging Face Space as public instead of private", false).addOption(new Option("--gateway-token <token>").hideHelp()).option("--router-token <token>", "Hugging Face Router inference token for Space gateway model calls").option(
     "--router-token-file <path>",
     "File containing MLCLAW_ROUTER_TOKEN=..., HF_ROUTER_TOKEN=..., or a raw token"
-  ).option("--docker-context <name>", "Docker context for local gateway mode").option("--container-runtime <auto|docker|podman>", "Local container runtime", "auto").option("--local-port <port>", "Loopback port for a local gateway", parseLocalPort).option("--tailscale <off|direct|serve>", "Tailnet access mode", parseTailscaleMode).option("--tailscale-port <port>", "Tailnet listener or Serve HTTPS port", parseLocalPort).option(
+  ).option("--broker-hf-token-file <path>", "File containing MLCLAW_BROKER_HF_TOKEN=... or a raw Hugging Face token").option("--docker-context <name>", "Docker context for local gateway mode").option("--container-runtime <auto|docker|podman>", "Local container runtime", "auto").option("--local-port <port>", "Loopback port for a local gateway", parseLocalPort).option("--tailscale <off|direct|serve>", "Tailnet access mode", parseTailscaleMode).option("--tailscale-port <port>", "Tailnet listener or Serve HTTPS port", parseLocalPort).option(
     "--allow-local-fallback",
     "Allow non-interactive Space bootstrap to fall back to a ready local runtime",
     false
@@ -20777,20 +20948,24 @@ async function bootstrap(opts, runtime) {
   const runtimeImage = resolveRuntimeImage(opts.runtimeImage, runtime.env);
   resolveSpaceRuntimeImage(opts, runtime.env);
   let plan;
+  let reviewedBrokerHfToken;
   for (; ; ) {
     plan = await resolveBootstrapPlan({
       opts,
       owner,
       agentName,
       hfToken,
+      hfIdentity: me2,
       model,
       runtimeImage,
       hub,
       runtime,
+      ...reviewedBrokerHfToken ? { providedBrokerHfToken: reviewedBrokerHfToken, brokerCredentialReviewed: true } : {},
       ...requestedGatewayLocation ? { requestedGatewayLocation } : {},
       ...telegramToken ? { telegramToken } : {},
       ...telegramUserId ? { telegramUserId } : {}
     });
+    reviewedBrokerHfToken = plan.secrets.MLCLAW_BROKER_HF_TOKEN;
     const alternative = await promptAlternativeBootstrapName({
       plan,
       explicitBucket: opts.bucket,
@@ -20866,6 +21041,8 @@ async function bootstrap(opts, runtime) {
         owner,
         agentName,
         hfToken,
+        hfIdentity: me2,
+        brokerHfToken: activePlan.secrets.MLCLAW_BROKER_HF_TOKEN ?? hfToken,
         model,
         runtimeImage,
         hub,
@@ -21240,6 +21417,9 @@ async function resolveBootstrapPlan(params) {
     agentName,
     requestedGatewayLocation,
     hfToken,
+    hfIdentity,
+    providedBrokerHfToken,
+    brokerCredentialReviewed,
     telegramToken,
     telegramUserId,
     model,
@@ -21251,6 +21431,16 @@ async function resolveBootstrapPlan(params) {
   const now = runtime.now().toISOString();
   const existingManifest = await readManifest(runtime.configRoot, agentName).catch(() => null);
   const existingSecrets = await readSecretEnv(runtime.configRoot, agentName).catch(() => ({}));
+  const effectiveBrokerHfToken = await resolveBrokerHfToken({
+    opts,
+    owner,
+    hfToken,
+    hfIdentity,
+    ...providedBrokerHfToken ? { preferredToken: providedBrokerHfToken } : {},
+    skipReview: Boolean(brokerCredentialReviewed),
+    existingSecrets,
+    runtime
+  });
   const sessionSecret = existingSecrets.MLCLAW_SESSION_SECRET ?? randomBytes(48).toString("base64url");
   const restoredCredentialKey = existingSecrets.MLCLAW_CREDENTIAL_KEY ?? runtime.env.MLCLAW_CREDENTIAL_KEY;
   if (existingManifest?.recoveredWithoutCredentialKey && !restoredCredentialKey) {
@@ -21342,7 +21532,7 @@ async function resolveBootstrapPlan(params) {
   const effectiveTelegramProxy = opts.telegramProxy ?? existingSecrets.TELEGRAM_PROXY;
   const effectiveTelegramApiRoot = opts.telegramApiRoot ?? existingSecrets.TELEGRAM_API_ROOT;
   const secrets = deploymentSecrets({
-    hfToken,
+    hfToken: effectiveBrokerHfToken,
     ...effectiveTelegramToken ? { telegramToken: effectiveTelegramToken } : {},
     ...effectiveTelegramUserId ? { telegramUserId: effectiveTelegramUserId } : {},
     sessionSecret,
@@ -21601,6 +21791,9 @@ async function resolveHostedBootstrapFallback(params) {
       agentName: params.agentName,
       requestedGatewayLocation: "local",
       hfToken: params.hfToken,
+      hfIdentity: params.hfIdentity,
+      providedBrokerHfToken: params.brokerHfToken,
+      brokerCredentialReviewed: true,
       model: params.model,
       runtimeImage: params.runtimeImage,
       hub: params.hub,
@@ -23767,6 +23960,113 @@ async function readOptionalRouterTokenFile(file) {
   const raw = await fs16.readFile(file, "utf8");
   const parsed = parseSecretEnv(raw);
   return nonEmpty(parsed.MLCLAW_ROUTER_TOKEN) ?? nonEmpty(parsed.HF_ROUTER_TOKEN) ?? nonEmpty(raw);
+}
+async function resolveBrokerHfToken(params) {
+  const fileToken = await readOptionalBrokerHfTokenFile(params.opts.brokerHfTokenFile);
+  const configuredToken = fileToken ?? nonEmpty(params.runtime.env.MLCLAW_BROKER_HF_TOKEN) ?? nonEmpty(params.preferredToken) ?? nonEmpty(params.existingSecrets.MLCLAW_BROKER_HF_TOKEN);
+  let token = configuredToken ?? params.hfToken;
+  let identity;
+  try {
+    identity = token === params.hfToken ? params.hfIdentity : await params.runtime.hubFactory(token).whoami();
+    if (identity.name !== params.hfIdentity.name) {
+      throw new Error(`broker token belongs to ${identity.name}, not ${params.hfIdentity.name}`);
+    }
+  } catch (error) {
+    if (fileToken) throw error;
+    const warning = `The saved HF Broker credential could not be used (${errorMessage(error)}). Using the active Hugging Face login instead.`;
+    if (params.runtime.prompt.isInteractive()) {
+      params.runtime.prompt.note(warning, "HF Broker credential");
+    } else {
+      params.runtime.stderr.error(`Warning: ${warning}`);
+    }
+    token = params.hfToken;
+    identity = params.hfIdentity;
+  }
+  const assessment = assessBrokerCredential(identity, params.owner);
+  if (assessment.status === "sufficient") return token;
+  if (params.skipReview) return token;
+  const detail = brokerCredentialAssessmentDetail(assessment);
+  if (!params.runtime.prompt.isInteractive()) {
+    params.runtime.stderr.error(
+      `Warning: ${detail}. Continuing with the current credential; some broker operations may fail with a permission error.`
+    );
+    return token;
+  }
+  params.runtime.prompt.note(
+    `${detail}.
+
+ML Claw can open a Hugging Face token form with BrokerKit's permissions preselected. You still create the token on Hugging Face, then paste it here. Your current HF CLI login will not be changed.`,
+    "HF Broker credential"
+  );
+  const action = await promptSelect(
+    "How should HF Broker authenticate?",
+    [
+      {
+        value: "create",
+        label: "Create a dedicated broker token",
+        hint: "Recommended for complete broker coverage"
+      },
+      {
+        value: "current",
+        label: "Continue with the current credential",
+        hint: "Some broker operations may fail"
+      }
+    ],
+    "create",
+    params.runtime
+  );
+  if (action === "current") return token;
+  const url = buildBrokerTokenUrl(params.owner, params.hfIdentity.name);
+  const opened = await params.runtime.hfCli.openUrl(url);
+  params.runtime.prompt.note(
+    `${opened ? "The token form was opened in your browser." : "Open this token form in your browser."}
+
+Name and create the token, then copy it. The URL contains permission names only; it contains no credential.
+
+${url}`,
+    "Create the broker token"
+  );
+  for (; ; ) {
+    const replacement = readPromptValue(
+      await params.runtime.prompt.password({ message: "Paste the new Hugging Face broker token" }),
+      "Hugging Face broker token"
+    );
+    try {
+      const replacementIdentity = await params.runtime.hubFactory(replacement).whoami();
+      if (replacementIdentity.name !== params.hfIdentity.name) {
+        throw new Error(`token belongs to ${replacementIdentity.name}, not ${params.hfIdentity.name}`);
+      }
+      const replacementAssessment = assessBrokerCredential(replacementIdentity, params.owner);
+      if (replacementAssessment.status !== "sufficient") {
+        throw new Error(brokerCredentialAssessmentDetail(replacementAssessment));
+      }
+      params.runtime.prompt.note(
+        "The dedicated broker token was verified. It will be stored only in ML Claw's trusted broker configuration.",
+        "HF Broker credential ready"
+      );
+      return replacement;
+    } catch (error) {
+      params.runtime.prompt.note(errorMessage(error), "Broker token was not accepted");
+      if (!await promptConfirm("Try another broker token?", true, params.runtime)) return token;
+    }
+  }
+}
+async function readOptionalBrokerHfTokenFile(file) {
+  if (!file) return void 0;
+  const raw = await fs16.readFile(file, "utf8");
+  const parsed = parseSecretEnv(raw);
+  const token = nonEmpty(parsed.MLCLAW_BROKER_HF_TOKEN) ?? nonEmpty(raw);
+  if (!token) throw new Error("HF Broker token file is empty");
+  return token;
+}
+function brokerCredentialAssessmentDetail(assessment) {
+  if (assessment.status === "unknown") return assessment.reason;
+  const shown = assessment.missing.slice(0, 8);
+  const remaining = assessment.missing.length - shown.length;
+  return `The HF Broker credential is missing ${assessment.missing.length} required permission${assessment.missing.length === 1 ? "" : "s"}: ${shown.join(", ")}${remaining > 0 ? `, and ${remaining} more` : ""}`;
+}
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
 }
 function isHuggingFaceRouterModel(model) {
   return model.trim().startsWith("huggingface/");
