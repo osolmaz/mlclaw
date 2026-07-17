@@ -57,9 +57,11 @@
   "session": {
     "dmScope": "per-channel-peer",
     "reset": {
-      "mode": "daily",
-      "atHour": 4,
-      "idleMinutes": 1440
+      "mode": "idle",
+      "idleMinutes": 2147483647
+    },
+    "maintenance": {
+      "resetArchiveRetention": false
     }
   },
   "cron": {

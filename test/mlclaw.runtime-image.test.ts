@@ -9,6 +9,7 @@ import {
   OPENCLAW_VERSION,
   PACKAGE_VERSION,
 } from "../src/mlclaw/runtime-image.js";
+import { AUTOMATIC_SESSION_RESET_DISABLED_MINUTES } from "../src/mlclaw-space-runtime/openclaw-config.js";
 
 describe("runtime image Dockerfile", () => {
   it("healthchecks the ML Claw gateway port", async () => {
@@ -74,8 +75,18 @@ describe("runtime image Dockerfile", () => {
   it("pins OpenClaw's default workspace to the ML Claw live workspace", async () => {
     const config = JSON.parse(await fs.readFile("openclaw.default.json", "utf8")) as {
       agents?: { defaults?: { workspace?: string } };
+      session?: {
+        reset?: { mode?: string; atHour?: number; idleMinutes?: number };
+        maintenance?: { resetArchiveRetention?: boolean };
+      };
     };
     expect(config.agents?.defaults?.workspace).toBe("${OPENCLAW_WORKSPACE_DIR}");
+    expect(config.session?.reset).toEqual({
+      mode: "idle",
+      idleMinutes: AUTOMATIC_SESSION_RESET_DISABLED_MINUTES,
+    });
+    expect(config.session?.reset?.atHour).toBeUndefined();
+    expect(config.session?.maintenance?.resetArchiveRetention).toBe(false);
   });
 
   it("leaves workspace tooling seeding to the bootstrap-aware runtime", async () => {

@@ -8584,6 +8584,7 @@ function remainingUpstreamTimeout(deadline) {
 // src/mlclaw-space-runtime/openclaw-config.ts
 var BROKER_MCP_CONNECTION_TIMEOUT_MS = 1e4;
 var BROKER_MCP_REQUEST_TIMEOUT_MS = 45e3;
+var AUTOMATIC_SESSION_RESET_DISABLED_MINUTES = 2147483647;
 async function configureOpenClawGateway(config2) {
   const raw2 = await fs.readFile(config2.openclawConfigPath, "utf8");
   const openclawConfig = JSON.parse(raw2);
@@ -8607,6 +8608,7 @@ async function configureOpenClawGateway(config2) {
     embedSandbox: "scripts"
   };
   configureOpenClawModels(openclawConfig, config2);
+  disableAutomaticSessionResets(openclawConfig);
   configureManagedMcpServers(openclawConfig, config2);
   configureBrokerMcpServer(openclawConfig, config2);
   configureBrokerKitPlugin(openclawConfig, config2);
@@ -8617,6 +8619,18 @@ async function configureOpenClawGateway(config2) {
   if (process.getuid?.() === 0) {
     await fs.chown(config2.openclawConfigPath, config2.openclawUid, config2.openclawGid);
   }
+}
+function disableAutomaticSessionResets(openclawConfig) {
+  const session = object(openclawConfig, "session");
+  session.reset = {
+    mode: "idle",
+    idleMinutes: AUTOMATIC_SESSION_RESET_DISABLED_MINUTES
+  };
+  delete session.idleMinutes;
+  delete session.resetByType;
+  delete session.resetByChannel;
+  const maintenance = object(session, "maintenance");
+  maintenance.resetArchiveRetention = false;
 }
 function configureBrokerMcpServer(openclawConfig, config2) {
   const servers = object(object(openclawConfig, "mcp"), "servers");

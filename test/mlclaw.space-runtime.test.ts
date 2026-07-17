@@ -1938,6 +1938,13 @@ describe("ML Claw Space runtime", () => {
     await fs.writeFile(
       configPath,
       JSON.stringify({
+        session: {
+          idleMinutes: 60,
+          reset: { mode: "daily", atHour: 4, idleMinutes: 1440 },
+          resetByType: { direct: { mode: "daily", atHour: 6 } },
+          resetByChannel: { telegram: { mode: "idle", idleMinutes: 30 } },
+          maintenance: { pruneAfter: "30d" },
+        },
         gateway: {
           controlUi: {
             allowedOrigins: ["https://old.example"],
@@ -1991,6 +1998,10 @@ describe("ML Claw Space runtime", () => {
       },
     });
     expect(rewritten.agents.defaults.model.primary).toBe("huggingface/google/gemma-4-26B-A4B-it:deepinfra");
+    expect(rewritten.session).toEqual({
+      reset: { mode: "idle", idleMinutes: 2_147_483_647 },
+      maintenance: { pruneAfter: "30d", resetArchiveRetention: false },
+    });
     expect(rewritten.agents.defaults.models).toHaveProperty("huggingface/google/gemma-4-26B-A4B-it:deepinfra");
     expect(rewritten.agents.defaults.models).toHaveProperty("huggingface/Qwen/Qwen3.6-27B:deepinfra");
     expect(rewritten.models.providers.huggingface).toMatchObject({

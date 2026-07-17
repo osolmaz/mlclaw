@@ -6,6 +6,8 @@ import { displayNameFromModelId, parseOpenClawModelRef, type ModelChoice } from 
 
 export const BROKER_MCP_CONNECTION_TIMEOUT_MS = 10_000;
 export const BROKER_MCP_REQUEST_TIMEOUT_MS = 45_000;
+// OpenClaw has no disabled reset mode. This valid idle window is over 4,000 years.
+export const AUTOMATIC_SESSION_RESET_DISABLED_MINUTES = 2_147_483_647;
 
 export async function configureOpenClawGateway(config: SpaceRuntimeConfig): Promise<void> {
   const raw = await fs.readFile(config.openclawConfigPath, "utf8");
@@ -30,6 +32,7 @@ export async function configureOpenClawGateway(config: SpaceRuntimeConfig): Prom
     embedSandbox: "scripts",
   };
   configureOpenClawModels(openclawConfig, config);
+  disableAutomaticSessionResets(openclawConfig);
   configureManagedMcpServers(openclawConfig, config);
   configureBrokerMcpServer(openclawConfig, config);
   configureBrokerKitPlugin(openclawConfig, config);
@@ -40,6 +43,20 @@ export async function configureOpenClawGateway(config: SpaceRuntimeConfig): Prom
   if (process.getuid?.() === 0) {
     await fs.chown(config.openclawConfigPath, config.openclawUid, config.openclawGid);
   }
+}
+
+function disableAutomaticSessionResets(openclawConfig: Record<string, unknown>): void {
+  const session = object(openclawConfig, "session");
+  session.reset = {
+    mode: "idle",
+    idleMinutes: AUTOMATIC_SESSION_RESET_DISABLED_MINUTES,
+  };
+  delete session.idleMinutes;
+  delete session.resetByType;
+  delete session.resetByChannel;
+
+  const maintenance = object(session, "maintenance");
+  maintenance.resetArchiveRetention = false;
 }
 
 function configureBrokerMcpServer(openclawConfig: Record<string, unknown>, config: SpaceRuntimeConfig): void {
