@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -28,7 +29,11 @@ import type {
   TailscaleServeState,
 } from "../src/mlclaw/tailscale.js";
 import { TailscaleApprovalRequiredError } from "../src/mlclaw/tailscale.js";
-import { BROKER_GLOBAL_PERMISSIONS, BROKER_PERSONAL_PERMISSIONS } from "../src/mlclaw/hf-broker-credential.js";
+import {
+  BROKER_GLOBAL_PERMISSIONS,
+  BROKER_ORGANIZATION_PERMISSIONS,
+  BROKER_PERSONAL_PERMISSIONS,
+} from "../src/mlclaw/hf-broker-credential.js";
 
 type PromptAnswer = string | boolean;
 
@@ -63,6 +68,7 @@ function createFakeHub(
     existingSpaces?: string[];
     spaceVisibilities?: Record<string, "private" | "public">;
     createDockerSpaceError?: Error;
+    restartSpaceErrors?: Error[];
     failFirstTombstoneUpload?: boolean;
     onDeploymentClaimAcquired?: (bucketObjects: Map<string, string>) => void;
     identity?: HubIdentity;
@@ -151,13 +157,7 @@ function createFakeHub(
     },
     async whoami() {
       calls.push({ name: "whoami", args: [] });
-      return (
-        opts.identity ?? {
-          name: "alice",
-          organizations: [],
-          auth: { type: "access_token", accessToken: { role: "write" } },
-        }
-      );
+      return opts.identity ?? completeFineGrainedIdentity();
     },
     async createBucket(...args: unknown[]) {
       calls.push({ name: "createBucket", args });
@@ -227,6 +227,8 @@ function createFakeHub(
     },
     async restartSpace(...args: unknown[]) {
       calls.push({ name: "restartSpace", args });
+      const restartError = opts.restartSpaceErrors?.shift();
+      if (restartError) throw restartError;
       const agent = variables.get("OPENCLAW_AGENT_NAME")?.value ?? "research";
       const bucket = variables.get("OPENCLAW_HF_STATE_BUCKET")?.value ?? "alice/research-data";
       const prefix = variables.get("OPENCLAW_HF_STATE_PREFIX")?.value ?? "openclaw-state";
@@ -338,7 +340,7 @@ async function createRuntime(hub: HubApi, prompt: ReturnType<typeof createPrompt
   const podman = createFakeDocker("podman");
   const configRoot = await fs.mkdtemp(path.join(os.tmpdir(), "mlclaw-cli-test-"));
   return {
-    env: { MLCLAW_ROUTER_TOKEN: "hf_router_test" },
+    env: { MLCLAW_BROKER_HF_TOKEN: "hf_broker_test", MLCLAW_ROUTER_TOKEN: "hf_router_test" },
     stdout: { log: () => undefined },
     stderr: { error: (message: unknown) => stderr.push(String(message)) },
     readToken: async () => "hf_test_token",
@@ -526,7 +528,7 @@ describe("mlclaw CLI", () => {
     const manifest = await readManifest(runtime.configRoot, "research");
     expect(manifest.localRuntimeId).toMatch(/^local-research-[a-f0-9]{16}$/);
     await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
-      MLCLAW_BROKER_HF_TOKEN: "hf_test_token",
+      MLCLAW_BROKER_HF_TOKEN: "hf_broker_test",
       MLCLAW_RUNTIME_ID: manifest.localRuntimeId,
       OPENCLAW_MODEL: DEFAULT_MODEL,
     });
@@ -2088,7 +2090,7 @@ describe("mlclaw CLI", () => {
     expect(hub.calls.some((call) => call.name === "createBucket")).toBe(false);
   });
 
-  it("uses the active broad token behind HF Broker for non-interactive Space bootstrap", async () => {
+  it("fails non-interactive Space bootstrap without a dedicated broker token", async () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt([], false);
     const stderr: string[] = [];
@@ -2099,12 +2101,9 @@ describe("mlclaw CLI", () => {
 
     const code = await main(["bootstrap", "--name", "research", "--yes"], runtime);
 
-    expect(code).toBe(0);
-    expect(stderr.join("\n")).toBe("");
-    expect(hub.calls).toContainEqual({
-      name: "addSpaceSecret",
-      args: ["alice/research", "MLCLAW_BROKER_HF_TOKEN", "hf_test_token"],
-    });
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain("a dedicated HF Broker credential is required");
+    expect(hub.calls.some((call) => call.name === "addSpaceSecret")).toBe(false);
   });
 
   it("guides an interactive OAuth login to a verified dedicated broker token", async () => {
@@ -2112,10 +2111,11 @@ describe("mlclaw CLI", () => {
       identity: { name: "alice", organizations: [], auth: { type: "oauth" } },
     });
     const brokerHub = createFakeHub({ identity: completeFineGrainedIdentity() });
-    const { prompt, notes } = createPrompt(["create", "hf_broker_complete"]);
+    const { prompt, notes } = createPrompt(["hf_broker_complete"]);
     const openedUrls: string[] = [];
     const runtime = {
       ...(await createRuntime(loginHub, prompt)),
+      env: {},
       hubFactory: (token: string) => (token === "hf_broker_complete" ? brokerHub : loginHub),
       hfCli: {
         findExecutable: async () => "/usr/bin/hf",
@@ -2155,11 +2155,11 @@ describe("mlclaw CLI", () => {
     });
   });
 
-  it("keeps an opaque credential in non-interactive mode and warns about limited coverage", async () => {
+  it("rejects an opaque broker credential in non-interactive mode", async () => {
     const hub = createFakeHub({ identity: { name: "alice", organizations: [], auth: { type: "oauth" } } });
     const { prompt } = createPrompt([], false);
     const stderr: string[] = [];
-    const runtime = await createRuntime(hub, prompt, stderr);
+    const runtime = { ...(await createRuntime(hub, prompt, stderr)), env: { MLCLAW_BROKER_HF_TOKEN: "hf_opaque" } };
 
     const code = await main(
       [
@@ -2176,11 +2176,9 @@ describe("mlclaw CLI", () => {
       runtime,
     );
 
-    expect(code).toBe(0);
-    expect(stderr.join("\n")).toContain("does not expose permission details");
-    await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
-      MLCLAW_BROKER_HF_TOKEN: "hf_test_token",
-    });
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain("requires a dedicated fine-grained Hugging Face token");
+    await expect(readSecretEnv(runtime.configRoot, "research")).rejects.toThrow();
   });
 
   it("reuses and verifies an existing broker token instead of replacing it with the login token", async () => {
@@ -2189,6 +2187,7 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([], false);
     const runtime = {
       ...(await createRuntime(loginHub, prompt)),
+      env: { MLCLAW_ROUTER_TOKEN: "hf_router_test" },
       hubFactory: (token: string) => (token === "hf_saved_broker" ? savedHub : loginHub),
     };
     await writeSecretEnv(runtime.configRoot, "research", {
@@ -2251,6 +2250,134 @@ describe("mlclaw CLI", () => {
     });
   });
 
+  it("reports dedicated broker credential health without using the provisioning login", async () => {
+    const hub = createFakeHub();
+    const output: string[] = [];
+    const runtime = {
+      ...(await createRuntime(hub, createPrompt([], false).prompt)),
+      stdout: { log: (message: unknown) => output.push(String(message)) },
+    };
+    await expect(
+      main(["bootstrap", "--gateway", "local", "--name", "research", "--no-pull", "--yes"], runtime),
+    ).resolves.toBe(0);
+    runtime.readToken = async () => {
+      throw new Error("provisioning login must not be read");
+    };
+    output.length = 0;
+
+    await expect(main(["credentials", "status"], runtime)).resolves.toBe(0);
+
+    expect(output).toContain("Status: healthy");
+    expect(output).toContain("Profile: hf-broker-complete-v1");
+    expect(output.join("\n")).not.toContain("hf_broker_test");
+  });
+
+  it("fails credential status closed when verification metadata is missing", async () => {
+    const hub = createFakeHub();
+    const stderr: string[] = [];
+    const runtime = await createRuntime(hub, createPrompt([], false).prompt, stderr);
+    await expect(
+      main(["bootstrap", "--gateway", "local", "--name", "research", "--no-pull", "--yes"], runtime),
+    ).resolves.toBe(0);
+    const manifest = await readManifest(runtime.configRoot, "research");
+    const { brokerCredential: _brokerCredential, ...legacyManifest } = manifest;
+    await writeManifest(runtime.configRoot, legacyManifest);
+    runtime.readToken = async () => {
+      throw new Error("provisioning login must not be read");
+    };
+
+    await expect(main(["credentials", "status", "research"], runtime)).resolves.toBe(1);
+
+    expect(stderr.join("\n")).toContain("credential metadata is missing");
+  });
+
+  it("repairs a running local gateway with a verified replacement", async () => {
+    const hub = createFakeHub();
+    const replacementHub = createFakeHub();
+    const runtime = {
+      ...(await createRuntime(hub, createPrompt([], false).prompt)),
+      hubFactory: (token: string) => (token === "hf_broker_replacement" ? replacementHub : hub),
+    };
+    await expect(
+      main(["bootstrap", "--gateway", "local", "--name", "research", "--no-pull", "--yes"], runtime),
+    ).resolves.toBe(0);
+    runtime.dockerRunner.calls.length = 0;
+    const tokenFile = path.join(runtime.configRoot, "replacement-token");
+    await fs.writeFile(tokenFile, "hf_broker_replacement\n", { mode: 0o600 });
+
+    await expect(
+      main(["credentials", "repair", "research", "--broker-hf-token-file", tokenFile], runtime),
+    ).resolves.toBe(0);
+
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(true);
+    await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
+      MLCLAW_BROKER_HF_TOKEN: "hf_broker_replacement",
+    });
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      brokerCredential: {
+        profileId: "hf-broker-complete-v1",
+        account: "alice",
+        fingerprintSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      },
+    });
+  });
+
+  it("repairs a stopped local gateway without starting it", async () => {
+    const hub = createFakeHub();
+    const replacementHub = createFakeHub();
+    const runtime = {
+      ...(await createRuntime(hub, createPrompt([], false).prompt)),
+      hubFactory: (token: string) => (token === "hf_broker_replacement" ? replacementHub : hub),
+    };
+    await expect(
+      main(["bootstrap", "--gateway", "local", "--name", "research", "--no-pull", "--yes"], runtime),
+    ).resolves.toBe(0);
+    runtime.dockerRunner.inspectValue = { exists: true, running: false, status: "exited" };
+    runtime.dockerRunner.calls.length = 0;
+    const tokenFile = path.join(runtime.configRoot, "replacement-token");
+    await fs.writeFile(tokenFile, "hf_broker_replacement\n", { mode: 0o600 });
+
+    await expect(
+      main(["credentials", "repair", "research", "--broker-hf-token-file", tokenFile], runtime),
+    ).resolves.toBe(0);
+
+    expect(runtime.dockerRunner.calls.map((call) => call.name)).toEqual(["inspect"]);
+    await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
+      MLCLAW_BROKER_HF_TOKEN: "hf_broker_replacement",
+    });
+  });
+
+  it("rolls back a Space credential when restart fails", async () => {
+    const restartSpaceErrors: Error[] = [];
+    const hub = createFakeHub({ restartSpaceErrors });
+    const replacementHub = createFakeHub();
+    const stderr: string[] = [];
+    const runtime = {
+      ...(await createRuntime(hub, createPrompt([], false).prompt, stderr)),
+      hubFactory: (token: string) => (token === "hf_broker_replacement" ? replacementHub : hub),
+    };
+    await expect(main(["bootstrap", "--name", "research", "--yes"], runtime)).resolves.toBe(0);
+    const previousManifest = await readManifest(runtime.configRoot, "research");
+    restartSpaceErrors.push(new Error("simulated restart failure"));
+    const tokenFile = path.join(runtime.configRoot, "replacement-token");
+    await fs.writeFile(tokenFile, "hf_broker_replacement\n", { mode: 0o600 });
+    hub.calls.length = 0;
+
+    await expect(
+      main(["credentials", "repair", "research", "--broker-hf-token-file", tokenFile], runtime),
+    ).resolves.toBe(1);
+
+    expect(stderr.join("\n")).toContain("simulated restart failure");
+    expect(hub.calls.filter((call) => call.name === "addSpaceSecret")).toEqual([
+      { name: "addSpaceSecret", args: ["alice/research", "MLCLAW_BROKER_HF_TOKEN", "hf_broker_replacement"] },
+      { name: "addSpaceSecret", args: ["alice/research", "MLCLAW_BROKER_HF_TOKEN", "hf_broker_test"] },
+    ]);
+    await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
+      MLCLAW_BROKER_HF_TOKEN: "hf_broker_test",
+    });
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toEqual(previousManifest);
+  });
+
   it("rejects a pasted broker token from another account without replacing the current credential", async () => {
     const loginHub = createFakeHub({
       identity: { name: "alice", organizations: [], auth: { type: "oauth" } },
@@ -2262,9 +2389,10 @@ describe("mlclaw CLI", () => {
         auth: { type: "access_token", accessToken: { role: "write" } },
       },
     });
-    const { prompt, notes } = createPrompt(["create", "hf_other_account", false]);
+    const { prompt, notes } = createPrompt(["hf_other_account", false]);
     const runtime = {
       ...(await createRuntime(loginHub, prompt)),
+      env: {},
       hubFactory: (token: string) => (token === "hf_other_account" ? otherHub : loginHub),
       hfCli: {
         findExecutable: async () => "/usr/bin/hf",
@@ -2291,16 +2419,14 @@ describe("mlclaw CLI", () => {
       runtime,
     );
 
-    expect(code).toBe(0);
+    expect(code).toBe(1);
     expect(notes).toContainEqual(
       expect.objectContaining({ title: "Broker token was not accepted", message: expect.stringContaining("mallory") }),
     );
-    await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
-      MLCLAW_BROKER_HF_TOKEN: "hf_test_token",
-    });
+    await expect(readSecretEnv(runtime.configRoot, "research")).rejects.toThrow();
   });
 
-  it("uses the active broad token behind HF Broker for a non-interactive local gateway", async () => {
+  it("fails a non-interactive local gateway without a dedicated broker token", async () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt([], false);
     const stderr: string[] = [];
@@ -2324,15 +2450,12 @@ describe("mlclaw CLI", () => {
       runtime,
     );
 
-    expect(code).toBe(0);
-    expect(stderr.join("\n")).toBe("");
-    expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(true);
-    await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
-      MLCLAW_BROKER_HF_TOKEN: "hf_test_token",
-    });
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain("a dedicated HF Broker credential is required");
+    expect(runtime.dockerRunner.calls.some((call) => call.name === "run")).toBe(false);
   });
 
-  it("reuses a persisted Router token for non-interactive Space bootstrap", async () => {
+  it("does not treat a persisted Router token as a broker credential", async () => {
     const hub = createFakeHub();
     const { prompt } = createPrompt([], false);
     const stderr: string[] = [];
@@ -2354,16 +2477,9 @@ describe("mlclaw CLI", () => {
 
     const code = await main(["bootstrap", "--name", "research", "--yes"], runtime);
 
-    expect(code).toBe(0);
-    expect(stderr.join("\n")).toBe("");
-    expect(hub.calls).toContainEqual({
-      name: "addSpaceSecret",
-      args: ["alice/research", "MLCLAW_ROUTER_TOKEN", "hf_router_saved"],
-    });
-    expect(hub.calls).toContainEqual({
-      name: "addSpaceSecret",
-      args: ["alice/research", "MLCLAW_CREDENTIAL_KEY", expect.any(String)],
-    });
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain("a dedicated HF Broker credential is required");
+    expect(hub.calls.some((call) => call.name === "addSpaceSecret")).toBe(false);
   });
 
   it("does not overwrite Space volumes when runtime volume metadata cannot be read", async () => {
@@ -2486,10 +2602,11 @@ describe("mlclaw CLI", () => {
       identity: { name: "alice", organizations: [], auth: { type: "oauth" } },
     });
     const brokerHub = createFakeHub({ identity: completeFineGrainedIdentity() });
-    const { prompt, notes } = createPrompt(["create", "hf_broker_complete", "mlclaw-fresh"]);
+    const { prompt, notes } = createPrompt(["hf_broker_complete", "mlclaw-fresh"]);
     const openedUrls: string[] = [];
     const runtime = {
       ...(await createRuntime(hub, prompt)),
+      env: {},
       hubFactory: (token: string) => (token === "hf_broker_complete" ? brokerHub : hub),
       hfCli: {
         findExecutable: async () => "/usr/bin/hf",
@@ -2934,6 +3051,7 @@ describe("mlclaw CLI", () => {
     await hub.addSpaceVariable("alice/research", "MLCLAW_RUNTIME_IMAGE", "registry.example/mlclaw:test");
     const { prompt } = createPrompt([]);
     const baseRuntime = await createRuntime(hub, prompt);
+    await seedDedicatedCredentialDeployment(baseRuntime);
     const pushed: Array<{ runtimeImage: string | undefined }> = [];
     const runtime = {
       ...baseRuntime,
@@ -2953,7 +3071,7 @@ describe("mlclaw CLI", () => {
     });
     expect(hub.calls).toContainEqual({
       name: "addSpaceSecret",
-      args: ["alice/research", "MLCLAW_BROKER_HF_TOKEN", "hf_test_token"],
+      args: ["alice/research", "MLCLAW_BROKER_HF_TOKEN", "hf_broker_test"],
     });
     expect(hub.calls).toContainEqual({
       name: "addSpaceVariable",
@@ -2987,6 +3105,7 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([], false);
     const stderr: string[] = [];
     const baseRuntime = await createRuntime(hub, prompt, stderr);
+    await seedDedicatedCredentialDeployment(baseRuntime);
     let pushed = false;
     const runtime = {
       ...baseRuntime,
@@ -3004,7 +3123,7 @@ describe("mlclaw CLI", () => {
     expect(pushed).toBe(true);
     expect(hub.calls).toContainEqual({
       name: "addSpaceSecret",
-      args: ["alice/research", "MLCLAW_BROKER_HF_TOKEN", "hf_test_token"],
+      args: ["alice/research", "MLCLAW_BROKER_HF_TOKEN", "hf_broker_test"],
     });
     expect(hub.calls.some((call) => call.name === "restartSpace")).toBe(false);
   });
@@ -3017,20 +3136,9 @@ describe("mlclaw CLI", () => {
     hub.calls.length = 0;
     const { prompt } = createPrompt([], false);
     const runtime = await createRuntime(hub, prompt);
-    await writeManifest(runtime.configRoot, {
-      version: 1,
-      agent: "research",
-      owner: "alice",
-      bucket: "alice/research-data",
-      space: "alice/research",
-      localRuntimeId: "local-research-existing",
-      gatewayLocation: "space",
-      model: DEFAULT_MODEL,
-      runtimeImage: DEFAULT_RUNTIME_IMAGE,
-      createdAt: "2026-06-16T00:00:00.000Z",
-      updatedAt: "2026-06-16T00:00:00.000Z",
-    });
+    await seedDedicatedCredentialDeployment(runtime);
     await writeSecretEnv(runtime.configRoot, "research", {
+      ...(await readSecretEnv(runtime.configRoot, "research")),
       MLCLAW_ROUTER_TOKEN: "hf_router_revoked",
     });
 
@@ -3053,6 +3161,7 @@ describe("mlclaw CLI", () => {
     await hub.addSpaceVariable("alice/research", "MLCLAW_RUNTIME_IMAGE", "registry.example/mlclaw:test");
     const { prompt } = createPrompt([]);
     const baseRuntime = await createRuntime(hub, prompt);
+    await seedDedicatedCredentialDeployment(baseRuntime);
     const pushed: Array<{ runtimeImage: string | undefined }> = [];
     const runtime = {
       ...baseRuntime,
@@ -3078,6 +3187,7 @@ describe("mlclaw CLI", () => {
     await hub.addSpaceVariable("alice/research", "MLCLAW_RUNTIME_IMAGE", "registry.example/mlclaw:old");
     const { prompt } = createPrompt([]);
     const baseRuntime = await createRuntime(hub, prompt);
+    await seedDedicatedCredentialDeployment(baseRuntime);
     const pushed: Array<{ runtimeImage: string | undefined }> = [];
     const runtime = {
       ...baseRuntime,
@@ -3196,6 +3306,7 @@ describe("mlclaw CLI", () => {
       ...(await createRuntime(hub, prompt)),
       stdout: { log: (message: unknown) => output.push(String(message)) },
     };
+    await seedDedicatedCredentialDeployment(runtime);
 
     const code = await main(["doctor", "alice/research", "--fix"], runtime);
 
@@ -3269,7 +3380,6 @@ describe("mlclaw CLI", () => {
       ...(await createRuntime(hub, prompt)),
       stdout: { log: (message: unknown) => output.push(String(message)) },
     };
-
     const code = await main(["doctor", "alice/research"], runtime);
 
     expect(code).toBe(0);
@@ -3299,6 +3409,7 @@ describe("mlclaw CLI", () => {
       ...(await createRuntime(hub, prompt)),
       stdout: { log: (message: unknown) => output.push(String(message)) },
     };
+    await seedDedicatedCredentialDeployment(runtime);
 
     const code = await main(["doctor", "alice/research", "--fix"], runtime);
 
@@ -3328,6 +3439,7 @@ describe("mlclaw CLI", () => {
     const { prompt } = createPrompt([]);
     const stderr: string[] = [];
     const runtime = await createRuntime(hub, prompt, stderr);
+    await seedDedicatedCredentialDeployment(runtime);
 
     const code = await main(["doctor", "alice/research", "--fix"], runtime);
 
@@ -3436,6 +3548,7 @@ describe("mlclaw CLI", () => {
     });
     await writeSecretEnv(runtime.configRoot, "research", {
       HF_TOKEN: "hf_test_token",
+      MLCLAW_BROKER_HF_TOKEN: "hf_broker_saved",
       OPENCLAW_HF_STATE_BUCKET: "alice/research-data",
       OPENCLAW_AGENT_NAME: "research",
       OPENCLAW_MODEL: DEFAULT_MODEL,
@@ -4445,10 +4558,36 @@ describe("mlclaw CLI", () => {
   });
 });
 
+async function seedDedicatedCredentialDeployment(runtime: { configRoot: string }): Promise<void> {
+  const token = "hf_broker_test";
+  await writeManifest(runtime.configRoot, {
+    version: 2,
+    deploymentId: "11111111-1111-5111-a111-111111111111",
+    desiredGeneration: 0,
+    agent: "research",
+    owner: "alice",
+    bucket: "alice/research-data",
+    space: "alice/research",
+    localRuntimeId: "local-research-existing",
+    gatewayLocation: "space",
+    model: DEFAULT_MODEL,
+    runtimeImage: DEFAULT_RUNTIME_IMAGE,
+    brokerCredential: {
+      profileId: "hf-broker-complete-v1",
+      account: "alice",
+      fingerprintSha256: createHash("sha256").update(token).digest("hex"),
+      verifiedAt: "2026-06-16T00:00:00.000Z",
+    },
+    createdAt: "2026-06-16T00:00:00.000Z",
+    updatedAt: "2026-06-16T00:00:00.000Z",
+  });
+  await writeSecretEnv(runtime.configRoot, "research", { MLCLAW_BROKER_HF_TOKEN: token });
+}
+
 function completeFineGrainedIdentity(): HubIdentity {
   return {
     name: "alice",
-    organizations: [],
+    organizations: ["research-org"],
     auth: {
       type: "access_token",
       accessToken: {
@@ -4460,6 +4599,10 @@ function completeFineGrainedIdentity(): HubIdentity {
             {
               entity: { type: "user", name: "alice" },
               permissions: [...BROKER_PERSONAL_PERMISSIONS],
+            },
+            {
+              entity: { type: "org", name: "research-org" },
+              permissions: [...BROKER_ORGANIZATION_PERMISSIONS],
             },
           ],
         },

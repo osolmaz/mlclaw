@@ -47,23 +47,23 @@ flow, and resumes after sign-in. Non-interactive runs never install software and
 still require a token up front. You never paste that token into someone else's
 app; the bootstrapper runs locally.
 
-ML Claw checks whether the credential assigned to HF Broker exposes enough
-permission metadata for the broker's operation catalog. When the active CLI
-login is an opaque OAuth credential or is missing permissions, interactive
-bootstrap can open Hugging Face's fine-grained token form with BrokerKit fields
-preselected. You name and create the token on Hugging Face, then paste it into a
-hidden local prompt. This does not replace or modify the active `hf` CLI login.
-For automation, pass a `0600` file through `--broker-hf-token-file`; ML Claw
-does not accept the token as a command-line value.
+The `hf` CLI login is a provisioning credential: ML Claw uses it to create and
+configure resources owned by your account. HF Broker uses a separate, durable
+fine-grained credential whose required permissions are versioned by BrokerKit.
+Interactive bootstrap opens Hugging Face's token form with those fields
+preselected, then accepts the new token through a hidden local prompt. Creating
+or replacing this credential never changes the active `hf` CLI login. For
+automation, pass a `0600` file through `--broker-hf-token-file`; ML Claw does
+not accept the token as a command-line value.
 
 The broker owns the selected credential; OpenClaw receives only a separate
 agent credential that can call the broker's typed, policy-checked routes. It
 cannot read the token or use the admin-only operator API. Rerunning bootstrap
-preserves and rechecks an existing broker token. You may continue with an
-unverified credential, but individual broker operations can then fail with a
-Hugging Face permission error. Existing dedicated inference tokens remain
-supported through `MLCLAW_ROUTER_TOKEN`, `HF_ROUTER_TOKEN`, or
-`--router-token-file` during migration.
+reuses a healthy saved broker credential without reopening the form. A missing,
+invalid, wrong-account, or under-scoped credential must be repaired before ML
+Claw continues; it never silently substitutes the active CLI login. Existing
+dedicated inference tokens remain supported through `MLCLAW_ROUTER_TOKEN`,
+`HF_ROUTER_TOKEN`, or `--router-token-file` during migration.
 
 ## Default Flow
 
@@ -265,9 +265,25 @@ It never reads secret values and never modifies bucket contents.
 
 `mlclaw update` also refreshes the generated Space Dockerfile and runtime
 metadata, so older Spaces can move to the current implementation without
-recreating their bucket. For legacy deployments, ML Claw installs the active
-local Hugging Face credential as `MLCLAW_BROKER_HF_TOKEN`, removes stale direct
-token secrets, and restarts the Space with the broker boundary enabled.
+recreating their bucket. It does not promote the active Hugging Face CLI login
+into a runtime secret. Recover or repair the dedicated broker credential first
+when updating a deployment that predates this boundary.
+
+Inspect or replace the dedicated credential with:
+
+```bash
+mlclaw credentials status mlclaw
+mlclaw credentials repair mlclaw
+mlclaw credentials repair mlclaw --broker-hf-token-file ~/secrets/mlclaw-broker.env
+```
+
+`status` performs a read-only verification and prints the account, BrokerKit
+profile, verification time, and a short SHA-256 fingerprint, never the token.
+`repair` validates the replacement before changing anything. Local running
+gateways are replaced transactionally and rolled back on failure; stopped local
+gateways stay stopped. Space repair uses the active CLI login only to install
+the already-validated secret and restart the Space, restoring the previous
+secret and local metadata if the operation fails.
 
 ## Browser Settings
 

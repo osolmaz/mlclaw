@@ -4,6 +4,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { GatewayLocation } from "./gateway-location.js";
+import type { BrokerCredentialMetadata } from "./hf-broker-credential.js";
 import { AGENT_NAME_PATTERN, assertAgentName } from "./naming.js";
 
 export type DeploymentManifest = {
@@ -18,6 +19,7 @@ export type DeploymentManifest = {
   gatewayLocation: GatewayLocation;
   model: string;
   runtimeImage: string;
+  brokerCredential?: BrokerCredentialMetadata;
   credentialKeySha256?: string;
   tailscaleMode?: "off" | "direct" | "serve";
   spaceVisibility?: "private" | "public";
@@ -121,6 +123,15 @@ const manifestFields = {
   gatewayLocation: z.enum(["local", "space"]),
   model: z.string().min(1).max(512),
   runtimeImage: z.string().min(1).max(1024),
+  brokerCredential: z
+    .object({
+      profileId: z.literal("hf-broker-complete-v1"),
+      account: z.string().min(1).max(128),
+      fingerprintSha256: z.string().regex(/^[a-f0-9]{64}$/),
+      verifiedAt: z.string().datetime(),
+    })
+    .strict()
+    .optional(),
   credentialKeySha256: z
     .string()
     .regex(/^[a-f0-9]{64}$/)

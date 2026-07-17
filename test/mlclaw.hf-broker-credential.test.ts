@@ -30,10 +30,10 @@ describe("HF Broker credential policy", () => {
     expect(url.searchParams.getAll("ownUserPermissions")).toEqual(BROKER_PERSONAL_PERMISSIONS);
   });
 
-  it("accepts legacy write tokens", () => {
+  it("rejects legacy write tokens", () => {
     expect(
       assessBrokerCredential(identity({ type: "access_token", accessToken: { role: "write" } }), "research-org"),
-    ).toEqual({ status: "sufficient" });
+    ).toEqual({ status: "unsupported", reason: "HF Broker requires a dedicated fine-grained Hugging Face token" });
   });
 
   it("accepts a complete personal fine-grained token", () => {
@@ -92,18 +92,18 @@ describe("HF Broker credential policy", () => {
     });
   });
 
-  it("does not claim opaque OAuth credentials are insufficient", () => {
+  it("rejects opaque OAuth credentials", () => {
     expect(assessBrokerCredential(identity({ type: "oauth" }), "alice")).toEqual({
-      status: "unknown",
-      reason: "Hugging Face does not expose permission details for this login credential",
+      status: "unsupported",
+      reason: "HF Broker requires a dedicated fine-grained Hugging Face token",
     });
   });
 
-  it("reports fine-grained credentials whose metadata is omitted as unknown", () => {
+  it("rejects fine-grained credentials whose metadata is omitted", () => {
     expect(
       assessBrokerCredential(identity({ type: "access_token", accessToken: { role: "fineGrained" } }), "alice"),
     ).toEqual({
-      status: "unknown",
+      status: "unsupported",
       reason: "Hugging Face omitted this fine-grained token's permission details",
     });
   });

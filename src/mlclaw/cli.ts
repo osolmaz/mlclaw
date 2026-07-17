@@ -79,6 +79,7 @@ import { getTelegramBot, type TelegramBot } from "./telegram.js";
 import { createSystemHfCli, type HfCliRuntime } from "./hf-cli.js";
 import {
   assessBrokerCredential,
+  brokerCredentialMetadata,
   buildBrokerTokenUrl,
   type BrokerCredentialAssessment,
 } from "./hf-broker-credential.js";
@@ -159,6 +160,10 @@ type UpdateOptions = {
 type DoctorOptions = {
   fix?: boolean;
   bucket?: string;
+};
+
+type CredentialRepairOptions = {
+  brokerHfTokenFile?: string;
 };
 
 type SettingsOptions = {
@@ -409,6 +414,25 @@ export function createProgram(runtimeOverrides: CliRuntime = {}): Command {
       const token = await runtime.readToken(runtime.env);
       const hub = runtime.hubFactory(token);
       await settings(repoId, opts, hub, runtime);
+    });
+
+  const credentials = program.command("credentials").description("Inspect or replace trusted broker credentials");
+
+  credentials
+    .command("status")
+    .description("Verify the dedicated HF Broker credential")
+    .argument("[agent]", "Agent name; inferred when exactly one deployment exists")
+    .action(async (agent?: string) => {
+      await credentialsStatus(agent, runtime);
+    });
+
+  credentials
+    .command("repair")
+    .description("Replace and apply the dedicated HF Broker credential")
+    .argument("[agent]", "Agent name; inferred when exactly one deployment exists")
+    .option("--broker-hf-token-file <path>", "File containing MLCLAW_BROKER_HF_TOKEN=... or a raw token")
+    .action(async (agent: string | undefined, opts: CredentialRepairOptions) => {
+      await credentialsRepair(agent, opts, runtime);
     });
 
   const gateway = program.command("gateway").description("Operate a ML Claw gateway");
@@ -743,9 +767,7 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
       runtimeImage,
       hub,
       runtime,
-      ...(reviewedBrokerHfToken
-        ? { providedBrokerHfToken: reviewedBrokerHfToken, brokerCredentialReviewed: true }
-        : {}),
+      ...(reviewedBrokerHfToken ? { providedBrokerHfToken: reviewedBrokerHfToken } : {}),
       ...(requestedGatewayLocation ? { requestedGatewayLocation } : {}),
       ...(telegramToken ? { telegramToken } : {}),
       ...(telegramUserId ? { telegramUserId } : {}),
@@ -892,7 +914,7 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
           const secretsChanged = JSON.stringify(previousSecrets) !== JSON.stringify(activePlan.secrets);
           if (secretsChanged) {
             await assertLease();
-            await setSpaceGatewaySecrets(hub, activePlan.manifest.space, hfToken, activePlan.secrets, assertLease);
+            await setSpaceGatewaySecrets(hub, activePlan.manifest.space, activePlan.secrets, assertLease);
             if (
               canDeleteBroadTokenSecrets({
                 model: activePlan.manifest.model,
@@ -1293,7 +1315,6 @@ async function resolveBootstrapPlan(params: {
   hfToken: string;
   hfIdentity: HubIdentity;
   providedBrokerHfToken?: string;
-  brokerCredentialReviewed?: boolean;
   telegramToken?: string;
   telegramUserId?: string;
   model: string;
@@ -1309,7 +1330,6 @@ async function resolveBootstrapPlan(params: {
     hfToken,
     hfIdentity,
     providedBrokerHfToken,
-    brokerCredentialReviewed,
     telegramToken,
     telegramUserId,
     model,
@@ -1321,13 +1341,11 @@ async function resolveBootstrapPlan(params: {
   const now = runtime.now().toISOString();
   const existingManifest = await readManifest(runtime.configRoot, agentName).catch(() => null);
   const existingSecrets: Record<string, string> = await readSecretEnv(runtime.configRoot, agentName).catch(() => ({}));
-  const effectiveBrokerHfToken = await resolveBrokerHfToken({
+  const brokerCredential = await resolveBrokerHfToken({
     opts,
     owner,
-    hfToken,
     hfIdentity,
     ...(providedBrokerHfToken ? { preferredToken: providedBrokerHfToken } : {}),
-    skipReview: Boolean(brokerCredentialReviewed),
     existingSecrets,
     runtime,
   });
@@ -1409,6 +1427,7 @@ async function resolveBootstrapPlan(params: {
     gatewayLocation,
     model: effectiveModel,
     runtimeImage: effectiveRuntimeImage,
+    brokerCredential: brokerCredentialMetadata(brokerCredential.token, brokerCredential.identity, runtime.now()),
     credentialKeySha256,
     ...(existingManifest?.tailscaleMode ? { tailscaleMode: existingManifest.tailscaleMode } : {}),
     ...(existingManifest?.spaceVisibility ? { spaceVisibility: existingManifest.spaceVisibility } : {}),
@@ -1436,7 +1455,7 @@ async function resolveBootstrapPlan(params: {
   const effectiveTelegramProxy = opts.telegramProxy ?? existingSecrets.TELEGRAM_PROXY;
   const effectiveTelegramApiRoot = opts.telegramApiRoot ?? existingSecrets.TELEGRAM_API_ROOT;
   const secrets = deploymentSecrets({
-    hfToken: effectiveBrokerHfToken,
+    hfToken: brokerCredential.token,
     ...(effectiveTelegramToken ? { telegramToken: effectiveTelegramToken } : {}),
     ...(effectiveTelegramUserId ? { telegramUserId: effectiveTelegramUserId } : {}),
     sessionSecret,
@@ -1770,7 +1789,6 @@ async function resolveHostedBootstrapFallback(params: {
       hfToken: params.hfToken,
       hfIdentity: params.hfIdentity,
       providedBrokerHfToken: params.brokerHfToken,
-      brokerCredentialReviewed: true,
       model: params.model,
       runtimeImage: params.runtimeImage,
       hub: params.hub,
@@ -2408,7 +2426,7 @@ async function deploySpaceGateway(params: {
   await assertLease();
   await clearSpaceGatewayDisabled(hub, manifest.space);
   await assertLease();
-  await setSpaceGatewaySecrets(hub, manifest.space, hfToken, secrets, assertLease);
+  await setSpaceGatewaySecrets(hub, manifest.space, secrets, assertLease);
   if (
     canDeleteBroadTokenSecrets({
       model: manifest.model,
@@ -3813,7 +3831,8 @@ async function ensureUpdateRouterToken(params: {
     return;
   }
   const hasManifest = await manifestExists(params.runtime.configRoot, params.agentName);
-  const localSecrets = hasManifest
+  const localManifest = hasManifest ? await readManifest(params.runtime.configRoot, params.agentName) : undefined;
+  const localSecrets: Record<string, string> = hasManifest
     ? await readSecretEnv(params.runtime.configRoot, params.agentName).catch(() => ({}))
     : {};
   const routerToken = hasExplicitOverride
@@ -3824,10 +3843,16 @@ async function ensureUpdateRouterToken(params: {
         model: params.model,
       })
     : undefined;
-  const brokerToken = routerToken ? undefined : await params.runtime.readToken(params.runtime.env);
+  const brokerToken = routerToken
+    ? undefined
+    : localManifest
+      ? (await verifiedStoredBrokerCredential(localManifest, params.runtime)).token
+      : undefined;
   const credential = routerToken ?? brokerToken;
   if (!credential) {
-    throw new Error("Hugging Face broker credential is unavailable");
+    throw new Error(
+      `Hugging Face broker credential is unavailable; recover the deployment and run \`mlclaw credentials repair ${params.agentName}\``,
+    );
   }
   await params.hub.addSpaceSecret(
     params.repoId,
@@ -3939,7 +3964,14 @@ async function doctor(repoId: string, opts: DoctorOptions, hub: HubApi, runtime:
   }
   if (!secrets.has("MLCLAW_BROKER_HF_TOKEN")) {
     if (fix) {
-      await hub.addSpaceSecret(repoId, "MLCLAW_BROKER_HF_TOKEN", await runtime.readToken(runtime.env));
+      const manifests = (await listManifests(runtime.configRoot)).filter((manifest) => manifest.space === repoId);
+      if (manifests.length !== 1) {
+        throw new Error(
+          `cannot repair MLCLAW_BROKER_HF_TOKEN without one matching local deployment; recover it with \`mlclaw bootstrap --name ${repoId.split("/")[1] ?? "agent"}\``,
+        );
+      }
+      const credential = await verifiedStoredBrokerCredential(manifests[0] as DeploymentManifest, runtime);
+      await hub.addSpaceSecret(repoId, "MLCLAW_BROKER_HF_TOKEN", credential.token);
       secrets.set("MLCLAW_BROKER_HF_TOKEN", { key: "MLCLAW_BROKER_HF_TOKEN" });
       fixed.push("set secret MLCLAW_BROKER_HF_TOKEN");
     } else {
@@ -4196,7 +4228,6 @@ async function setDeploymentSecrets(
 async function setSpaceGatewaySecrets(
   hub: HubApi,
   repoId: string,
-  hfToken: string,
   secrets: Record<string, string>,
   assertMutation: () => Promise<void> = async () => undefined,
 ): Promise<void> {
@@ -4206,7 +4237,7 @@ async function setSpaceGatewaySecrets(
     {
       MLCLAW_SESSION_SECRET: requiredSecret(secrets, "MLCLAW_SESSION_SECRET"),
       MLCLAW_CREDENTIAL_KEY: requiredSecret(secrets, "MLCLAW_CREDENTIAL_KEY"),
-      MLCLAW_BROKER_HF_TOKEN: hfToken,
+      MLCLAW_BROKER_HF_TOKEN: requiredSecret(secrets, "MLCLAW_BROKER_HF_TOKEN"),
       ...(secrets.MLCLAW_ROUTER_TOKEN ? { MLCLAW_ROUTER_TOKEN: secrets.MLCLAW_ROUTER_TOKEN } : {}),
       ...(secrets.TELEGRAM_BOT_TOKEN ? { TELEGRAM_BOT_TOKEN: secrets.TELEGRAM_BOT_TOKEN } : {}),
       ...(secrets.TELEGRAM_ALLOWED_USERS ? { TELEGRAM_ALLOWED_USERS: secrets.TELEGRAM_ALLOWED_USERS } : {}),
@@ -4383,81 +4414,247 @@ async function readOptionalRouterTokenFile(file: string | undefined): Promise<st
   return nonEmpty(parsed.MLCLAW_ROUTER_TOKEN) ?? nonEmpty(parsed.HF_ROUTER_TOKEN) ?? nonEmpty(raw);
 }
 
+async function credentialsStatus(requestedAgent: string | undefined, runtime: Required<CliRuntime>): Promise<void> {
+  const manifest = await credentialManifest(requestedAgent, runtime);
+  await verifiedStoredBrokerCredential(manifest, runtime);
+  const metadata = manifest.brokerCredential;
+  if (!metadata) throw new Error("verified HF Broker credential metadata is missing");
+
+  runtime.stdout.log(`Agent: ${manifest.agent}`);
+  runtime.stdout.log(`Status: healthy`);
+  runtime.stdout.log(`Profile: ${metadata.profileId}`);
+  runtime.stdout.log(`Account: ${metadata.account}`);
+  runtime.stdout.log(`Fingerprint: ${metadata.fingerprintSha256.slice(0, 12)}`);
+  runtime.stdout.log(`Verified: ${metadata.verifiedAt}`);
+}
+
+async function verifiedStoredBrokerCredential(
+  manifest: DeploymentManifest,
+  runtime: Required<CliRuntime>,
+): Promise<{ token: string; identity: HubIdentity }> {
+  const secrets = await readSecretEnv(runtime.configRoot, manifest.agent);
+  const token = nonEmpty(secrets.MLCLAW_BROKER_HF_TOKEN);
+  if (!token) throw new Error(`deployment ${manifest.agent} has no dedicated HF Broker credential`);
+  if (!manifest.brokerCredential) {
+    throw new Error(
+      `HF Broker credential metadata is missing; run \`mlclaw credentials repair ${manifest.agent}\` to complete the cutover`,
+    );
+  }
+  const verified = await verifyBrokerHfToken(token, manifest.owner, manifest.brokerCredential.account, runtime);
+  const observed = brokerCredentialMetadata(token, verified.identity, runtime.now());
+  if (observed.fingerprintSha256 !== manifest.brokerCredential.fingerprintSha256) {
+    throw new Error(
+      `HF Broker credential fingerprint changed; run \`mlclaw credentials repair ${manifest.agent}\` to reconcile it`,
+    );
+  }
+  return verified;
+}
+
+async function credentialsRepair(
+  requestedAgent: string | undefined,
+  opts: CredentialRepairOptions,
+  runtime: Required<CliRuntime>,
+): Promise<void> {
+  const manifest = await credentialManifest(requestedAgent, runtime);
+  const secrets: Record<string, string> = await readSecretEnv(runtime.configRoot, manifest.agent).catch(() => ({}));
+  const oldToken = nonEmpty(secrets.MLCLAW_BROKER_HF_TOKEN);
+  const account = await credentialRepairAccount(manifest, oldToken, runtime);
+  const fileToken = await readOptionalBrokerHfTokenFile(opts.brokerHfTokenFile);
+  const suppliedToken = fileToken ?? nonEmpty(runtime.env.MLCLAW_BROKER_HF_TOKEN);
+  let replacement: { token: string; identity: HubIdentity };
+  if (suppliedToken) {
+    replacement = await verifyBrokerHfToken(suppliedToken, manifest.owner, account, runtime);
+  } else {
+    if (!runtime.prompt.isInteractive()) {
+      throw new Error(
+        "credential repair requires --broker-hf-token-file, MLCLAW_BROKER_HF_TOKEN, or an interactive terminal",
+      );
+    }
+    replacement = await promptForBrokerHfToken(manifest.owner, account, runtime);
+  }
+
+  const updatedManifest: DeploymentManifest = {
+    ...manifest,
+    brokerCredential: brokerCredentialMetadata(replacement.token, replacement.identity, runtime.now()),
+    updatedAt: runtime.now().toISOString(),
+  };
+  const updatedSecrets = { ...secrets, MLCLAW_BROKER_HF_TOKEN: replacement.token };
+  if (manifest.gatewayLocation === "local") {
+    await applyLocalCredentialRepair(manifest, updatedManifest, secrets, updatedSecrets, runtime);
+  } else {
+    await applySpaceCredentialRepair(manifest, updatedManifest, secrets, updatedSecrets, oldToken, runtime);
+  }
+  runtime.stdout.log(`HF Broker credential repaired: ${manifest.agent}`);
+}
+
+async function credentialManifest(
+  requestedAgent: string | undefined,
+  runtime: Required<CliRuntime>,
+): Promise<DeploymentManifest> {
+  if (requestedAgent) return await readManifest(runtime.configRoot, requestedAgent);
+  const manifests = await listManifests(runtime.configRoot);
+  if (manifests.length === 1) return manifests[0] as DeploymentManifest;
+  if (manifests.length === 0) throw new Error("no ML Claw deployment found");
+  throw new Error("multiple ML Claw deployments found; specify an agent name");
+}
+
+async function credentialRepairAccount(
+  manifest: DeploymentManifest,
+  oldToken: string | undefined,
+  runtime: Required<CliRuntime>,
+): Promise<string> {
+  if (manifest.brokerCredential) return manifest.brokerCredential.account;
+  if (oldToken) {
+    try {
+      return (await runtime.hubFactory(oldToken).whoami()).name;
+    } catch {
+      // A broken legacy credential cannot identify its owner; use provisioning identity only for account selection.
+    }
+  }
+  const provisioningToken = await runtime.readToken(runtime.env);
+  return (await runtime.hubFactory(provisioningToken).whoami()).name;
+}
+
+async function applyLocalCredentialRepair(
+  previousManifest: DeploymentManifest,
+  updatedManifest: DeploymentManifest,
+  previousSecrets: Record<string, string>,
+  updatedSecrets: Record<string, string>,
+  runtime: Required<CliRuntime>,
+): Promise<void> {
+  const runner = localRunnerFor(previousManifest, runtime);
+  const existing = await runner.inspect(containerNameFor(previousManifest.agent), localConnectionFor(previousManifest));
+  if (!existing?.running) {
+    await replaceLocalCredentialFiles(previousManifest, updatedManifest, previousSecrets, updatedSecrets, runtime);
+    return;
+  }
+  const bucketPrefix = await readDeploymentBucketPrefix(runtime, previousManifest.agent);
+  await deployLocalBootstrap(
+    {
+      agentName: previousManifest.agent,
+      names: namesFor(previousManifest.owner, previousManifest.agent),
+      hasExistingManifest: true,
+      previousManifest,
+      gatewayLocation: "local",
+      ...(bucketPrefix ? { bucketPrefix } : {}),
+      bucketPlan: { bucket: previousManifest.bucket, exists: true, objectCount: 0 },
+      bucket: previousManifest.bucket,
+      manifest: updatedManifest,
+      secrets: updatedSecrets,
+    },
+    { pull: false },
+    runtime,
+    true,
+  );
+}
+
+async function replaceLocalCredentialFiles(
+  previousManifest: DeploymentManifest,
+  updatedManifest: DeploymentManifest,
+  previousSecrets: Record<string, string>,
+  updatedSecrets: Record<string, string>,
+  runtime: Required<CliRuntime>,
+): Promise<void> {
+  try {
+    await writeSecretEnv(runtime.configRoot, updatedManifest.agent, updatedSecrets);
+    await writeManifest(runtime.configRoot, updatedManifest);
+  } catch (error) {
+    await writeSecretEnv(runtime.configRoot, previousManifest.agent, previousSecrets);
+    await writeManifest(runtime.configRoot, previousManifest);
+    throw error;
+  }
+}
+
+async function applySpaceCredentialRepair(
+  previousManifest: DeploymentManifest,
+  updatedManifest: DeploymentManifest,
+  previousSecrets: Record<string, string>,
+  updatedSecrets: Record<string, string>,
+  oldToken: string | undefined,
+  runtime: Required<CliRuntime>,
+): Promise<void> {
+  const provisioningToken = await runtime.readToken(runtime.env);
+  const hub = runtime.hubFactory(provisioningToken);
+  try {
+    await hub.addSpaceSecret(
+      previousManifest.space,
+      "MLCLAW_BROKER_HF_TOKEN",
+      requiredSecret(updatedSecrets, "MLCLAW_BROKER_HF_TOKEN"),
+    );
+    await hub.restartSpace(previousManifest.space, true);
+    await replaceLocalCredentialFiles(previousManifest, updatedManifest, previousSecrets, updatedSecrets, runtime);
+  } catch (error) {
+    try {
+      if (oldToken) {
+        await hub.addSpaceSecret(previousManifest.space, "MLCLAW_BROKER_HF_TOKEN", oldToken);
+      } else {
+        await hub.deleteSpaceSecret(previousManifest.space, "MLCLAW_BROKER_HF_TOKEN");
+      }
+      await hub.restartSpace(previousManifest.space, true);
+      await writeSecretEnv(runtime.configRoot, previousManifest.agent, previousSecrets);
+      await writeManifest(runtime.configRoot, previousManifest);
+    } catch (rollbackError) {
+      throw new Error(
+        `credential repair failed (${errorMessage(error)}) and rollback failed (${errorMessage(rollbackError)})`,
+      );
+    }
+    throw error;
+  }
+}
+
 async function resolveBrokerHfToken(params: {
   opts: Pick<BootstrapOptions, "brokerHfTokenFile">;
   owner: string;
-  hfToken: string;
   hfIdentity: HubIdentity;
   preferredToken?: string;
-  skipReview: boolean;
   existingSecrets: Record<string, string>;
   runtime: Required<CliRuntime>;
-}): Promise<string> {
+}): Promise<{ token: string; identity: HubIdentity }> {
   const fileToken = await readOptionalBrokerHfTokenFile(params.opts.brokerHfTokenFile);
+  const environmentToken = nonEmpty(params.runtime.env.MLCLAW_BROKER_HF_TOKEN);
   const configuredToken =
     fileToken ??
-    nonEmpty(params.runtime.env.MLCLAW_BROKER_HF_TOKEN) ??
+    environmentToken ??
     nonEmpty(params.preferredToken) ??
     nonEmpty(params.existingSecrets.MLCLAW_BROKER_HF_TOKEN);
-  let token = configuredToken ?? params.hfToken;
-  let identity: HubIdentity;
-  try {
-    identity = token === params.hfToken ? params.hfIdentity : await params.runtime.hubFactory(token).whoami();
-    if (identity.name !== params.hfIdentity.name) {
-      throw new Error(`broker token belongs to ${identity.name}, not ${params.hfIdentity.name}`);
+  if (configuredToken) {
+    try {
+      return await verifyBrokerHfToken(configuredToken, params.owner, params.hfIdentity.name, params.runtime);
+    } catch (error) {
+      if (fileToken || environmentToken || params.preferredToken) throw error;
+      if (params.runtime.prompt.isInteractive()) {
+        params.runtime.prompt.note(
+          `The saved HF Broker credential could not be used (${errorMessage(error)}). It must be replaced before ML Claw can continue.`,
+          "HF Broker credential",
+        );
+      } else {
+        throw new Error(
+          `the saved HF Broker credential is unusable (${errorMessage(error)}); run \`mlclaw credentials repair\` interactively`,
+        );
+      }
     }
-  } catch (error) {
-    if (fileToken) throw error;
-    const warning = `The saved HF Broker credential could not be used (${errorMessage(error)}). Using the active Hugging Face login instead.`;
-    if (params.runtime.prompt.isInteractive()) {
-      params.runtime.prompt.note(warning, "HF Broker credential");
-    } else {
-      params.runtime.stderr.error(`Warning: ${warning}`);
-    }
-    token = params.hfToken;
-    identity = params.hfIdentity;
   }
 
-  const assessment = assessBrokerCredential(identity, params.owner);
-  if (assessment.status === "sufficient") return token;
-  if (params.skipReview) return token;
-
-  const detail = brokerCredentialAssessmentDetail(assessment);
   if (!params.runtime.prompt.isInteractive()) {
-    params.runtime.stderr.error(
-      `Warning: ${detail}. Continuing with the current credential; some broker operations may fail with a permission error.`,
+    throw new Error(
+      "a dedicated HF Broker credential is required; set MLCLAW_BROKER_HF_TOKEN, pass --broker-hf-token-file, or run bootstrap interactively",
     );
-    return token;
   }
+  return await promptForBrokerHfToken(params.owner, params.hfIdentity.name, params.runtime);
+}
 
-  params.runtime.prompt.note(
-    `${detail}.
-
-ML Claw can open a Hugging Face token form with BrokerKit's permissions preselected. You still create the token on Hugging Face, then paste it here. Your current HF CLI login will not be changed.`,
+async function promptForBrokerHfToken(
+  owner: string,
+  account: string,
+  runtime: Required<CliRuntime>,
+): Promise<{ token: string; identity: HubIdentity }> {
+  runtime.prompt.note(
+    "ML Claw will open a Hugging Face token form with BrokerKit's permissions preselected. Create a dedicated token and paste it here. Your current HF CLI login will not be changed.",
     "HF Broker credential",
   );
-  const action = await promptSelect(
-    "How should HF Broker authenticate?",
-    [
-      {
-        value: "create",
-        label: "Create a dedicated broker token",
-        hint: "Recommended for complete broker coverage",
-      },
-      {
-        value: "current",
-        label: "Continue with the current credential",
-        hint: "Some broker operations may fail",
-      },
-    ],
-    "create",
-    params.runtime,
-  );
-  if (action === "current") return token;
-
-  const url = buildBrokerTokenUrl(params.owner, params.hfIdentity.name);
-  const opened = await params.runtime.hfCli.openUrl(url);
-  params.runtime.prompt.note(
+  const url = buildBrokerTokenUrl(owner, account);
+  const opened = await runtime.hfCli.openUrl(url);
+  runtime.prompt.note(
     `${opened ? "The token form was opened in your browser." : "Open this token form in your browser."}
 
 Name and create the token, then copy it. The URL contains permission names only; it contains no credential.
@@ -4465,31 +4662,42 @@ Name and create the token, then copy it. The URL contains permission names only;
 ${url}`,
     "Create the broker token",
   );
-
   for (;;) {
     const replacement = readPromptValue(
-      await params.runtime.prompt.password({ message: "Paste the new Hugging Face broker token" }),
+      await runtime.prompt.password({ message: "Paste the new Hugging Face broker token" }),
       "Hugging Face broker token",
     );
     try {
-      const replacementIdentity = await params.runtime.hubFactory(replacement).whoami();
-      if (replacementIdentity.name !== params.hfIdentity.name) {
-        throw new Error(`token belongs to ${replacementIdentity.name}, not ${params.hfIdentity.name}`);
-      }
-      const replacementAssessment = assessBrokerCredential(replacementIdentity, params.owner);
-      if (replacementAssessment.status !== "sufficient") {
-        throw new Error(brokerCredentialAssessmentDetail(replacementAssessment));
-      }
-      params.runtime.prompt.note(
+      const verified = await verifyBrokerHfToken(replacement, owner, account, runtime);
+      runtime.prompt.note(
         "The dedicated broker token was verified. It will be stored only in ML Claw's trusted broker configuration.",
         "HF Broker credential ready",
       );
-      return replacement;
+      return verified;
     } catch (error) {
-      params.runtime.prompt.note(errorMessage(error), "Broker token was not accepted");
-      if (!(await promptConfirm("Try another broker token?", true, params.runtime))) return token;
+      runtime.prompt.note(errorMessage(error), "Broker token was not accepted");
+      if (!(await promptConfirm("Try another broker token?", true, runtime))) {
+        throw new Error("a valid dedicated HF Broker credential is required");
+      }
     }
   }
+}
+
+async function verifyBrokerHfToken(
+  token: string,
+  owner: string,
+  expectedAccount: string,
+  runtime: Required<CliRuntime>,
+): Promise<{ token: string; identity: HubIdentity }> {
+  const identity = await runtime.hubFactory(token).whoami();
+  if (identity.name !== expectedAccount) {
+    throw new Error(`broker token belongs to ${identity.name}, not ${expectedAccount}`);
+  }
+  const assessment = assessBrokerCredential(identity, owner);
+  if (assessment.status !== "sufficient") {
+    throw new Error(brokerCredentialAssessmentDetail(assessment));
+  }
+  return { token, identity };
 }
 
 async function readOptionalBrokerHfTokenFile(file: string | undefined): Promise<string | undefined> {
@@ -4504,7 +4712,7 @@ async function readOptionalBrokerHfTokenFile(file: string | undefined): Promise<
 function brokerCredentialAssessmentDetail(
   assessment: Exclude<BrokerCredentialAssessment, { status: "sufficient" }>,
 ): string {
-  if (assessment.status === "unknown") return assessment.reason;
+  if (assessment.status === "unsupported") return assessment.reason;
   const shown = assessment.missing.slice(0, 8);
   const remaining = assessment.missing.length - shown.length;
   return `The HF Broker credential is missing ${assessment.missing.length} required permission${assessment.missing.length === 1 ? "" : "s"}: ${shown.join(", ")}${remaining > 0 ? `, and ${remaining} more` : ""}`;
