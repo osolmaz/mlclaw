@@ -4730,11 +4730,10 @@ async function promptForBrokerHfToken(
   runtime.prompt.note(
     `${opened ? "The token form was opened in your browser." : "Open this token form in your browser."}
 
-Name and create the token, then copy it. The URL contains permission names only; it contains no credential.
-
-${url}`,
+Name and create the token, then copy it. The URL contains permission names only; it contains no credential. The exact URL is printed below.`,
     "Create the broker token",
   );
+  runtime.stdout.log(url);
   for (;;) {
     const replacement = readPromptValue(
       await runtime.prompt.password({ message: "Paste the new Hugging Face broker token" }),

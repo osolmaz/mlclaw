@@ -2113,9 +2113,11 @@ describe("mlclaw CLI", () => {
     const brokerHub = createFakeHub({ identity: completeFineGrainedIdentity() });
     const { prompt, notes } = createPrompt(["hf_broker_complete"]);
     const openedUrls: string[] = [];
+    const stdout: string[] = [];
     const runtime = {
       ...(await createRuntime(loginHub, prompt)),
       env: {},
+      stdout: { log: (message: unknown) => stdout.push(String(message)) },
       hubFactory: (token: string) => (token === "hf_broker_complete" ? brokerHub : loginHub),
       hfCli: {
         findExecutable: async () => "/usr/bin/hf",
@@ -2149,6 +2151,8 @@ describe("mlclaw CLI", () => {
     expect(openedUrls).toHaveLength(1);
     expect(openedUrls[0]).toContain("tokenType=fineGrained");
     expect(openedUrls[0]).not.toContain("hf_broker_complete");
+    expect(stdout).toContain(openedUrls[0]);
+    expect(notes.some((note) => note.message.includes(openedUrls[0] ?? ""))).toBe(false);
     expect(notes).toContainEqual(expect.objectContaining({ title: "HF Broker credential ready" }));
     await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
       MLCLAW_BROKER_HF_TOKEN: "hf_broker_complete",
