@@ -2483,9 +2483,24 @@ describe("mlclaw CLI", () => {
     const hub = createFakeHub({
       existingBuckets: ["alice/mlclaw-data"],
       existingSpaces: ["alice/mlclaw"],
+      identity: { name: "alice", organizations: [], auth: { type: "oauth" } },
     });
-    const { prompt, notes } = createPrompt(["mlclaw-fresh"]);
-    const runtime = await createRuntime(hub, prompt);
+    const brokerHub = createFakeHub({ identity: completeFineGrainedIdentity() });
+    const { prompt, notes } = createPrompt(["create", "hf_broker_complete", "mlclaw-fresh"]);
+    const openedUrls: string[] = [];
+    const runtime = {
+      ...(await createRuntime(hub, prompt)),
+      hubFactory: (token: string) => (token === "hf_broker_complete" ? brokerHub : hub),
+      hfCli: {
+        findExecutable: async () => "/usr/bin/hf",
+        install: async () => undefined,
+        login: async () => undefined,
+        openUrl: async (url: string) => {
+          openedUrls.push(url);
+          return true;
+        },
+      },
+    };
 
     const code = await main(["bootstrap", "--name", "mlclaw"], runtime);
 
@@ -2496,6 +2511,7 @@ describe("mlclaw CLI", () => {
         message: expect.stringContaining("Enter another name for a fresh deployment"),
       }),
     );
+    expect(openedUrls).toHaveLength(1);
     expect(notes).toContainEqual(
       expect.objectContaining({
         title: "Bootstrap plan",
@@ -2516,6 +2532,9 @@ describe("mlclaw CLI", () => {
       agent: "mlclaw-fresh",
       bucket: "alice/mlclaw-fresh-data",
       space: "alice/mlclaw-fresh",
+    });
+    await expect(readSecretEnv(runtime.configRoot, "mlclaw-fresh")).resolves.toMatchObject({
+      MLCLAW_BROKER_HF_TOKEN: "hf_broker_complete",
     });
   });
 
@@ -4436,6 +4455,7 @@ function completeFineGrainedIdentity(): HubIdentity {
         role: "fineGrained",
         fineGrained: {
           global: [...BROKER_GLOBAL_PERMISSIONS],
+          canReadGatedRepos: true,
           scoped: [
             {
               entity: { type: "user", name: "alice" },

@@ -731,6 +731,7 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
   resolveSpaceRuntimeImage(opts, runtime.env);
 
   let plan: BootstrapResolvedPlan;
+  let reviewedBrokerHfToken: string | undefined;
   for (;;) {
     plan = await resolveBootstrapPlan({
       opts,
@@ -742,10 +743,14 @@ async function bootstrap(opts: BootstrapOptions, runtime: Required<CliRuntime>):
       runtimeImage,
       hub,
       runtime,
+      ...(reviewedBrokerHfToken
+        ? { providedBrokerHfToken: reviewedBrokerHfToken, brokerCredentialReviewed: true }
+        : {}),
       ...(requestedGatewayLocation ? { requestedGatewayLocation } : {}),
       ...(telegramToken ? { telegramToken } : {}),
       ...(telegramUserId ? { telegramUserId } : {}),
     });
+    reviewedBrokerHfToken = plan.secrets.MLCLAW_BROKER_HF_TOKEN;
     const alternative = await promptAlternativeBootstrapName({
       plan,
       explicitBucket: opts.bucket,

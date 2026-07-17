@@ -52,6 +52,7 @@ export type HubIdentity = {
       fineGrained?: {
         global: string[];
         scoped: HubFineGrainedScope[];
+        canReadGatedRepos: boolean;
       };
     };
   };
@@ -547,9 +548,10 @@ export function parseHubIdentity(value: unknown): HubIdentity {
     ? fineGrained.scoped.map(parseFineGrainedScope).filter((entry): entry is HubFineGrainedScope => Boolean(entry))
     : [];
   const global = stringArray(fineGrained.global);
+  const canReadGatedRepos = fineGrained.canReadGatedRepos === true;
   const parsedAccessToken = {
     ...(accessTokenRole ? { role: accessTokenRole } : {}),
-    ...(Object.keys(fineGrained).length > 0 ? { fineGrained: { global, scoped } } : {}),
+    ...(Object.keys(fineGrained).length > 0 ? { fineGrained: { global, scoped, canReadGatedRepos } } : {}),
   };
   const parsedAuth = {
     ...(authType ? { type: authType } : {}),

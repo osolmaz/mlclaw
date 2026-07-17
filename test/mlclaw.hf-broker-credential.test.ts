@@ -66,6 +66,32 @@ describe("HF Broker credential policy", () => {
     expect(assessBrokerCredential(candidate, "alice")).toEqual({ status: "insufficient", missing: ["job.write"] });
   });
 
+  it("requires personal and global grants independently", () => {
+    const missingPersonal = fineGrainedIdentity(
+      [],
+      BROKER_PERSONAL_PERMISSIONS.filter((value) => value !== "discussion.write"),
+    );
+    const missingGlobal = fineGrainedIdentity([], BROKER_PERSONAL_PERMISSIONS, []);
+
+    expect(assessBrokerCredential(missingPersonal, "alice")).toEqual({
+      status: "insufficient",
+      missing: ["discussion.write"],
+    });
+    expect(assessBrokerCredential(missingGlobal, "alice")).toEqual({
+      status: "insufficient",
+      missing: ["global:discussion.write", "global:post.write"],
+    });
+  });
+
+  it("requires gated-repository access", () => {
+    const candidate = fineGrainedIdentity([], BROKER_PERSONAL_PERMISSIONS, BROKER_GLOBAL_PERMISSIONS, false);
+
+    expect(assessBrokerCredential(candidate, "alice")).toEqual({
+      status: "insufficient",
+      missing: ["canReadGatedRepos"],
+    });
+  });
+
   it("does not claim opaque OAuth credentials are insufficient", () => {
     expect(assessBrokerCredential(identity({ type: "oauth" }), "alice")).toEqual({
       status: "unknown",
@@ -90,14 +116,17 @@ function identity(auth: NonNullable<HubIdentity["auth"]>): HubIdentity {
 function fineGrainedIdentity(
   extraScopes: NonNullable<NonNullable<NonNullable<HubIdentity["auth"]>["accessToken"]>["fineGrained"]>["scoped"] = [],
   personalPermissions: readonly string[] = BROKER_PERSONAL_PERMISSIONS,
+  globalPermissions: readonly string[] = BROKER_GLOBAL_PERMISSIONS,
+  canReadGatedRepos = true,
 ): HubIdentity {
   return identity({
     type: "access_token",
     accessToken: {
       role: "fineGrained",
       fineGrained: {
-        global: [...BROKER_GLOBAL_PERMISSIONS],
+        global: [...globalPermissions],
         scoped: [{ entity: { type: "user", name: "alice" }, permissions: [...personalPermissions] }, ...extraScopes],
+        canReadGatedRepos,
       },
     },
   });

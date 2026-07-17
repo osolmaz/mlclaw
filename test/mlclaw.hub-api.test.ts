@@ -15,6 +15,7 @@ describe("HubApi Space commits", () => {
               role: "fineGrained",
               fineGrained: {
                 global: ["post.write", "post.write", 42],
+                canReadGatedRepos: true,
                 scoped: [
                   {
                     entity: { type: "org", name: "research-org" },
@@ -37,6 +38,7 @@ describe("HubApi Space commits", () => {
           role: "fineGrained",
           fineGrained: {
             global: ["post.write"],
+            canReadGatedRepos: true,
             scoped: [
               {
                 entity: { type: "org", name: "research-org" },

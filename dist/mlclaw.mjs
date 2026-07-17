@@ -15299,9 +15299,10 @@ function parseHubIdentity(value) {
   const accessTokenRole = stringValue(accessToken.role);
   const scoped = Array.isArray(fineGrained.scoped) ? fineGrained.scoped.map(parseFineGrainedScope).filter((entry) => Boolean(entry)) : [];
   const global2 = stringArray(fineGrained.global);
+  const canReadGatedRepos = fineGrained.canReadGatedRepos === true;
   const parsedAccessToken = {
     ...accessTokenRole ? { role: accessTokenRole } : {},
-    ...Object.keys(fineGrained).length > 0 ? { fineGrained: { global: global2, scoped } } : {}
+    ...Object.keys(fineGrained).length > 0 ? { fineGrained: { global: global2, scoped, canReadGatedRepos } } : {}
   };
   const parsedAuth = {
     ...authType ? { type: authType } : {},
@@ -20414,9 +20415,17 @@ function assessBrokerCredential(identity, owner) {
   if (!accessToken.fineGrained) {
     return { status: "unknown", reason: "Hugging Face omitted this fine-grained token's permission details" };
   }
-  const userPermissions = scopedPermissions(accessToken.fineGrained.scoped, "user", identity.name);
-  const personalAvailable = /* @__PURE__ */ new Set([...accessToken.fineGrained.global, ...userPermissions]);
-  const missing = [...BROKER_PERSONAL_PERMISSIONS, ...BROKER_GLOBAL_PERMISSIONS].filter((permission) => !personalAvailable.has(permission)).map(String);
+  const personalAvailable = new Set(scopedPermissions(accessToken.fineGrained.scoped, "user", identity.name));
+  const globalAvailable = new Set(accessToken.fineGrained.global);
+  const missing = BROKER_PERSONAL_PERMISSIONS.filter((permission) => !personalAvailable.has(permission)).map(String);
+  missing.push(
+    ...BROKER_GLOBAL_PERMISSIONS.filter((permission) => !globalAvailable.has(permission)).map(
+      (permission) => `global:${permission}`
+    )
+  );
+  if (!accessToken.fineGrained.canReadGatedRepos) {
+    missing.push("canReadGatedRepos");
+  }
   if (owner !== identity.name) {
     const organizationAvailable = new Set(scopedPermissions(accessToken.fineGrained.scoped, "org", owner));
     missing.push(
@@ -20435,8 +20444,9 @@ function scopedPermissions(scopes, type, name) {
 function requiredPermissions(owner, accountName) {
   return [
     ...BROKER_PERSONAL_PERMISSIONS,
-    ...BROKER_GLOBAL_PERMISSIONS,
-    ...owner === accountName ? [] : BROKER_ORGANIZATION_PERMISSIONS
+    ...BROKER_GLOBAL_PERMISSIONS.map((permission) => `global:${permission}`),
+    "canReadGatedRepos",
+    ...owner === accountName ? [] : BROKER_ORGANIZATION_PERMISSIONS.map((permission) => `org:${permission}`)
   ].sort();
 }
 
@@ -20938,6 +20948,7 @@ async function bootstrap(opts, runtime) {
   const runtimeImage = resolveRuntimeImage(opts.runtimeImage, runtime.env);
   resolveSpaceRuntimeImage(opts, runtime.env);
   let plan;
+  let reviewedBrokerHfToken;
   for (; ; ) {
     plan = await resolveBootstrapPlan({
       opts,
@@ -20949,10 +20960,12 @@ async function bootstrap(opts, runtime) {
       runtimeImage,
       hub,
       runtime,
+      ...reviewedBrokerHfToken ? { providedBrokerHfToken: reviewedBrokerHfToken, brokerCredentialReviewed: true } : {},
       ...requestedGatewayLocation ? { requestedGatewayLocation } : {},
       ...telegramToken ? { telegramToken } : {},
       ...telegramUserId ? { telegramUserId } : {}
     });
+    reviewedBrokerHfToken = plan.secrets.MLCLAW_BROKER_HF_TOKEN;
     const alternative = await promptAlternativeBootstrapName({
       plan,
       explicitBucket: opts.bucket,

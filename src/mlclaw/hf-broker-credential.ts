@@ -95,11 +95,17 @@ export function assessBrokerCredential(identity: HubIdentity, owner: string): Br
     return { status: "unknown", reason: "Hugging Face omitted this fine-grained token's permission details" };
   }
 
-  const userPermissions = scopedPermissions(accessToken.fineGrained.scoped, "user", identity.name);
-  const personalAvailable = new Set([...accessToken.fineGrained.global, ...userPermissions]);
-  const missing = [...BROKER_PERSONAL_PERMISSIONS, ...BROKER_GLOBAL_PERMISSIONS]
-    .filter((permission) => !personalAvailable.has(permission))
-    .map(String);
+  const personalAvailable = new Set(scopedPermissions(accessToken.fineGrained.scoped, "user", identity.name));
+  const globalAvailable = new Set(accessToken.fineGrained.global);
+  const missing = BROKER_PERSONAL_PERMISSIONS.filter((permission) => !personalAvailable.has(permission)).map(String);
+  missing.push(
+    ...BROKER_GLOBAL_PERMISSIONS.filter((permission) => !globalAvailable.has(permission)).map(
+      (permission) => `global:${permission}`,
+    ),
+  );
+  if (!accessToken.fineGrained.canReadGatedRepos) {
+    missing.push("canReadGatedRepos");
+  }
   if (owner !== identity.name) {
     const organizationAvailable = new Set(scopedPermissions(accessToken.fineGrained.scoped, "org", owner));
     missing.push(
@@ -122,7 +128,8 @@ function scopedPermissions(scopes: HubFineGrainedScope[], type: string, name: st
 function requiredPermissions(owner: string, accountName: string): string[] {
   return [
     ...BROKER_PERSONAL_PERMISSIONS,
-    ...BROKER_GLOBAL_PERMISSIONS,
-    ...(owner === accountName ? [] : BROKER_ORGANIZATION_PERMISSIONS),
+    ...BROKER_GLOBAL_PERMISSIONS.map((permission) => `global:${permission}`),
+    "canReadGatedRepos",
+    ...(owner === accountName ? [] : BROKER_ORGANIZATION_PERMISSIONS.map((permission) => `org:${permission}`)),
   ].sort();
 }
