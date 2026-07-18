@@ -1,4 +1,6 @@
 ---
+import { LICENSE_URL, REPOSITORY_URL, SITE_NAME } from "../site";
+
 interface Props {
   title: string;
   description: string;
@@ -6,7 +8,6 @@ interface Props {
 
 const { title, description } = Astro.props;
 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
-const repoUrl = "https://github.com/huggingface/mlclaw";
 ---
 
 <!doctype html>
@@ -26,22 +27,21 @@ const repoUrl = "https://github.com/huggingface/mlclaw";
       <nav>
         <a class="brand" href={`${base}/`}>
           <img src={`${base}/mlclaw.svg`} alt="" width="28" height="25" />
-          <span>ML Claw</span>
+          <span>{SITE_NAME}</span>
         </a>
         <div class="links">
           <a href={`${base}/getting-started/`}>Getting started</a>
           <a href={`${base}/how-it-works/`}>How it works</a>
           <a href={`${base}/costs/`}>Costs</a>
-          <a href={repoUrl}>GitHub</a>
+          <a href={REPOSITORY_URL}>GitHub</a>
         </div>
       </nav>
     </header>
     <slot />
     <footer class="site-footer">
       <p>
-        <a href={repoUrl}>GitHub</a> ·
-        <a href={`${repoUrl}/blob/main/LICENSE`}>MIT License</a> · Built on
-        OpenClaw and Hugging Face.
+        <a href={REPOSITORY_URL}>GitHub</a> ·
+        <a href={LICENSE_URL}>MIT License</a> · Built on OpenClaw and Hugging Face.
       </p>
     </footer>
   </body>
@@ -73,7 +73,12 @@ const repoUrl = "https://github.com/huggingface/mlclaw";
     background: var(--bg);
     color: var(--text);
     font-family:
-      ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      ui-sans-serif,
+      system-ui,
+      -apple-system,
+      "Segoe UI",
+      Roboto,
+      sans-serif;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
   }

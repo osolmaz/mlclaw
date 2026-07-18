@@ -5,7 +5,7 @@ export default defineConfig({
     include: ["test/**/*.test.ts"],
     coverage: {
       provider: "v8",
-      include: ["src/mlclaw-space-runtime/operator-brokers.ts"],
+      include: ["src/**/*.ts"],
       reporter: ["text", "json-summary", "json"],
       thresholds: {
         lines: 85,
@@ -13,7 +13,6 @@ export default defineConfig({
         statements: 85,
         branches: 85,
       },
-      exclude: ["assets/**", "dist/**", "src/vendor/**", "test/**"],
     },
   },
 });

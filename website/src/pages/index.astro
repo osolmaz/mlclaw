@@ -1,7 +1,7 @@
 ---
 import Layout from "../layouts/Layout.astro";
+import { REPOSITORY_URL } from "../site";
 
-const repoUrl = "https://github.com/huggingface/mlclaw";
 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 const features = [
@@ -45,16 +45,15 @@ const steps = [
       <h1>ML Claw</h1>
       <p class="tagline">Your own AI agent on Hugging Face.</p>
       <p class="lede">
-        ML Claw deploys an <a href="https://github.com/openclaw/openclaw">OpenClaw</a> agent to a
-        private Hugging Face Space, with durable state in a private Storage
-        Bucket and sign-in through Hugging Face OAuth.
+        ML Claw deploys an <a href="https://github.com/openclaw/openclaw">OpenClaw</a> agent to a private Hugging Face Space,
+        with durable state in a private Storage Bucket and sign-in through Hugging Face OAuth.
       </p>
       <div class="install">
         <code id="install-cmd">npx mlclaw@latest bootstrap</code>
         <button id="copy-btn" type="button" aria-label="Copy install command">Copy</button>
       </div>
       <div class="actions">
-        <a class="button primary" href={repoUrl}>Get started on GitHub</a>
+        <a class="button primary" href={REPOSITORY_URL}>Get started on GitHub</a>
       </div>
     </section>
 

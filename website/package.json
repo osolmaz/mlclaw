@@ -5,9 +5,32 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "format": "prettier --plugin=prettier-plugin-astro --check \"src/**/*.{astro,ts}\" \"test/**/*.ts\" astro.config.mjs eslint.config.mjs package.json README.md stryker.conf.json tsconfig.json vitest.config.ts vitest.stryker.config.ts",
+    "lint": "eslint --max-warnings 0 src test astro.config.mjs",
+    "typecheck": "tsc --noEmit && astro check",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage",
+    "dry": "slophammer-ts dry .",
+    "mutate": "stryker run --dryRunOnly",
+    "check": "npm run format && npm run lint && npm run typecheck && npm test && npm run coverage && npm run build && npm run dry"
   },
   "dependencies": {
     "astro": "^5.12.0"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.9",
+    "@eslint/js": "^9.39.5",
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/typescript-checker": "^9.6.1",
+    "@stryker-mutator/vitest-runner": "^9.6.1",
+    "@vitest/coverage-v8": "^3.2.7",
+    "eslint": "^9.39.5",
+    "prettier": "^3.9.5",
+    "prettier-plugin-astro": "^0.14.1",
+    "slophammer-ts": "^0.3.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.64.0",
+    "vitest": "^3.2.7"
   }
 }
