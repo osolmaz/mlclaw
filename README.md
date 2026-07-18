@@ -386,6 +386,12 @@ Local gateways pass the broad credential only to the trusted state-sync
 supervisor for bucket I/O and to the trusted MCP integration proxy through a
 protected token file. Neither path passes it to OpenClaw.
 
+## Related
+
+[ml-intern](https://github.com/huggingface/ml-intern) is Hugging Face's
+open-source ML engineer for reading papers, training models, and shipping
+models.
+
 ## Costs
 
 - Browser Space gateway: `cpu-basic` is enough for the default browser gateway.
