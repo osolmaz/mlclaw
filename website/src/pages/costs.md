@@ -16,7 +16,7 @@ GPU Space tiers exist for self-hosting a model next to the agent, and the tradeo
 
 ## Inference
 
-Model calls go to the Hugging Face Inference Providers router. Requests draw down your Inference Providers credits first and then fall to provider pay-as-you-go pricing per token, so the bill tracks how much you actually talk to your agent. Model choice moves this number a lot, and the [README](https://github.com/osolmaz/mlclaw#readme) lists low-cost options such as Gemma 4 and GPT-OSS 20B alongside the larger long-context default.
+Model calls go to the Hugging Face Inference Providers router. Requests draw down your Inference Providers credits first and then fall to provider pay-as-you-go pricing per token, so the bill tracks how much you actually talk to your agent. Model choice moves this number a lot, and the [README](https://github.com/huggingface/mlclaw#readme) lists low-cost options such as Gemma 4 and GPT-OSS 20B alongside the larger long-context default.
 
 ## Storage
 

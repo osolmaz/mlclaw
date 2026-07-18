@@ -1,6 +1,6 @@
 # ML Claw website
 
-Landing page for [ML Claw](https://github.com/osolmaz/mlclaw), built with
+Landing page for [ML Claw](https://github.com/huggingface/mlclaw), built with
 [Astro](https://astro.build) as a static site. It is served with GitHub Pages
 at <https://mlclaw.dev/> (custom domain configured in the repository's Pages
 settings).

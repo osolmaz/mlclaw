@@ -10,11 +10,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/osolmaz/mlclaw"
+    "url": "https://github.com/huggingface/mlclaw"
   },
-  "homepage": "https://github.com/osolmaz/mlclaw#readme",
+  "homepage": "https://github.com/huggingface/mlclaw#readme",
   "bugs": {
-    "url": "https://github.com/osolmaz/mlclaw/issues"
+    "url": "https://github.com/huggingface/mlclaw/issues"
   },
   "type": "module",
   "bin": {

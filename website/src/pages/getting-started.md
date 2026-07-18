@@ -23,13 +23,13 @@ npx mlclaw@latest bootstrap --name mlclaw
 Without Node.js, a launcher script fetches a pinned Node runtime into your user cache and runs the same npm package:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/osolmaz/mlclaw/main/mlclaw.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/huggingface/mlclaw/main/mlclaw.sh)
 ```
 
 On Windows, PowerShell does the same:
 
 ```powershell
-irm https://raw.githubusercontent.com/osolmaz/mlclaw/main/mlclaw.ps1 | iex
+irm https://raw.githubusercontent.com/huggingface/mlclaw/main/mlclaw.ps1 | iex
 ```
 
 Bootstrap creates a private Storage Bucket for the agent's state, a private Docker Space for the browser gateway, and a local deployment manifest under `~/.config/mlclaw`. The Space starts from the prebuilt `ghcr.io/osolmaz/mlclaw` image and gets write-only secrets for session signing and credential encryption. Your Hugging Face token goes into the `MLCLAW_BROKER_HF_TOKEN` secret, which only the isolated broker process reads; the agent itself never sees it. [How it works](/how-it-works/) covers that boundary in detail.
@@ -46,7 +46,7 @@ npx mlclaw@latest bootstrap \
   --model huggingface/zai-org/GLM-5.2:fireworks-ai
 ```
 
-The [README](https://github.com/osolmaz/mlclaw#readme) keeps a list of recommended router-compatible models with tool and structured-output support, from low-cost Gemma 4 and GPT-OSS options to the long-context GLM default. You can also switch models later from the browser under `/mlclaw/settings` without redeploying.
+The [README](https://github.com/huggingface/mlclaw#readme) keeps a list of recommended router-compatible models with tool and structured-output support, from low-cost Gemma 4 and GPT-OSS options to the long-context GLM default. You can also switch models later from the browser under `/mlclaw/settings` without redeploying.
 
 ## Local gateway
 

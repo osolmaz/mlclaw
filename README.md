@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/osolmaz/mlclaw/main/assets/mlclaw.svg" alt="ML Claw" width="180">
+  <img src="https://raw.githubusercontent.com/huggingface/mlclaw/main/assets/mlclaw.svg" alt="ML Claw" width="180">
 </p>
 
 # ML Claw
@@ -30,13 +30,13 @@ Without Node.js, the launcher fetches a pinned Node runtime into your user
 cache and runs the same npm package:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/osolmaz/mlclaw/main/mlclaw.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/huggingface/mlclaw/main/mlclaw.sh)
 ```
 
 On Windows:
 
 ```powershell
-irm https://raw.githubusercontent.com/osolmaz/mlclaw/main/mlclaw.ps1 | iex
+irm https://raw.githubusercontent.com/huggingface/mlclaw/main/mlclaw.ps1 | iex
 ```
 
 You need a Hugging Face account and a token available through `HF_TOKEN`,
