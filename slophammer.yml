@@ -3,6 +3,7 @@ typescript:
     threshold: 85
     paths:
       - src
+      - website/src
     exclude:
       - pattern: "src/vendor/**"
         reason: "Vendored Hugging Face transport code is maintained upstream."
@@ -14,6 +15,7 @@ typescript:
     max_findings: 0
     paths:
       - src
+      - website/src
     exclude:
       - pattern: "src/vendor/**"
         reason: "Vendored Hugging Face transport code is maintained upstream."

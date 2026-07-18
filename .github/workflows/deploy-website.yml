@@ -32,7 +32,10 @@ jobs:
           cache: npm
           cache-dependency-path: website/package-lock.json
       - run: npm ci
-      - run: npm run build
+      - run: npm run check
+      - name: Mutation tests (opt-in)
+        if: ${{ vars.MLCLAW_RUN_MUTATION == '1' }}
+        run: npm run mutate
       - uses: actions/upload-pages-artifact@v3
         with:
           path: website/dist

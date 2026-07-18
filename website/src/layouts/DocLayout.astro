@@ -1,13 +1,11 @@
 ---
 import Layout from "./Layout.astro";
+import { documentTitle } from "../site";
 
 const { frontmatter } = Astro.props;
 ---
 
-<Layout
-  title={`${frontmatter.title} · ML Claw`}
-  description={frontmatter.description}
->
+<Layout title={documentTitle(frontmatter.title)} description={frontmatter.description}>
   <main class="doc">
     <article>
       <h1>{frontmatter.title}</h1>
