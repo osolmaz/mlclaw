@@ -11,13 +11,13 @@ Implemented in the ML Claw cutover branch.
 ML Claw should publish and use one prebuilt Docker image:
 
 ```text
-ghcr.io/osolmaz/mlclaw:<mlclaw-version>-openclaw-<openclaw-version>
+ghcr.io/huggingface/mlclaw:<mlclaw-version>-openclaw-<openclaw-version>
 ```
 
 For version `0.2.2`, the default image is:
 
 ```text
-ghcr.io/osolmaz/mlclaw:0.2.2-openclaw-2026.7.1-beta.2
+ghcr.io/huggingface/mlclaw:0.2.2-openclaw-2026.7.1-beta.2
 ```
 
 The OpenClaw base image is pinned to the current beta release:
@@ -56,7 +56,7 @@ Runtime image naming lives in `package.json`:
 The TypeScript CLI reads this metadata and derives:
 
 ```text
-ghcr.io/osolmaz/mlclaw:<package-version>-openclaw-<openclaw-version>
+ghcr.io/huggingface/mlclaw:<package-version>-openclaw-<openclaw-version>
 ```
 
 The publish workflow reads the same metadata before building and tagging the
@@ -68,7 +68,7 @@ By default, `mlclaw bootstrap`, `mlclaw update`, and
 `mlclaw gateway migrate --to space` generate a Space Dockerfile with one line:
 
 ```dockerfile
-FROM ghcr.io/osolmaz/mlclaw:0.2.2-openclaw-2026.7.1-beta.2
+FROM ghcr.io/huggingface/mlclaw:0.2.2-openclaw-2026.7.1-beta.2
 ```
 
 The Space variable `MLCLAW_RUNTIME_IMAGE` must match that image tag.
@@ -110,10 +110,10 @@ The GitHub Actions publish workflow must:
 The image tags are:
 
 ```text
-ghcr.io/osolmaz/mlclaw:<package-version>-openclaw-<openclaw-version>
-ghcr.io/osolmaz/mlclaw:openclaw-<openclaw-version>
-ghcr.io/osolmaz/mlclaw:sha-<git-sha>
-ghcr.io/osolmaz/mlclaw:latest
+ghcr.io/huggingface/mlclaw:<package-version>-openclaw-<openclaw-version>
+ghcr.io/huggingface/mlclaw:openclaw-<openclaw-version>
+ghcr.io/huggingface/mlclaw:sha-<git-sha>
+ghcr.io/huggingface/mlclaw:latest
 ```
 
 The GHCR image package must be public. Hugging Face Spaces pull the image
@@ -145,20 +145,20 @@ node dist/mlclaw.mjs update osolmaz/mlclaw-test --force
 The generated Space Dockerfile should contain:
 
 ```dockerfile
-FROM ghcr.io/osolmaz/mlclaw:0.2.2-openclaw-2026.7.1-beta.2
+FROM ghcr.io/huggingface/mlclaw:0.2.2-openclaw-2026.7.1-beta.2
 ```
 
 Runtime validation:
 
 ```bash
 docker build -t mlclaw:test .
-docker run --rm --entrypoint sh mlclaw:test -lc 'openclaw --version && test "$MLCLAW_RUNTIME_IMAGE" = "ghcr.io/osolmaz/mlclaw:0.2.2-openclaw-2026.7.1-beta.2"'
+docker run --rm --entrypoint sh mlclaw:test -lc 'openclaw --version && test "$MLCLAW_RUNTIME_IMAGE" = "ghcr.io/huggingface/mlclaw:0.2.2-openclaw-2026.7.1-beta.2"'
 ```
 
 Live validation after publish:
 
 ```bash
-docker buildx imagetools inspect ghcr.io/osolmaz/mlclaw:0.2.2-openclaw-2026.7.1-beta.2
+docker buildx imagetools inspect ghcr.io/huggingface/mlclaw:0.2.2-openclaw-2026.7.1-beta.2
 node dist/mlclaw.mjs doctor osolmaz/mlclaw
 node dist/mlclaw.mjs doctor osolmaz/mlclaw-test
 ```

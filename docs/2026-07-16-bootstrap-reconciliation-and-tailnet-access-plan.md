@@ -205,7 +205,7 @@ Use a reserved control prefix separate from snapshot state:
     "tailscaleMode": "direct"
   },
   "model": "huggingface/zai-org/GLM-5.2:fireworks-ai",
-  "runtimeImage": "ghcr.io/osolmaz/mlclaw:0.3.8-openclaw-2026.7.1",
+  "runtimeImage": "ghcr.io/huggingface/mlclaw:0.3.8-openclaw-2026.7.1",
   "space": {
     "repo": "example-user/mlclaw",
     "visibility": "private"

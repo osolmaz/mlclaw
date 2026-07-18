@@ -147,7 +147,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
         run: |
-          gh api --method PATCH /user/packages/container/mlclaw/visibility -f visibility=public
+          gh api --method PATCH /orgs/huggingface/packages/container/mlclaw/visibility -f visibility=public
       - name: Verify anonymous GHCR image pull
         if: ${{ github.event_name == 'release' || inputs.publish_image == 'true' || inputs.update_template_space == 'true' }}
         env:

@@ -76,7 +76,7 @@ This creates:
 - a private Docker Space for the browser gateway when the account can host it;
 - a private Storage Bucket for OpenClaw state after the Space is accepted;
 - no explicit Space hardware request unless you pass `--hardware`;
-- a Docker Space that starts from the prebuilt `ghcr.io/osolmaz/mlclaw` image;
+- a Docker Space that starts from the prebuilt `ghcr.io/huggingface/mlclaw` image;
 - Hugging Face OAuth metadata for browser auth, Hugging Face MCP, and Research
   Agent access in the Space README;
 - Space variables, a bucket volume mount for state sync, and separate

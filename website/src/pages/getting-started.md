@@ -32,7 +32,7 @@ On Windows, PowerShell does the same:
 irm https://raw.githubusercontent.com/huggingface/mlclaw/main/mlclaw.ps1 | iex
 ```
 
-Bootstrap creates a private Storage Bucket for the agent's state, a private Docker Space for the browser gateway, and a local deployment manifest under `~/.config/mlclaw`. The Space starts from the prebuilt `ghcr.io/osolmaz/mlclaw` image and gets write-only secrets for session signing and credential encryption. Your Hugging Face token goes into the `MLCLAW_BROKER_HF_TOKEN` secret, which only the isolated broker process reads; the agent itself never sees it. [How it works](/how-it-works/) covers that boundary in detail.
+Bootstrap creates a private Storage Bucket for the agent's state, a private Docker Space for the browser gateway, and a local deployment manifest under `~/.config/mlclaw`. The Space starts from the prebuilt `ghcr.io/huggingface/mlclaw` image and gets write-only secrets for session signing and credential encryption. Your Hugging Face token goes into the `MLCLAW_BROKER_HF_TOKEN` secret, which only the isolated broker process reads; the agent itself never sees it. [How it works](/how-it-works/) covers that boundary in detail.
 
 When the Space is up, open it and sign in with your Hugging Face account. You land in the OpenClaw browser gateway, which includes a small ML Claw control link for settings, status, credentials, and sign out.
 

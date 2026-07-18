@@ -47,7 +47,7 @@ On a GitHub release, the publish workflow must:
 2. build the TypeScript artifacts;
 3. run typecheck, tests, secret checks, and package checks;
 4. publish `mlclaw` to npm;
-5. publish the `ghcr.io/osolmaz/mlclaw` runtime image to GHCR;
+5. publish the `ghcr.io/huggingface/mlclaw` runtime image to GHCR;
 6. update the canonical Hugging Face template Space from the same built repo.
 
 The workflow updates the template Space with:
@@ -65,7 +65,7 @@ setting the `template_space` input. The default remains `osolmaz/mlclaw`.
 The default Space Dockerfile should be:
 
 ```dockerfile
-FROM ghcr.io/osolmaz/mlclaw:<package-version>-openclaw-<openclaw-version>
+FROM ghcr.io/huggingface/mlclaw:<package-version>-openclaw-<openclaw-version>
 ```
 
 The GHCR package must be public. Hugging Face Spaces pull the image without a

@@ -51,7 +51,7 @@ describe("runtime image Dockerfile", () => {
       "COPY --from=hf-broker-build /out/hf-broker.policy-manifest.json /app/hf-broker.policy-manifest.json",
     );
     expect(dockerfile).not.toContain("ghcr.io/osolmaz/mlclaw-runtime");
-    expect(DEFAULT_RUNTIME_IMAGE).toBe(`ghcr.io/osolmaz/mlclaw:${PACKAGE_VERSION}-openclaw-${OPENCLAW_VERSION}`);
+    expect(DEFAULT_RUNTIME_IMAGE).toBe(`ghcr.io/huggingface/mlclaw:${PACKAGE_VERSION}-openclaw-${OPENCLAW_VERSION}`);
     expect(dockerfile).toContain("ENV PORT=7860");
     expect(dockerfile).toContain("ENV OPENCLAW_GATEWAY_PORT=7861");
     expect(dockerfile).toContain("EXPOSE 7860");
