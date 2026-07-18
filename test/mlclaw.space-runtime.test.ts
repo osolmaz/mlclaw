@@ -1479,6 +1479,10 @@ describe("ML Claw Space runtime", () => {
     expect(brandingScript).not.toContain("brokerKitSession");
     expect(brandingScript).toContain('data.type !== "brokerkit.delegated-web.open"');
     expect(brandingScript).toContain("event.source !== frame.contentWindow");
+    expect(brandingScript).toContain('data.type === "brokerkit.delegated-web.rebootstrap"');
+    expect(brandingScript).toContain("now - lastRebootstrapAt < 30000");
+    expect(brandingScript).toContain('frame.removeAttribute("src")');
+    expect(brandingScript).not.toContain("brokerkit.delegated-web.session.response");
     const topLevelPath = brandingScript.match(/window\.location\.assign\("([^"]+)"\)/u)?.[1];
     expect(topLevelPath).toBeDefined();
     const topLevelUrl = new URL(topLevelPath ?? "", "http://mlclaw.test");

@@ -118,6 +118,12 @@ OpenClaw process cannot read broker credentials or delegated decision tokens.
 Decisions are enabled in the popover by default. Set
 `MLCLAW_BROKERKIT_POPOVER_DECISIONS=false` to make the popover read-only.
 
+If a tab remains suspended until its delegated token is no longer renewable,
+the packaged UI sends the credential-free BrokerKit rebootstrap message. ML
+Claw accepts it only from the mounted BrokerKit frame, rate-limits it, and
+reloads only that frame so the protected HTML response can issue a fresh
+session. The token is never sent through the parent page or `postMessage`.
+
 The sandbox sends the raw delegated token only in `BrokerKit-Session`. ML Claw
 does not accept it from `Authorization`, cookies, URLs, or request bodies. This
 keeps standard authorization available to an identity-aware hosting edge and

@@ -91,6 +91,16 @@ export const CONTROL_BRANDING_SCRIPT = `(function () {
         frame.contentWindow.postMessage({ type: "brokerkit.operator-ui.invalidate", version: 1 }, "*");
       }
     }
+    var lastRebootstrapAt = 0;
+    function rebootstrapFrame() {
+      var now = Date.now();
+      if (now - lastRebootstrapAt < 30000) return;
+      lastRebootstrapAt = now;
+      frame.removeAttribute("src");
+      if (!popover.hidden) {
+        window.setTimeout(function () { frame.setAttribute("src", frame.getAttribute("data-src")); }, 0);
+      }
+    }
     function setOpen(open) {
       popover.hidden = !open;
       button.setAttribute("aria-expanded", open ? "true" : "false");
@@ -109,6 +119,17 @@ export const CONTROL_BRANDING_SCRIPT = `(function () {
     });
     window.addEventListener("message", function (event) {
       var data = event.data;
+      if (
+        event.source === frame.contentWindow &&
+        data &&
+        typeof data === "object" &&
+        Object.keys(data).sort().join(",") === "type,version" &&
+        data.type === "brokerkit.delegated-web.rebootstrap" &&
+        data.version === 1
+      ) {
+        rebootstrapFrame();
+        return;
+      }
       if (
         event.source !== frame.contentWindow ||
         !data ||
