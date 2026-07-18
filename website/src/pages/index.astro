@@ -1,0 +1,318 @@
+---
+import Layout from "../layouts/Layout.astro";
+
+const repoUrl = "https://github.com/osolmaz/mlclaw";
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+const features = [
+  {
+    title: "Private by default",
+    body: "Your agent runs in a private Hugging Face Space behind Hugging Face OAuth. The browser never receives an OpenClaw gateway token.",
+  },
+  {
+    title: "Durable state",
+    body: "Agent state lives in a private Storage Bucket, so conversations and configuration survive Space restarts and rebuilds.",
+  },
+  {
+    title: "Your token stays yours",
+    body: "An isolated broker holds your real Hugging Face token. The agent only gets a limited credential with typed, policy-checked access.",
+  },
+];
+
+const steps = [
+  {
+    title: "Bootstrap",
+    body: "Run one command. It creates the Space, the Storage Bucket, and the secrets for you.",
+  },
+  {
+    title: "Sign in",
+    body: "Open your Space and sign in with your Hugging Face account.",
+  },
+  {
+    title: "Chat",
+    body: "Use your OpenClaw agent from any browser, on any device.",
+  },
+];
+---
+
+<Layout
+  title="ML Claw — your own AI agent on Hugging Face"
+  description="ML Claw deploys an OpenClaw agent to a private Hugging Face Space with durable state and Hugging Face OAuth sign-in. One command to bootstrap."
+>
+  <main>
+    <section class="hero">
+      <img src={`${base}/mlclaw.svg`} alt="ML Claw logo" class="logo" width="140" height="125" />
+      <h1>ML Claw</h1>
+      <p class="tagline">Your own AI agent on Hugging Face.</p>
+      <p class="lede">
+        ML Claw deploys an <a href="https://github.com/openclaw/openclaw">OpenClaw</a> agent to a
+        private Hugging Face Space, with durable state in a private Storage
+        Bucket and sign-in through Hugging Face OAuth.
+      </p>
+      <div class="install">
+        <code id="install-cmd">npx mlclaw@latest bootstrap</code>
+        <button id="copy-btn" type="button" aria-label="Copy install command">Copy</button>
+      </div>
+      <div class="actions">
+        <a class="button primary" href={repoUrl}>Get started on GitHub</a>
+      </div>
+    </section>
+
+    <section class="features">
+      {
+        features.map((f) => (
+          <div class="card">
+            <h2>{f.title}</h2>
+            <p>{f.body}</p>
+          </div>
+        ))
+      }
+    </section>
+
+    <section class="steps">
+      <h2>How it works</h2>
+      <ol>
+        {
+          steps.map((s) => (
+            <li>
+              <h3>{s.title}</h3>
+              <p>{s.body}</p>
+            </li>
+          ))
+        }
+      </ol>
+    </section>
+  </main>
+
+  <footer>
+    <p>
+      <a href={repoUrl}>GitHub</a> ·
+      <a href={`${repoUrl}/blob/main/LICENSE`}>MIT License</a> · Built on
+      OpenClaw and Hugging Face.
+    </p>
+  </footer>
+</Layout>
+
+<script>
+  const btn = document.getElementById("copy-btn");
+  const cmd = document.getElementById("install-cmd");
+  btn?.addEventListener("click", async () => {
+    if (!cmd?.textContent) return;
+    await navigator.clipboard.writeText(cmd.textContent);
+    btn.textContent = "Copied!";
+    setTimeout(() => {
+      btn.textContent = "Copy";
+    }, 1500);
+  });
+</script>
+
+<style>
+  main {
+    max-width: 60rem;
+    margin: 0 auto;
+    padding: 0 1.5rem;
+  }
+
+  .hero {
+    text-align: center;
+    padding: 5rem 0 3.5rem;
+  }
+
+  .logo {
+    width: 140px;
+    height: auto;
+  }
+
+  h1 {
+    font-size: 3rem;
+    margin: 1rem 0 0.25rem;
+    letter-spacing: -0.02em;
+  }
+
+  .tagline {
+    font-size: 1.35rem;
+    font-weight: 600;
+    color: var(--orange);
+    margin: 0 0 1rem;
+  }
+
+  .lede {
+    max-width: 38rem;
+    margin: 0 auto 2rem;
+    color: var(--muted);
+    font-size: 1.05rem;
+  }
+
+  .lede a {
+    color: inherit;
+  }
+
+  .install {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+    background: var(--code-bg);
+    border-radius: 0.6rem;
+    padding: 0.8rem 1rem 0.8rem 1.25rem;
+    margin-bottom: 1.5rem;
+    max-width: 100%;
+  }
+
+  .install code {
+    color: var(--code-text);
+    font-size: 1rem;
+    white-space: nowrap;
+    overflow-x: auto;
+  }
+
+  .install button {
+    flex-shrink: 0;
+    background: var(--yellow);
+    color: var(--text);
+    border: none;
+    border-radius: 0.4rem;
+    padding: 0.35rem 0.8rem;
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .install button:hover {
+    background: var(--orange);
+  }
+
+  .actions {
+    display: flex;
+    justify-content: center;
+    gap: 1rem;
+  }
+
+  .button {
+    display: inline-block;
+    border-radius: 0.6rem;
+    padding: 0.6rem 1.4rem;
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .button.primary {
+    background: var(--text);
+    color: #fff;
+  }
+
+  .button.primary:hover {
+    background: var(--red);
+  }
+
+  .features {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: 1.25rem;
+    padding: 1rem 0 3rem;
+  }
+
+  .card {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-top: 4px solid var(--yellow);
+    border-radius: 0.75rem;
+    padding: 1.25rem 1.4rem;
+  }
+
+  .card h2 {
+    font-size: 1.1rem;
+    margin: 0 0 0.5rem;
+  }
+
+  .card p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.95rem;
+  }
+
+  .steps {
+    padding: 1rem 0 4rem;
+    text-align: center;
+  }
+
+  .steps > h2 {
+    font-size: 1.75rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .steps ol {
+    list-style: none;
+    counter-reset: step;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    gap: 1.25rem;
+    margin: 0;
+    padding: 0;
+    text-align: left;
+  }
+
+  .steps li {
+    counter-increment: step;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    padding: 1.25rem 1.4rem;
+  }
+
+  .steps li::before {
+    content: counter(step);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 50%;
+    background: var(--yellow);
+    color: var(--text);
+    font-weight: 700;
+    margin-bottom: 0.6rem;
+  }
+
+  .steps h3 {
+    font-size: 1.05rem;
+    margin: 0 0 0.4rem;
+  }
+
+  .steps p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.95rem;
+  }
+
+  footer {
+    border-top: 1px solid var(--border);
+    text-align: center;
+    padding: 1.5rem;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+
+  footer a {
+    color: inherit;
+  }
+
+  @media (max-width: 40rem) {
+    .hero {
+      padding-top: 3rem;
+    }
+
+    h1 {
+      font-size: 2.25rem;
+    }
+
+    .install {
+      gap: 0.5rem;
+      padding: 0.7rem 0.7rem 0.7rem 0.9rem;
+    }
+
+    .install code {
+      font-size: 0.82rem;
+    }
+  }
+</style>
