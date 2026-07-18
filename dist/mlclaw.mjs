@@ -15375,7 +15375,7 @@ import fs12 from "node:fs";
 import path13 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 var DEFAULT_OPENCLAW_VERSION = "2026.7.1";
-var DEFAULT_BROKERKIT_PLUGIN_VERSION = "0.3.1";
+var DEFAULT_BROKERKIT_PLUGIN_VERSION = "0.3.2";
 var DEFAULT_BROKERKIT_VERSION = "hf-broker/v0.4.0";
 var DEFAULT_RUNTIME_IMAGE_REPOSITORY = "ghcr.io/huggingface/mlclaw";
 var PACKAGE_METADATA = readPackageMetadata();
