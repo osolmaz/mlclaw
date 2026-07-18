@@ -8,7 +8,7 @@ export function templatePage(config: SpaceRuntimeConfig): string {
       <img src="/assets/mlclaw.svg" alt="ML Claw" class="logo">
       <h1>ML Claw</h1>
       <p>Run the local bootstrapper to create a Hugging Face hosted OpenClaw agent for ML workflows.</p>
-      <p class="notice">Do not set this up by only clicking Duplicate. The bootstrapper creates the private Space, private Storage Bucket, OAuth settings, secrets, model configuration, and local manifest.</p>
+      <p class="notice">Do not set this up by only clicking Duplicate. The bootstrapper creates the protected Space, private Storage Bucket, OAuth settings, secrets, model configuration, and local manifest.</p>
       <h2>With Node.js</h2>
       <pre><code>npx mlclaw@latest bootstrap --name mlclaw</code></pre>
       <h2>macOS or Linux without Node.js</h2>

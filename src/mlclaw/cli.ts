@@ -22,7 +22,14 @@ import {
 } from "./docker.js";
 import { parseGatewayLocation, type GatewayLocation } from "./gateway-location.js";
 import { pushTemplateToSpace } from "./git.js";
-import { HubApi, HubApiError, type HubIdentity, type SpaceRuntime, type SpaceVolume } from "./hub-api.js";
+import {
+  HubApi,
+  HubApiError,
+  type HubIdentity,
+  type SpaceRuntime,
+  type SpaceVisibility,
+  type SpaceVolume,
+} from "./hub-api.js";
 import {
   assertNoLiveForeignLease,
   clearRuntimeHandoffRequest,
@@ -111,6 +118,7 @@ const REMOTE_DISCOVERY_TIMEOUT_MS = 20_000;
 type ContainerRuntimePreference = "auto" | ContainerEngine;
 type HostedFallbackChoice = "local" | "pro" | "cancel";
 type TailscaleMode = "off" | "direct" | "serve";
+type HostedSpaceVisibility = Exclude<SpaceVisibility, "private">;
 
 const STALE_PATH_VARS = ["OPENCLAW_STATE_DIR", "OPENCLAW_WORKSPACE_DIR", "OPENCLAW_CONFIG_PATH"];
 const SNAPSHOT_MANIFEST_REMOTE_NAME = "manifest.json";
@@ -220,8 +228,8 @@ type BootstrapBucketPlan = {
 type BootstrapSpacePlan = {
   space: string;
   exists: boolean;
-  visibility: "private" | "public";
-  currentVisibility?: "private" | "public";
+  visibility: HostedSpaceVisibility;
+  currentVisibility?: SpaceVisibility;
 };
 
 type SpaceHardwareRequest =
@@ -347,7 +355,7 @@ export function createProgram(runtimeOverrides: CliRuntime = {}): Command {
     .option("--model <model>", "OpenClaw model identifier")
     .option("--runtime-image <image>", "ML Claw runtime image")
     .option("--bundled-runtime", "Generate a bundled Space runtime instead of using the prebuilt ML Claw image", false)
-    .option("--public-space", "Create the Hugging Face Space as public instead of private", false)
+    .option("--public-space", "Expose the Space source as well as the authenticated app", false)
     .addOption(new Option("--gateway-token <token>").hideHelp())
     .option("--router-token <token>", "Hugging Face Router inference token for Space gateway model calls")
     .option(
@@ -492,7 +500,7 @@ export function createProgram(runtimeOverrides: CliRuntime = {}): Command {
     .option("--sleep-time <seconds>", "Space sleep timeout in seconds; -1 means never sleep", parseInteger)
     .option("--runtime-image <image>", "ML Claw runtime image")
     .option("--bundled-runtime", "Generate a bundled Space runtime instead of using the prebuilt ML Claw image", false)
-    .option("--public-space", "Create the Hugging Face Space as public instead of private", false)
+    .option("--public-space", "Expose the Space source as well as the authenticated app", false)
     .option("--router-token <token>", "Hugging Face Router inference token for Space gateway model calls")
     .option(
       "--router-token-file <path>",
@@ -1110,7 +1118,7 @@ type ReconcileManifestFinalizer = (context: {
 async function reconcileManifest(params: {
   manifest: DeploymentManifest;
   bucketPrefix?: string | undefined;
-  visibility?: "private" | "public" | undefined;
+  visibility?: SpaceVisibility | undefined;
   credentialKey?: string | undefined;
   initialIdentityClaimed?: boolean | undefined;
   previousIdentityBucket?: string | undefined;
@@ -1180,7 +1188,7 @@ async function reconcileManifest(params: {
     if (currentDesired && currentDesired.deploymentId !== requestedManifest.deploymentId) {
       throw new Error(`bucket ${requestedManifest.bucket} desired state belongs to another deployment`);
     }
-    const visibility = params.visibility ?? requestedManifest.spaceVisibility ?? "private";
+    const visibility = params.visibility ?? requestedManifest.spaceVisibility ?? "protected";
     const candidate = deploymentDesiredState(requestedManifest, visibility);
     const sameDesired =
       currentDesired &&
@@ -1408,7 +1416,7 @@ async function resolveBootstrapPlan(params: {
     spacePlan = {
       space: names.space,
       exists,
-      visibility: opts.publicSpace ? "public" : (existingManifest?.spaceVisibility ?? currentVisibility ?? "private"),
+      visibility: opts.publicSpace ? "public" : "protected",
       ...(currentVisibility ? { currentVisibility } : {}),
     };
   }
@@ -1758,7 +1766,7 @@ async function createOrAdoptSpace(params: {
   }
   params.runtime.stdout.log(`Creating ${params.spacePlan.visibility} Space ${params.spacePlan.space}`);
   await params.hub.createDockerSpace(params.spacePlan.space, {
-    private: params.spacePlan.visibility === "private",
+    visibility: params.spacePlan.visibility,
     ...(params.hardware ? { hardware: params.hardware } : {}),
     ...(typeof params.sleepTime === "number" ? { sleepTimeSeconds: params.sleepTime } : {}),
   });
@@ -2362,7 +2370,7 @@ async function deploySpaceGateway(params: {
   hardware?: string;
   sleepTime?: number;
   templateRuntimeImage?: string;
-  publicSpace?: boolean;
+  visibility?: HostedSpaceVisibility;
   spaceExists?: boolean;
   spacePrepared?: boolean;
   assertLease?: () => Promise<void>;
@@ -2373,11 +2381,11 @@ async function deploySpaceGateway(params: {
     runtime.stdout.log(
       params.spaceExists
         ? `Updating existing Space ${manifest.space}`
-        : `Creating ${params.publicSpace ? "public" : "private"} Space ${manifest.space}`,
+        : `Creating ${params.visibility ?? "protected"} Space ${manifest.space}`,
     );
     await assertLease();
     await hub.createDockerSpace(manifest.space, {
-      private: !params.publicSpace,
+      visibility: params.visibility ?? "protected",
       ...(params.hardware && !params.spaceExists ? { hardware: params.hardware } : {}),
       ...(typeof params.sleepTime === "number" ? { sleepTimeSeconds: params.sleepTime } : {}),
     });
@@ -2853,7 +2861,7 @@ async function gatewayMigrate(
     });
     updated = {
       ...updated,
-      spaceVisibility: opts.publicSpace ? "public" : (current.spaceVisibility ?? "private"),
+      spaceVisibility: opts.publicSpace ? "public" : "protected",
       ...(paidHardware.kind === "explicit" ? { spaceHardware: paidHardware.hardware } : {}),
       ...(typeof paidHardware.sleepTime === "number" ? { spaceSleepTime: paidHardware.sleepTime } : {}),
     };
@@ -2884,7 +2892,7 @@ async function gatewayMigrate(
           manifest: updated,
           secrets: deploymentSecrets,
           allowedUsers: me.name,
-          publicSpace: updated.spaceVisibility === "public",
+          visibility: updated.spaceVisibility === "public" ? "public" : "protected",
           spaceExists,
           assertLease,
           ...(paidHardware.kind === "explicit" ? { hardware: paidHardware.hardware } : {}),
@@ -3912,6 +3920,16 @@ async function doctor(repoId: string, opts: DoctorOptions, hub: HubApi, runtime:
       }
     }
     return;
+  }
+
+  const visibility = await hub.getSpaceVisibility(repoId);
+  if (visibility !== "protected") {
+    if (fix) {
+      await hub.updateSpaceVisibility(repoId, "protected");
+      fixed.push("set protected Space visibility");
+    } else {
+      issues.push(`Space visibility is ${visibility}; hosted gateways require protected visibility`);
+    }
   }
 
   const bucket = variables.get("OPENCLAW_HF_STATE_BUCKET")?.value ?? opts.bucket;

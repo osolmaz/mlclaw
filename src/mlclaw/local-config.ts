@@ -22,7 +22,7 @@ export type DeploymentManifest = {
   brokerCredential?: BrokerCredentialMetadata;
   credentialKeySha256?: string;
   tailscaleMode?: "off" | "direct" | "serve";
-  spaceVisibility?: "private" | "public";
+  spaceVisibility?: "private" | "protected" | "public";
   spaceHardware?: string;
   spaceSleepTime?: number;
   recoveredWithoutCredentialKey?: boolean;
@@ -137,7 +137,7 @@ const manifestFields = {
     .regex(/^[a-f0-9]{64}$/)
     .optional(),
   tailscaleMode: z.enum(["off", "direct", "serve"]).optional(),
-  spaceVisibility: z.enum(["private", "public"]).optional(),
+  spaceVisibility: z.enum(["private", "protected", "public"]).optional(),
   spaceHardware: z.string().min(1).max(128).optional(),
   spaceSleepTime: z.number().int().min(-1).optional(),
   recoveredWithoutCredentialKey: z.boolean().optional(),

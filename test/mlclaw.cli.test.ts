@@ -66,7 +66,7 @@ function createFakeHub(
     spaceRuntime?: SpaceRuntime;
     existingBuckets?: string[];
     existingSpaces?: string[];
-    spaceVisibilities?: Record<string, "private" | "public">;
+    spaceVisibilities?: Record<string, "private" | "protected" | "public">;
     createDockerSpaceError?: Error;
     restartSpaceErrors?: Error[];
     failFirstTombstoneUpload?: boolean;
@@ -85,7 +85,7 @@ function createFakeHub(
   const existingBuckets = new Set(opts.existingBuckets ?? []);
   const existingSpaces = new Set(opts.existingSpaces ?? []);
   const spaceVisibilities = new Map(
-    [...existingSpaces].map((repoId) => [repoId, opts.spaceVisibilities?.[repoId] ?? "private"] as const),
+    [...existingSpaces].map((repoId) => [repoId, opts.spaceVisibilities?.[repoId] ?? "protected"] as const),
   );
   const bucketClient = {
     async uploadFiles(files: Array<{ path: string; content: Blob }>) {
@@ -170,8 +170,8 @@ function createFakeHub(
       }
       const repoId = String(args[0]);
       existingSpaces.add(repoId);
-      const options = args[1] as { private?: boolean } | undefined;
-      spaceVisibilities.set(repoId, options?.private === false ? "public" : "private");
+      const options = args[1] as { visibility?: "protected" | "public" } | undefined;
+      spaceVisibilities.set(repoId, options?.visibility ?? "protected");
     },
     async bucketExists(bucket: string) {
       calls.push({ name: "bucketExists", args: [bucket] });
@@ -195,9 +195,9 @@ function createFakeHub(
     },
     async getSpaceVisibility(repoId: string) {
       calls.push({ name: "getSpaceVisibility", args: [repoId] });
-      return spaceVisibilities.get(repoId) ?? "private";
+      return spaceVisibilities.get(repoId) ?? "protected";
     },
-    async updateSpaceVisibility(repoId: string, visibility: "private" | "public") {
+    async updateSpaceVisibility(repoId: string, visibility: "protected" | "public") {
       calls.push({ name: "updateSpaceVisibility", args: [repoId, visibility] });
       spaceVisibilities.set(repoId, visibility);
     },
@@ -1793,7 +1793,7 @@ describe("mlclaw CLI", () => {
       }),
       expect.objectContaining({
         title: "Bootstrap plan",
-        message: expect.stringContaining("Space: alice/research (will be created as private)"),
+        message: expect.stringContaining("Space: alice/research (will be created as protected)"),
       }),
       {
         title: "HERE IS YOUR ML CLAW",
@@ -1807,7 +1807,7 @@ describe("mlclaw CLI", () => {
       args: [
         "alice/research",
         {
-          private: true,
+          visibility: "protected",
           hardware: "cpu-upgrade",
           sleepTimeSeconds: -1,
         },
@@ -1910,7 +1910,7 @@ describe("mlclaw CLI", () => {
     });
     expect(hub.calls).toContainEqual({
       name: "createDockerSpace",
-      args: ["alice/research", { private: true }],
+      args: ["alice/research", { visibility: "protected" }],
     });
     expect(hub.calls.findIndex((call) => call.name === "createDockerSpace")).toBeLessThan(
       hub.calls.findIndex((call) => call.name === "createBucket"),
@@ -2656,7 +2656,7 @@ describe("mlclaw CLI", () => {
     expect(hub.calls).toContainEqual({ name: "createBucket", args: ["alice/mlclaw-fresh-data", true] });
     expect(hub.calls).toContainEqual({
       name: "createDockerSpace",
-      args: ["alice/mlclaw-fresh", { private: true }],
+      args: ["alice/mlclaw-fresh", { visibility: "protected" }],
     });
     expect(hub.calls.some((call) => call.name === "requestSpaceHardware")).toBe(false);
     await expect(readManifest(runtime.configRoot, "mlclaw-fresh")).resolves.toMatchObject({
@@ -2681,7 +2681,7 @@ describe("mlclaw CLI", () => {
     expect(code).toBe(0);
     expect(hub.calls).toContainEqual({
       name: "createDockerSpace",
-      args: ["alice/research", { private: false }],
+      args: ["alice/research", { visibility: "public" }],
     });
     expect(hub.calls.some((call) => call.name === "requestSpaceHardware")).toBe(false);
   });
@@ -2704,7 +2704,7 @@ describe("mlclaw CLI", () => {
     });
   });
 
-  it("preserves the actual visibility of a legacy Space manifest", async () => {
+  it("converges an existing Space to protected visibility", async () => {
     const hub = createFakeHub({
       existingSpaces: ["alice/research"],
       spaceVisibilities: { "alice/research": "public" },
@@ -2726,9 +2726,12 @@ describe("mlclaw CLI", () => {
 
     await expect(main(["bootstrap", "--name", "research", "--yes"], runtime)).resolves.toBe(0);
 
-    expect(hub.calls.some((call) => call.name === "updateSpaceVisibility")).toBe(false);
+    expect(hub.calls).toContainEqual({
+      name: "updateSpaceVisibility",
+      args: ["alice/research", "protected"],
+    });
     expect(JSON.parse(hub.bucketObjects.get(".mlclaw/desired-state.json") ?? "null")).toMatchObject({
-      space: { visibility: "public" },
+      space: { visibility: "protected" },
     });
   });
 
@@ -2755,12 +2758,12 @@ describe("mlclaw CLI", () => {
 
     await expect(main(["bootstrap", "--yes"], runtime)).resolves.toBe(0);
     await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
-      spaceVisibility: "public",
+      spaceVisibility: "protected",
       spaceHardware: "cpu-upgrade",
       spaceSleepTime: 42,
     });
     expect(JSON.parse(hub.bucketObjects.get(".mlclaw/desired-state.json") ?? "null")).toMatchObject({
-      space: { visibility: "public", hardware: "cpu-upgrade", sleepTime: 42 },
+      space: { visibility: "protected", hardware: "cpu-upgrade", sleepTime: 42 },
     });
   });
 
@@ -2801,7 +2804,7 @@ describe("mlclaw CLI", () => {
     expect(pushes).toBe(1);
     expect(hub.calls).toContainEqual({
       name: "createDockerSpace",
-      args: ["alice/research", { private: true }],
+      args: ["alice/research", { visibility: "protected" }],
     });
   });
 
@@ -2934,7 +2937,7 @@ describe("mlclaw CLI", () => {
     expect(code).toBe(0);
     expect(hub.calls).toContainEqual({
       name: "createDockerSpace",
-      args: ["research-org/research", { private: true }],
+      args: ["research-org/research", { visibility: "protected" }],
     });
     expect(hub.calls.some((call) => call.name === "requestSpaceHardware")).toBe(false);
     expect(hub.calls).toContainEqual({
@@ -3345,7 +3348,10 @@ describe("mlclaw CLI", () => {
   });
 
   it("repairs app Space mounted state and removes stale broad Hub token secrets", async () => {
-    const hub = createFakeHub();
+    const hub = createFakeHub({
+      existingSpaces: ["alice/research"],
+      spaceVisibilities: { "alice/research": "private" },
+    });
     await hub.addSpaceVariable("alice/research", "OPENCLAW_HF_STATE_BUCKET", "alice/research-data");
     await hub.addSpaceVariable("alice/research", "MLCLAW_TEMPLATE_REV", "test-template");
     await hub.addSpaceVariable("alice/research", "MLCLAW_GATEWAY_LOCATION", "space");
@@ -3374,6 +3380,11 @@ describe("mlclaw CLI", () => {
     expect(output.join("\n")).toContain("deleted stale secrets HF_TOKEN, HUGGINGFACE_HUB_TOKEN");
     expect(output.join("\n")).toContain("mounted bucket alice/research-data at /data/mlclaw-state");
     expect(output.join("\n")).toContain("set secret MLCLAW_CREDENTIAL_KEY");
+    expect(output.join("\n")).toContain("set protected Space visibility");
+    expect(hub.calls).toContainEqual({
+      name: "updateSpaceVisibility",
+      args: ["alice/research", "protected"],
+    });
     expect(hub.calls).toContainEqual({
       name: "addSpaceVariable",
       args: ["alice/research", "MLCLAW_STATE_MOUNT_DIR", "/data/mlclaw-state"],
@@ -3677,7 +3688,7 @@ describe("mlclaw CLI", () => {
     expect(hub.calls).toContainEqual({ name: "spaceExists", args: ["alice/research"] });
     expect(hub.calls).toContainEqual({
       name: "createDockerSpace",
-      args: ["alice/research", { private: true, sleepTimeSeconds: -1 }],
+      args: ["alice/research", { visibility: "protected", sleepTimeSeconds: -1 }],
     });
     expect(hub.calls).toContainEqual({
       name: "requestSpaceHardware",

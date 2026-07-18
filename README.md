@@ -5,8 +5,9 @@
 # ML Claw
 
 ML Claw deploys an OpenClaw agent on Hugging Face with durable state in a
-private Storage Bucket. The default deployment is a private Hugging Face Space
-with a browser gateway protected by Hugging Face OAuth.
+private Storage Bucket. The default deployment is a protected Hugging Face
+Space: its source stays private, its app URL is reachable, and the browser
+gateway is protected by ML Claw's Hugging Face OAuth session.
 
 [ml-intern](https://github.com/huggingface/ml-intern) is Hugging Face's
 open-source ML engineer for reading papers, training models, and shipping
@@ -77,7 +78,7 @@ npx mlclaw@latest bootstrap --name mlclaw
 
 This creates:
 
-- a private Docker Space for the browser gateway when the account can host it;
+- a protected Docker Space for the browser gateway when the account can host it;
 - a private Storage Bucket for OpenClaw state after the Space is accepted;
 - no explicit Space hardware request unless you pass `--hardware`;
 - a Docker Space that starts from the prebuilt `ghcr.io/huggingface/mlclaw` image;
@@ -106,7 +107,7 @@ Open the Space, sign in with your Hugging Face account, and use the OpenClaw
 browser gateway directly. The gateway includes a small ML Claw control link
 for settings, status, credentials, and sign out.
 
-Create a public Space only when you explicitly want a public demo or template:
+Expose the Space source only when you explicitly want a public demo or template:
 
 ```bash
 npx mlclaw@latest bootstrap --name mlclaw --public-space

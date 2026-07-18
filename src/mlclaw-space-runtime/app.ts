@@ -798,7 +798,6 @@ function safeErrorClass(error: unknown): string {
 
 function delegatedHeaders(c: Context): void {
   c.header("access-control-allow-origin", "null");
-  c.header("access-control-allow-credentials", "true");
   c.header("cache-control", "no-store");
   c.header("vary", "origin");
   c.header("x-content-type-options", "nosniff");

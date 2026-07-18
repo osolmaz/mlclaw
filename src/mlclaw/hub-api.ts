@@ -34,6 +34,8 @@ type SpaceInfo = {
   private?: boolean;
   runtime?: SpaceRuntime | null;
 };
+export type SpaceVisibility = "private" | "protected" | "public";
+type RepositorySettingsEntry = { id?: string; type?: string; visibility?: SpaceVisibility };
 export type HubCommitFile = { path: string; content: Uint8Array | Buffer };
 type ModelInfo = { sha?: string };
 
@@ -153,7 +155,7 @@ export class HubApi {
 
   async createDockerSpace(
     repoId: string,
-    options?: { private?: boolean; hardware?: string; sleepTimeSeconds?: number },
+    options?: { visibility?: "protected" | "public"; hardware?: string; sleepTimeSeconds?: number },
   ): Promise<void> {
     const [owner, name] = splitRepoId(repoId);
     const me = await this.whoami();
@@ -162,7 +164,7 @@ export class HubApi {
       organization: owner === me.name ? null : owner,
       type: "space",
       sdk: "docker",
-      private: options?.private !== false,
+      visibility: options?.visibility ?? "protected",
     };
     if (options?.hardware) {
       payload.hardware = options.hardware;
@@ -196,12 +198,26 @@ export class HubApi {
     }
   }
 
-  async getSpaceVisibility(repoId: string): Promise<"private" | "public"> {
-    const info = await this.requestJson<SpaceInfo>(`/api/spaces/${repoId}`);
-    return info.private === true ? "private" : "public";
+  async getSpaceVisibility(repoId: string): Promise<SpaceVisibility> {
+    const [owner] = splitRepoId(repoId);
+    const me = await this.whoami();
+    let url: string | null =
+      owner === me.name
+        ? `${this.hubUrl}/api/settings/repositories`
+        : `${this.hubUrl}/api/organizations/${encodeURIComponent(owner)}/settings/repositories`;
+    while (url) {
+      const response = await this.request(url);
+      const repositories = (await response.json()) as RepositorySettingsEntry[];
+      const visibility = repositories.find((repo) => repo.id === repoId && repo.type === "space")?.visibility;
+      if (visibility === "private" || visibility === "protected" || visibility === "public") {
+        return visibility;
+      }
+      url = nextLink(response.headers.get("link"));
+    }
+    throw new Error(`Hub repository settings omitted Space visibility for ${repoId}`);
   }
 
-  async updateSpaceVisibility(repoId: string, visibility: "private" | "public"): Promise<void> {
+  async updateSpaceVisibility(repoId: string, visibility: "protected" | "public"): Promise<void> {
     await this.requestJson(`/api/spaces/${repoId}/settings`, {
       method: "PUT",
       body: JSON.stringify({ visibility }),

@@ -45,7 +45,7 @@ const desiredStateSchema = z
     space: z
       .object({
         repo: z.string().min(3).max(256),
-        visibility: z.enum(["private", "public"]),
+        visibility: z.enum(["private", "protected", "public"]),
         hardware: z.string().min(1).max(128).optional(),
         sleepTime: z.number().int().min(-1).optional(),
       })
@@ -126,7 +126,7 @@ export function deploymentIdentity(manifest: DeploymentManifest, statePrefix = "
 
 export function deploymentDesiredState(
   manifest: DeploymentManifest,
-  visibility: "private" | "public" = manifest.spaceVisibility ?? "private",
+  visibility: "private" | "protected" | "public" = manifest.spaceVisibility ?? "protected",
 ): DeploymentDesiredState {
   return desiredStateSchema.parse({
     schemaVersion: 1,

@@ -14968,7 +14968,7 @@ var HubApi = class {
       organization: owner === me2.name ? null : owner,
       type: "space",
       sdk: "docker",
-      private: options?.private !== false
+      visibility: options?.visibility ?? "protected"
     };
     if (options?.hardware) {
       payload.hardware = options.hardware;
@@ -15001,8 +15001,19 @@ var HubApi = class {
     }
   }
   async getSpaceVisibility(repoId) {
-    const info = await this.requestJson(`/api/spaces/${repoId}`);
-    return info.private === true ? "private" : "public";
+    const [owner] = splitRepoId(repoId);
+    const me2 = await this.whoami();
+    let url = owner === me2.name ? `${this.hubUrl}/api/settings/repositories` : `${this.hubUrl}/api/organizations/${encodeURIComponent(owner)}/settings/repositories`;
+    while (url) {
+      const response = await this.request(url);
+      const repositories = await response.json();
+      const visibility = repositories.find((repo) => repo.id === repoId && repo.type === "space")?.visibility;
+      if (visibility === "private" || visibility === "protected" || visibility === "public") {
+        return visibility;
+      }
+      url = nextLink(response.headers.get("link"));
+    }
+    throw new Error(`Hub repository settings omitted Space visibility for ${repoId}`);
   }
   async updateSpaceVisibility(repoId, visibility) {
     await this.requestJson(`/api/spaces/${repoId}/settings`, {
@@ -15375,7 +15386,7 @@ import fs12 from "node:fs";
 import path13 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 var DEFAULT_OPENCLAW_VERSION = "2026.7.1";
-var DEFAULT_BROKERKIT_PLUGIN_VERSION = "0.3.2";
+var DEFAULT_BROKERKIT_PLUGIN_VERSION = "0.3.3";
 var DEFAULT_BROKERKIT_VERSION = "hf-broker/v0.4.0";
 var DEFAULT_RUNTIME_IMAGE_REPOSITORY = "ghcr.io/huggingface/mlclaw";
 var PACKAGE_METADATA = readPackageMetadata();
@@ -19848,7 +19859,7 @@ var manifestFields = {
   }).strict().optional(),
   credentialKeySha256: external_exports.string().regex(/^[a-f0-9]{64}$/).optional(),
   tailscaleMode: external_exports.enum(["off", "direct", "serve"]).optional(),
-  spaceVisibility: external_exports.enum(["private", "public"]).optional(),
+  spaceVisibility: external_exports.enum(["private", "protected", "public"]).optional(),
   spaceHardware: external_exports.string().min(1).max(128).optional(),
   spaceSleepTime: external_exports.number().int().min(-1).optional(),
   recoveredWithoutCredentialKey: external_exports.boolean().optional(),
@@ -20013,7 +20024,7 @@ var desiredStateSchema = external_exports.object({
   runtimeImage: external_exports.string().min(1).max(1024),
   space: external_exports.object({
     repo: external_exports.string().min(3).max(256),
-    visibility: external_exports.enum(["private", "public"]),
+    visibility: external_exports.enum(["private", "protected", "public"]),
     hardware: external_exports.string().min(1).max(128).optional(),
     sleepTime: external_exports.number().int().min(-1).optional()
   }).strict()
@@ -20067,7 +20078,7 @@ function deploymentIdentity(manifest, statePrefix = "openclaw-state") {
     createdAt: manifest.createdAt
   });
 }
-function deploymentDesiredState(manifest, visibility = manifest.spaceVisibility ?? "private") {
+function deploymentDesiredState(manifest, visibility = manifest.spaceVisibility ?? "protected") {
   return desiredStateSchema.parse({
     schemaVersion: 1,
     deploymentId: manifest.deploymentId,
@@ -20751,7 +20762,7 @@ function createProgram(runtimeOverrides = {}) {
   program2.name("mlclaw").description("Deploy OpenClaw to a Hugging Face Space and private bucket").showHelpAfterError().exitOverride((err) => {
     throw err;
   });
-  program2.command("bootstrap", { isDefault: true }).alias("configure").description("Create or update a Hugging Face OpenClaw deployment").option("--owner <owner>", "Hugging Face user or organization").option("--name <name>", "Agent and runtime resource base name").option("--bucket <owner/bucket>", "State bucket to create or adopt").option("--gateway <local|space>", "Where the live gateway runs").option("--telegram-token <token>", "Optional Telegram bot token").option("--telegram-token-file <path>", "File containing TELEGRAM_BOT_TOKEN=... or a raw token").option("--telegram-user-id <id>", "Allowed Telegram user ID").option("--telegram-api-root <url>", "Telegram API root override").option("--telegram-proxy <url>", "Telegram proxy URL override").option("--hardware <flavor>", "Hugging Face Space hardware flavor").option("--sleep-time <seconds>", "Space sleep timeout in seconds; -1 means never sleep", parseInteger).option("--model <model>", "OpenClaw model identifier").option("--runtime-image <image>", "ML Claw runtime image").option("--bundled-runtime", "Generate a bundled Space runtime instead of using the prebuilt ML Claw image", false).option("--public-space", "Create the Hugging Face Space as public instead of private", false).addOption(new Option("--gateway-token <token>").hideHelp()).option("--router-token <token>", "Hugging Face Router inference token for Space gateway model calls").option(
+  program2.command("bootstrap", { isDefault: true }).alias("configure").description("Create or update a Hugging Face OpenClaw deployment").option("--owner <owner>", "Hugging Face user or organization").option("--name <name>", "Agent and runtime resource base name").option("--bucket <owner/bucket>", "State bucket to create or adopt").option("--gateway <local|space>", "Where the live gateway runs").option("--telegram-token <token>", "Optional Telegram bot token").option("--telegram-token-file <path>", "File containing TELEGRAM_BOT_TOKEN=... or a raw token").option("--telegram-user-id <id>", "Allowed Telegram user ID").option("--telegram-api-root <url>", "Telegram API root override").option("--telegram-proxy <url>", "Telegram proxy URL override").option("--hardware <flavor>", "Hugging Face Space hardware flavor").option("--sleep-time <seconds>", "Space sleep timeout in seconds; -1 means never sleep", parseInteger).option("--model <model>", "OpenClaw model identifier").option("--runtime-image <image>", "ML Claw runtime image").option("--bundled-runtime", "Generate a bundled Space runtime instead of using the prebuilt ML Claw image", false).option("--public-space", "Expose the Space source as well as the authenticated app", false).addOption(new Option("--gateway-token <token>").hideHelp()).option("--router-token <token>", "Hugging Face Router inference token for Space gateway model calls").option(
     "--router-token-file <path>",
     "File containing MLCLAW_ROUTER_TOKEN=..., HF_ROUTER_TOKEN=..., or a raw token"
   ).option("--broker-hf-token-file <path>", "File containing MLCLAW_BROKER_HF_TOKEN=... or a raw Hugging Face token").option("--docker-context <name>", "Docker context for local gateway mode").option("--container-runtime <auto|docker|podman>", "Local container runtime", "auto").option("--local-port <port>", "Loopback port for a local gateway", parseLocalPort).option("--tailscale <off|direct|serve>", "Tailnet access mode", parseTailscaleMode).option("--tailscale-port <port>", "Tailnet listener or Serve HTTPS port", parseLocalPort).option(
@@ -20802,7 +20813,7 @@ function createProgram(runtimeOverrides = {}) {
   gateway.command("logs").argument("<agent>", "Agent name").option("--tail <lines>", "Number of log lines", parseInteger, 200).action(async (agent, opts) => {
     await gatewayLogs(agent, opts, runtime);
   });
-  gateway.command("migrate").argument("<agent>", "Agent name").requiredOption("--to <local|space>", "Target gateway location").option("--hardware <flavor>", "Hugging Face Space hardware flavor").option("--sleep-time <seconds>", "Space sleep timeout in seconds; -1 means never sleep", parseInteger).option("--runtime-image <image>", "ML Claw runtime image").option("--bundled-runtime", "Generate a bundled Space runtime instead of using the prebuilt ML Claw image", false).option("--public-space", "Create the Hugging Face Space as public instead of private", false).option("--router-token <token>", "Hugging Face Router inference token for Space gateway model calls").option(
+  gateway.command("migrate").argument("<agent>", "Agent name").requiredOption("--to <local|space>", "Target gateway location").option("--hardware <flavor>", "Hugging Face Space hardware flavor").option("--sleep-time <seconds>", "Space sleep timeout in seconds; -1 means never sleep", parseInteger).option("--runtime-image <image>", "ML Claw runtime image").option("--bundled-runtime", "Generate a bundled Space runtime instead of using the prebuilt ML Claw image", false).option("--public-space", "Expose the Space source as well as the authenticated app", false).option("--router-token <token>", "Hugging Face Router inference token for Space gateway model calls").option(
     "--router-token-file <path>",
     "File containing MLCLAW_ROUTER_TOKEN=..., HF_ROUTER_TOKEN=..., or a raw token"
   ).option("--docker-context <name>", "Docker context for local gateway startup when migrating to local").option("--container-runtime <auto|docker|podman>", "Local container runtime", "auto").option("--local-port <port>", "Loopback port for the local gateway", parseLocalPort).option("--tailscale <off|direct|serve>", "Tailnet access mode", parseTailscaleMode).option("--tailscale-port <port>", "Tailnet listener or Serve HTTPS port", parseLocalPort).option("--no-pull", "Do not docker pull before starting a local gateway").option("--takeover", "Start even if another live runtime lease is present", false).option("--yes", "Confirm paid hardware prompts for automation", false).action(async (agent, opts) => {
@@ -21353,7 +21364,7 @@ async function reconcileManifest(params) {
     if (currentDesired && currentDesired.deploymentId !== requestedManifest.deploymentId) {
       throw new Error(`bucket ${requestedManifest.bucket} desired state belongs to another deployment`);
     }
-    const visibility = params.visibility ?? requestedManifest.spaceVisibility ?? "private";
+    const visibility = params.visibility ?? requestedManifest.spaceVisibility ?? "protected";
     const candidate = deploymentDesiredState(requestedManifest, visibility);
     const sameDesired = currentDesired && JSON.stringify({ ...currentDesired, generation: 0, updatedAt: "" }) === JSON.stringify({ ...candidate, generation: 0, updatedAt: "" });
     if (currentDesired && currentDesired.generation > requestedManifest.desiredGeneration && !sameDesired) {
@@ -21543,7 +21554,7 @@ async function resolveBootstrapPlan(params) {
     spacePlan = {
       space: names.space,
       exists,
-      visibility: opts.publicSpace ? "public" : existingManifest?.spaceVisibility ?? currentVisibility ?? "private",
+      visibility: opts.publicSpace ? "public" : "protected",
       ...currentVisibility ? { currentVisibility } : {}
     };
   }
@@ -21824,7 +21835,7 @@ async function createOrAdoptSpace(params) {
   }
   params.runtime.stdout.log(`Creating ${params.spacePlan.visibility} Space ${params.spacePlan.space}`);
   await params.hub.createDockerSpace(params.spacePlan.space, {
-    private: params.spacePlan.visibility === "private",
+    visibility: params.spacePlan.visibility,
     ...params.hardware ? { hardware: params.hardware } : {},
     ...typeof params.sleepTime === "number" ? { sleepTimeSeconds: params.sleepTime } : {}
   });
@@ -22301,11 +22312,11 @@ async function deploySpaceGateway(params) {
   const assertLease = params.assertLease ?? (async () => void 0);
   if (!params.spacePrepared) {
     runtime.stdout.log(
-      params.spaceExists ? `Updating existing Space ${manifest.space}` : `Creating ${params.publicSpace ? "public" : "private"} Space ${manifest.space}`
+      params.spaceExists ? `Updating existing Space ${manifest.space}` : `Creating ${params.visibility ?? "protected"} Space ${manifest.space}`
     );
     await assertLease();
     await hub.createDockerSpace(manifest.space, {
-      private: !params.publicSpace,
+      visibility: params.visibility ?? "protected",
       ...params.hardware && !params.spaceExists ? { hardware: params.hardware } : {},
       ...typeof params.sleepTime === "number" ? { sleepTimeSeconds: params.sleepTime } : {}
     });
@@ -22739,7 +22750,7 @@ async function gatewayMigrate(agent, opts, runtime) {
     });
     updated = {
       ...updated,
-      spaceVisibility: opts.publicSpace ? "public" : current.spaceVisibility ?? "private",
+      spaceVisibility: opts.publicSpace ? "public" : "protected",
       ...paidHardware.kind === "explicit" ? { spaceHardware: paidHardware.hardware } : {},
       ...typeof paidHardware.sleepTime === "number" ? { spaceSleepTime: paidHardware.sleepTime } : {}
     };
@@ -22770,7 +22781,7 @@ async function gatewayMigrate(agent, opts, runtime) {
           manifest: updated,
           secrets: deploymentSecrets2,
           allowedUsers: me2.name,
-          publicSpace: updated.spaceVisibility === "public",
+          visibility: updated.spaceVisibility === "public" ? "public" : "protected",
           spaceExists,
           assertLease,
           ...paidHardware.kind === "explicit" ? { hardware: paidHardware.hardware } : {},
@@ -23608,6 +23619,15 @@ async function doctor(repoId, opts, hub, runtime) {
       }
     }
     return;
+  }
+  const visibility = await hub.getSpaceVisibility(repoId);
+  if (visibility !== "protected") {
+    if (fix) {
+      await hub.updateSpaceVisibility(repoId, "protected");
+      fixed.push("set protected Space visibility");
+    } else {
+      issues.push(`Space visibility is ${visibility}; hosted gateways require protected visibility`);
+    }
   }
   const bucket = variables.get("OPENCLAW_HF_STATE_BUCKET")?.value ?? opts.bucket;
   let signedInUser;

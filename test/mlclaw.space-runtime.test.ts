@@ -350,7 +350,7 @@ describe("ML Claw Space runtime", () => {
     expect(preflight.headers.get("access-control-allow-origin")).toBe("null");
     expect(preflight.headers.get("access-control-allow-headers")).toBe("brokerkit-session, content-type");
     expect(preflight.headers.get("access-control-allow-methods")).toBe("GET, POST, OPTIONS");
-    expect(preflight.headers.get("access-control-allow-credentials")).toBe("true");
+    expect(preflight.headers.get("access-control-allow-credentials")).toBeNull();
     const authorizedHeaders = {
       origin: "null",
       authorization: "Bearer simulated-host-credential",
@@ -358,7 +358,7 @@ describe("ML Claw Space runtime", () => {
     };
     const snapshot = await fetch(`${base}/snapshot`, { headers: authorizedHeaders });
     expect(snapshot.status).toBe(200);
-    expect(snapshot.headers.get("access-control-allow-credentials")).toBe("true");
+    expect(snapshot.headers.get("access-control-allow-credentials")).toBeNull();
     const snapshotBody = (await snapshot.json()) as {
       api_version: string;
       cursor: string;

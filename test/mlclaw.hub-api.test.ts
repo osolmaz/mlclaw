@@ -141,7 +141,7 @@ describe("HubApi Space commits", () => {
     expect(requests).toEqual(["https://huggingface.co/api/buckets/research-org"]);
   });
 
-  it("creates Docker Spaces as private by default", async () => {
+  it("creates Docker Spaces as protected by default", async () => {
     const requests: Array<{ url: string; init: RequestInit }> = [];
     const hub = new HubApi({
       token: "hf_test_token",
@@ -167,7 +167,7 @@ describe("HubApi Space commits", () => {
       organization: null,
       type: "space",
       sdk: "docker",
-      private: true,
+      visibility: "protected",
     });
   });
 
@@ -187,7 +187,7 @@ describe("HubApi Space commits", () => {
       },
     });
 
-    await hub.createDockerSpace("alice/research", { private: false });
+    await hub.createDockerSpace("alice/research", { visibility: "public" });
 
     const request = requests.find((entry) => entry.url === "https://huggingface.co/api/repos/create");
     expect(request).toBeDefined();
@@ -196,7 +196,7 @@ describe("HubApi Space commits", () => {
       organization: null,
       type: "space",
       sdk: "docker",
-      private: false,
+      visibility: "public",
     });
   });
 
@@ -207,32 +207,68 @@ describe("HubApi Space commits", () => {
       fetch: async (url, init) => {
         const request = { url: String(url), init: init ?? {} };
         requests.push(request);
-        if (request.url.endsWith("/api/spaces/alice/research")) {
-          return Response.json({ private: false });
+        if (request.url.endsWith("/api/whoami-v2")) {
+          return Response.json({ name: "alice" });
+        }
+        if (request.url.endsWith("/api/settings/repositories")) {
+          return Response.json([{ id: "alice/research", type: "space", visibility: "private" }]);
         }
         return Response.json({});
       },
     });
 
-    await expect(hub.getSpaceVisibility("alice/research")).resolves.toBe("public");
-    await hub.updateSpaceVisibility("alice/research", "private");
+    await expect(hub.getSpaceVisibility("alice/research")).resolves.toBe("private");
+    await hub.updateSpaceVisibility("alice/research", "protected");
 
     expect(requests).toEqual([
       {
-        url: "https://huggingface.co/api/spaces/alice/research",
+        url: "https://huggingface.co/api/whoami-v2",
+        init: expect.objectContaining({ headers: { Authorization: "Bearer hf_test_token" } }),
+      },
+      {
+        url: "https://huggingface.co/api/settings/repositories",
         init: expect.objectContaining({ headers: { Authorization: "Bearer hf_test_token" } }),
       },
       {
         url: "https://huggingface.co/api/spaces/alice/research/settings",
         init: expect.objectContaining({
           method: "PUT",
-          body: JSON.stringify({ visibility: "private" }),
+          body: JSON.stringify({ visibility: "protected" }),
           headers: {
             Authorization: "Bearer hf_test_token",
             "Content-Type": "application/json",
           },
         }),
       },
+    ]);
+  });
+
+  it("finds organization Space visibility across settings pages", async () => {
+    const requests: string[] = [];
+    const hub = new HubApi({
+      token: "hf_test_token",
+      fetch: async (url) => {
+        const requestUrl = String(url);
+        requests.push(requestUrl);
+        if (requestUrl.endsWith("/api/whoami-v2")) {
+          return Response.json({ name: "alice" });
+        }
+        if (requestUrl.endsWith("/api/organizations/research-org/settings/repositories")) {
+          return Response.json([{ id: "research-org/model", type: "model", visibility: "private" }], {
+            headers: {
+              link: '<https://huggingface.co/api/organizations/research-org/settings/repositories?cursor=next>; rel="next"',
+            },
+          });
+        }
+        return Response.json([{ id: "research-org/research", type: "space", visibility: "protected" }]);
+      },
+    });
+
+    await expect(hub.getSpaceVisibility("research-org/research")).resolves.toBe("protected");
+    expect(requests).toEqual([
+      "https://huggingface.co/api/whoami-v2",
+      "https://huggingface.co/api/organizations/research-org/settings/repositories",
+      "https://huggingface.co/api/organizations/research-org/settings/repositories?cursor=next",
     ]);
   });
 
