@@ -3790,8 +3790,9 @@ async function update(
   }
   const runtimeImage = resolveSpaceRuntimeImage(opts, runtime.env);
   const agentName = variables.get("OPENCLAW_AGENT_NAME")?.value?.trim() || repoId.split("/")[1] || "openclaw";
+  let localManifest: DeploymentManifest | undefined;
   if (!canonicalTemplate) {
-    await ensureUpdateCredentials({
+    localManifest = await ensureUpdateCredentials({
       repoId,
       agentName,
       model: variables.get("OPENCLAW_MODEL")?.value ?? DEFAULT_MODEL,
@@ -3806,8 +3807,9 @@ async function update(
     token: hfToken,
     ...(runtimeImage ? { runtimeImage } : {}),
   });
+  const effectiveRuntimeImage = runtimeImage ?? bundledSpaceRuntimeRef(templateRev);
   await hub.addSpaceVariable(repoId, "MLCLAW_TEMPLATE_REV", templateRev);
-  await hub.addSpaceVariable(repoId, "MLCLAW_RUNTIME_IMAGE", runtimeImage ?? bundledSpaceRuntimeRef(templateRev));
+  await hub.addSpaceVariable(repoId, "MLCLAW_RUNTIME_IMAGE", effectiveRuntimeImage);
   if (canonicalTemplate) {
     await hub.addSpaceVariable(repoId, "MLCLAW_CANONICAL_SPACE_ID", canonicalTemplateSpaceId(runtime.env));
     await doctor(repoId, { fix: true }, hub, runtime);
@@ -3826,7 +3828,41 @@ async function update(
     await ensureSpaceStateVolume(hub, repoId, bucket);
   }
   await doctor(repoId, { fix: true }, hub, runtime);
+  if (!localManifest) {
+    throw new Error(`local deployment metadata is unavailable for ${repoId}`);
+  }
+  await reconcileUpdatedDeployment(localManifest, effectiveRuntimeImage, hub, runtime);
   runtime.stdout.log(`Space deployment triggered: ${repoId}`);
+}
+
+async function reconcileUpdatedDeployment(
+  localManifest: DeploymentManifest,
+  runtimeImage: string,
+  hub: HubApi,
+  runtime: Required<CliRuntime>,
+): Promise<void> {
+  const secrets = await readSecretEnv(runtime.configRoot, localManifest.agent);
+  await reconcileManifest({
+    manifest: {
+      ...localManifest,
+      gatewayLocation: "space",
+      runtimeImage,
+      updatedAt: runtime.now().toISOString(),
+    },
+    bucketPrefix: persistedBucketPrefix(secrets),
+    hub,
+    runtime,
+    apply: async ({ manifest, assertLease }) => {
+      await assertLease();
+      const currentSecrets = await readSecretEnv(runtime.configRoot, manifest.agent);
+      await writeLocalDeployment(runtime.configRoot, manifest, {
+        ...currentSecrets,
+        MLCLAW_GATEWAY_LOCATION: "space",
+        MLCLAW_RUNTIME_IMAGE: runtimeImage,
+        MLCLAW_RUNTIME_ID: spaceRuntimeId(manifest.agent),
+      });
+    },
+  });
 }
 
 async function ensureUpdateCredentials(params: {
@@ -3836,7 +3872,7 @@ async function ensureUpdateCredentials(params: {
   opts: UpdateOptions;
   hub: HubApi;
   runtime: Required<CliRuntime>;
-}): Promise<void> {
+}): Promise<DeploymentManifest> {
   const hasExplicitOverride = params.opts.routerToken !== undefined || params.opts.routerTokenFile !== undefined;
   const hasManifest = await manifestExists(params.runtime.configRoot, params.agentName);
   if (!hasManifest) {
@@ -3871,6 +3907,7 @@ async function ensureUpdateCredentials(params: {
     MLCLAW_BROKER_HF_TOKEN: brokerCredential.token,
     ...(routerToken ? { MLCLAW_ROUTER_TOKEN: routerToken } : {}),
   });
+  return localManifest;
 }
 
 async function doctor(repoId: string, opts: DoctorOptions, hub: HubApi, runtime: Required<CliRuntime>): Promise<void> {

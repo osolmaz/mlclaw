@@ -1,6 +1,6 @@
 // Generated from package.json by scripts/sync-release-config.mjs. Do not edit.
 export const RELEASE_CONFIG = {
-  "packageVersion": "0.4.8",
+  "packageVersion": "0.4.9",
   "openclawVersion": "2026.7.1",
   "brokerkitVersion": "hf-broker/v0.4.2",
   "brokerkitPluginVersion": "0.3.4",

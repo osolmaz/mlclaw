@@ -3108,6 +3108,20 @@ describe("mlclaw CLI", () => {
     expect(allowedUsersIndex).toBeGreaterThanOrEqual(0);
     expect(adminsIndex).toBeGreaterThanOrEqual(0);
     expect(hub.calls.some((call) => call.name === "restartSpace")).toBe(false);
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      desiredGeneration: 1,
+      gatewayLocation: "space",
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+    });
+    await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
+      MLCLAW_GATEWAY_LOCATION: "space",
+      MLCLAW_RUNTIME_IMAGE: DEFAULT_RUNTIME_IMAGE,
+      MLCLAW_RUNTIME_ID: "space-research",
+    });
+    expect(JSON.parse(hub.bucketObjects.get(".mlclaw/desired-state.json") ?? "null")).toMatchObject({
+      generation: 1,
+      runtimeImage: DEFAULT_RUNTIME_IMAGE,
+    });
   });
 
   it("upgrades a legacy Router Space to the broker credential during update", async () => {
@@ -3239,6 +3253,13 @@ describe("mlclaw CLI", () => {
       name: "addSpaceVariable",
       args: ["alice/research", "MLCLAW_RUNTIME_IMAGE", "bundled:test-template"],
     });
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      desiredGeneration: 1,
+      runtimeImage: "bundled:test-template",
+    });
+    await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
+      MLCLAW_RUNTIME_IMAGE: "bundled:test-template",
+    });
   });
 
   it("honors an explicit runtime image override during update", async () => {
@@ -3272,6 +3293,13 @@ describe("mlclaw CLI", () => {
     expect(hub.calls).toContainEqual({
       name: "addSpaceVariable",
       args: ["alice/research", "MLCLAW_RUNTIME_ID", "space-research"],
+    });
+    await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
+      desiredGeneration: 1,
+      runtimeImage: "registry.example/mlclaw:new",
+    });
+    await expect(readSecretEnv(runtime.configRoot, "research")).resolves.toMatchObject({
+      MLCLAW_RUNTIME_IMAGE: "registry.example/mlclaw:new",
     });
   });
 
