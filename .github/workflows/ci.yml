@@ -31,8 +31,6 @@ jobs:
           test "$(git -C "$RUNNER_TEMP/brokerkit" rev-parse "refs/tags/$brokerkit_version^{commit}")" = \
             "$(git -C "$RUNNER_TEMP/brokerkit" rev-parse HEAD)"
           go build -C "$RUNNER_TEMP/brokerkit" -o "$RUNNER_TEMP/hf-broker" ./brokers/huggingface/cmd/hf-broker
-          "$RUNNER_TEMP/hf-broker" credential requirements > "$RUNNER_TEMP/hf-broker-credential-requirements.json"
-          cmp src/mlclaw/hf-broker-credential-requirements.json "$RUNNER_TEMP/hf-broker-credential-requirements.json"
       - name: Test pinned BrokerKit agent tools
         env:
           MLCLAW_HF_BROKER_BINARY: ${{ runner.temp }}/hf-broker

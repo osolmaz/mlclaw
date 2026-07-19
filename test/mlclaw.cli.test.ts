@@ -29,11 +29,6 @@ import type {
   TailscaleServeState,
 } from "../src/mlclaw/tailscale.js";
 import { TailscaleApprovalRequiredError } from "../src/mlclaw/tailscale.js";
-import {
-  BROKER_GLOBAL_PERMISSIONS,
-  BROKER_ORGANIZATION_PERMISSIONS,
-  BROKER_PERSONAL_PERMISSIONS,
-} from "../src/mlclaw/hf-broker-credential.js";
 
 type PromptAnswer = string | boolean;
 
@@ -2150,6 +2145,8 @@ describe("mlclaw CLI", () => {
     expect(code).toBe(0);
     expect(openedUrls).toHaveLength(1);
     expect(openedUrls[0]).toContain("tokenType=fineGrained");
+    expect(openedUrls[0]).not.toContain("Permissions");
+    expect(openedUrls[0]).not.toContain("orgs=");
     expect(openedUrls[0]).not.toContain("hf_broker_complete");
     expect(stdout).toContain(openedUrls[0]);
     expect(notes.some((note) => note.message.includes(openedUrls[0] ?? ""))).toBe(false);
@@ -2272,7 +2269,7 @@ describe("mlclaw CLI", () => {
     await expect(main(["credentials", "status"], runtime)).resolves.toBe(0);
 
     expect(output).toContain("Status: healthy");
-    expect(output).toContain("Profile: hf-broker-complete-v1");
+    expect(output).toContain("Credential kind: fine_grained_user_token");
     expect(output.join("\n")).not.toContain("hf_broker_test");
   });
 
@@ -2324,7 +2321,7 @@ describe("mlclaw CLI", () => {
     });
     await expect(readManifest(runtime.configRoot, "research")).resolves.toMatchObject({
       brokerCredential: {
-        profileId: "hf-broker-complete-v1",
+        credentialKind: "fine_grained_user_token",
         account: "alice",
         fingerprintSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
       },
@@ -4644,7 +4641,7 @@ async function seedDedicatedCredentialDeployment(runtime: { configRoot: string }
     model: DEFAULT_MODEL,
     runtimeImage: DEFAULT_RUNTIME_IMAGE,
     brokerCredential: {
-      profileId: "hf-broker-complete-v1",
+      credentialKind: "fine_grained_user_token",
       account: "alice",
       fingerprintSha256: createHash("sha256").update(token).digest("hex"),
       verifiedAt: "2026-06-16T00:00:00.000Z",
@@ -4664,18 +4661,9 @@ function completeFineGrainedIdentity(): HubIdentity {
       accessToken: {
         role: "fineGrained",
         fineGrained: {
-          global: [...BROKER_GLOBAL_PERMISSIONS],
-          canReadGatedRepos: true,
-          scoped: [
-            {
-              entity: { type: "user", name: "alice" },
-              permissions: [...BROKER_PERSONAL_PERMISSIONS],
-            },
-            {
-              entity: { type: "org", name: "research-org" },
-              permissions: [...BROKER_ORGANIZATION_PERMISSIONS],
-            },
-          ],
+          global: [],
+          canReadGatedRepos: false,
+          scoped: [],
         },
       },
     },

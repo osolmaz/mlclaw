@@ -125,7 +125,7 @@ const manifestFields = {
   runtimeImage: z.string().min(1).max(1024),
   brokerCredential: z
     .object({
-      profileId: z.literal("hf-broker-complete-v1"),
+      credentialKind: z.literal("fine_grained_user_token"),
       account: z.string().min(1).max(128),
       fingerprintSha256: z.string().regex(/^[a-f0-9]{64}$/),
       verifiedAt: z.string().datetime(),

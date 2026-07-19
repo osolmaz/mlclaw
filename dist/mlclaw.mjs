@@ -19824,7 +19824,7 @@ var manifestFields = {
   model: external_exports.string().min(1).max(512),
   runtimeImage: external_exports.string().min(1).max(1024),
   brokerCredential: external_exports.object({
-    profileId: external_exports.literal("hf-broker-complete-v1"),
+    credentialKind: external_exports.literal("fine_grained_user_token"),
     account: external_exports.string().min(1).max(128),
     fingerprintSha256: external_exports.string().regex(/^[a-f0-9]{64}$/),
     verifiedAt: external_exports.string().datetime()
@@ -20319,116 +20319,13 @@ function delay(ms) {
 
 // src/mlclaw/hf-broker-credential.ts
 import { createHash as createHash3 } from "node:crypto";
-
-// src/mlclaw/hf-broker-credential-requirements.json
-var hf_broker_credential_requirements_default = {
-  version: 1,
-  profile_id: "hf-broker-complete-v1",
-  token_form_url: "https://huggingface.co/settings/tokens/new",
-  token_type: "fineGrained",
-  requires_gated_repositories: true,
-  personal_permissions: [
-    "collection.read",
-    "collection.write",
-    "discussion.write",
-    "inference.endpoints.infer.write",
-    "inference.endpoints.write",
-    "inference.serverless.write",
-    "job.write",
-    "repo.access.read",
-    "repo.content.read",
-    "repo.write",
-    "sql-console.embed.write",
-    "user.billing.read",
-    "user.mcp.read",
-    "user.notifications.read",
-    "user.notifications.write",
-    "user.papers.write",
-    "user.preferences.write",
-    "user.settings.notifications.write",
-    "user.social.likes.write",
-    "user.webhooks.read",
-    "user.webhooks.write"
-  ],
-  global_permissions: [
-    "discussion.write",
-    "post.write"
-  ],
-  organization_permissions: [
-    "collection.read",
-    "collection.write",
-    "discussion.write",
-    "inference.endpoints.infer.write",
-    "inference.endpoints.write",
-    "inference.serverless.write",
-    "job.write",
-    "org.auditLog.write",
-    "org.billing.read",
-    "org.members.read",
-    "org.members.write",
-    "org.networkSecurity.read",
-    "org.networkSecurity.write",
-    "org.read",
-    "org.repos.read",
-    "org.serviceAccounts.read",
-    "org.serviceAccounts.write",
-    "org.write",
-    "repo.access.read",
-    "repo.content.read",
-    "repo.write",
-    "resourceGroup.write",
-    "sql-console.embed.write"
-  ]
-};
-
-// src/mlclaw/hf-broker-credential.ts
-var permissionListSchema = external_exports.array(external_exports.string().min(1)).min(1).superRefine((permissions, context) => {
-  if (permissions.some((permission) => permission !== permission.trim())) {
-    context.addIssue({ code: external_exports.ZodIssueCode.custom, message: "permissions must not contain outer whitespace" });
-  }
-  if (new Set(permissions).size !== permissions.length) {
-    context.addIssue({ code: external_exports.ZodIssueCode.custom, message: "permissions must be unique" });
-  }
-  if (permissions.some((permission, index) => index > 0 && permission < permissions[index - 1])) {
-    context.addIssue({ code: external_exports.ZodIssueCode.custom, message: "permissions must be sorted" });
-  }
-});
-var profileSchema = external_exports.object({
-  version: external_exports.literal(1),
-  profile_id: external_exports.literal("hf-broker-complete-v1"),
-  token_form_url: external_exports.literal("https://huggingface.co/settings/tokens/new"),
-  token_type: external_exports.literal("fineGrained"),
-  requires_gated_repositories: external_exports.literal(true),
-  personal_permissions: permissionListSchema,
-  global_permissions: permissionListSchema,
-  organization_permissions: permissionListSchema
-}).strict();
-var BROKER_CREDENTIAL_PROFILE = Object.freeze(profileSchema.parse(hf_broker_credential_requirements_default));
-var HF_TOKEN_CREATE_URL = BROKER_CREDENTIAL_PROFILE.token_form_url;
-var BROKER_PERSONAL_PERMISSIONS = BROKER_CREDENTIAL_PROFILE.personal_permissions;
-var BROKER_GLOBAL_PERMISSIONS = BROKER_CREDENTIAL_PROFILE.global_permissions;
-var BROKER_ORGANIZATION_PERMISSIONS = BROKER_CREDENTIAL_PROFILE.organization_permissions;
-function buildBrokerTokenUrl(owner, accountName) {
-  const url = new URL(HF_TOKEN_CREATE_URL);
-  url.searchParams.set("tokenType", BROKER_CREDENTIAL_PROFILE.token_type);
-  for (const permission of BROKER_PERSONAL_PERMISSIONS) {
-    url.searchParams.append("ownUserPermissions", permission);
-  }
-  for (const permission of BROKER_GLOBAL_PERMISSIONS) {
-    url.searchParams.append("globalPermissions", permission);
-  }
-  url.searchParams.set("canReadGatedRepos", String(BROKER_CREDENTIAL_PROFILE.requires_gated_repositories));
-  if (owner !== accountName) {
-    url.searchParams.append("orgs", owner);
-    for (const permission of BROKER_ORGANIZATION_PERMISSIONS) {
-      url.searchParams.append("orgPermissions", permission);
-    }
-  }
-  return url.toString();
+var HF_TOKEN_CREATE_URL = "https://huggingface.co/settings/tokens/new?tokenType=fineGrained";
+function buildBrokerTokenUrl() {
+  return HF_TOKEN_CREATE_URL;
 }
-function assessBrokerCredential(identity, owner) {
+function assessBrokerCredential(identity) {
   const accessToken = identity.auth?.accessToken;
-  if (accessToken?.role !== BROKER_CREDENTIAL_PROFILE.token_type) {
+  if (accessToken?.role !== "fineGrained") {
     return {
       status: "unsupported",
       reason: "HF Broker requires a dedicated fine-grained Hugging Face token"
@@ -20440,39 +20337,15 @@ function assessBrokerCredential(identity, owner) {
       reason: "Hugging Face omitted this fine-grained token's permission details"
     };
   }
-  const personalAvailable = new Set(scopedPermissions(accessToken.fineGrained.scoped, "user", identity.name));
-  const globalAvailable = new Set(accessToken.fineGrained.global);
-  const missing = BROKER_PERSONAL_PERMISSIONS.filter((permission) => !personalAvailable.has(permission));
-  missing.push(
-    ...BROKER_GLOBAL_PERMISSIONS.filter((permission) => !globalAvailable.has(permission)).map(
-      (permission) => `global:${permission}`
-    )
-  );
-  if (!accessToken.fineGrained.canReadGatedRepos) {
-    missing.push("canReadGatedRepos");
-  }
-  if (owner !== identity.name) {
-    const organizationAvailable = new Set(scopedPermissions(accessToken.fineGrained.scoped, "org", owner));
-    missing.push(
-      ...BROKER_ORGANIZATION_PERMISSIONS.filter((permission) => !organizationAvailable.has(permission)).map(
-        (permission) => `org:${permission}`
-      )
-    );
-  }
-  missing.sort();
-  return missing.length === 0 ? { status: "sufficient" } : { status: "insufficient", missing };
+  return { status: "sufficient" };
 }
 function brokerCredentialMetadata(token, identity, verifiedAt) {
   return {
-    profileId: BROKER_CREDENTIAL_PROFILE.profile_id,
+    credentialKind: "fine_grained_user_token",
     account: identity.name,
     fingerprintSha256: createHash3("sha256").update(token).digest("hex"),
     verifiedAt: verifiedAt.toISOString()
   };
-}
-function scopedPermissions(scopes, type, name) {
-  if (!Array.isArray(scopes)) return [];
-  return scopes.filter((scope) => scope.entity.type === type && (!scope.entity.name || scope.entity.name === name)).flatMap((scope) => scope.permissions);
 }
 
 // src/mlclaw/tailscale.ts
@@ -21464,7 +21337,6 @@ async function resolveBootstrapPlan(params) {
   const existingSecrets = await readSecretEnv(runtime.configRoot, agentName).catch(() => ({}));
   const brokerCredential = await resolveBrokerHfToken({
     opts,
-    owner,
     hfIdentity,
     ...providedBrokerHfToken ? { preferredToken: providedBrokerHfToken } : {},
     existingSecrets,
@@ -24020,7 +23892,7 @@ async function credentialsStatus(requestedAgent, runtime) {
   if (!metadata) throw new Error("verified HF Broker credential metadata is missing");
   runtime.stdout.log(`Agent: ${manifest.agent}`);
   runtime.stdout.log(`Status: healthy`);
-  runtime.stdout.log(`Profile: ${metadata.profileId}`);
+  runtime.stdout.log(`Credential kind: ${metadata.credentialKind}`);
   runtime.stdout.log(`Account: ${metadata.account}`);
   runtime.stdout.log(`Fingerprint: ${metadata.fingerprintSha256.slice(0, 12)}`);
   runtime.stdout.log(`Verified: ${metadata.verifiedAt}`);
@@ -24034,7 +23906,7 @@ async function verifiedStoredBrokerCredential(manifest, runtime) {
       `HF Broker credential metadata is missing; run \`mlclaw credentials repair ${manifest.agent}\` to complete the cutover`
     );
   }
-  const verified = await verifyBrokerHfToken(token, manifest.owner, manifest.brokerCredential.account, runtime);
+  const verified = await verifyBrokerHfToken(token, manifest.brokerCredential.account, runtime);
   const observed = brokerCredentialMetadata(token, verified.identity, runtime.now());
   if (observed.fingerprintSha256 !== manifest.brokerCredential.fingerprintSha256) {
     throw new Error(
@@ -24054,14 +23926,14 @@ async function credentialsRepair(requestedAgent, opts, runtime) {
     const suppliedToken = fileToken ?? nonEmpty(runtime.env.MLCLAW_BROKER_HF_TOKEN);
     let replacement;
     if (suppliedToken) {
-      replacement = await verifyBrokerHfToken(suppliedToken, manifest.owner, account, runtime);
+      replacement = await verifyBrokerHfToken(suppliedToken, account, runtime);
     } else {
       if (!runtime.prompt.isInteractive()) {
         throw new Error(
           "credential repair requires --broker-hf-token-file, MLCLAW_BROKER_HF_TOKEN, or an interactive terminal"
         );
       }
-      replacement = await promptForBrokerHfToken(manifest.owner, account, runtime);
+      replacement = await promptForBrokerHfToken(account, runtime);
     }
     const updatedManifest = {
       ...manifest,
@@ -24232,7 +24104,7 @@ async function resolveBrokerHfToken(params) {
   const configuredToken = fileToken ?? environmentToken ?? nonEmpty(params.preferredToken) ?? nonEmpty(params.existingSecrets.MLCLAW_BROKER_HF_TOKEN);
   if (configuredToken) {
     try {
-      return await verifyBrokerHfToken(configuredToken, params.owner, params.hfIdentity.name, params.runtime);
+      return await verifyBrokerHfToken(configuredToken, params.hfIdentity.name, params.runtime);
     } catch (error) {
       if (fileToken || environmentToken || params.preferredToken) throw error;
       if (params.runtime.prompt.isInteractive()) {
@@ -24252,19 +24124,19 @@ async function resolveBrokerHfToken(params) {
       "a dedicated HF Broker credential is required; set MLCLAW_BROKER_HF_TOKEN, pass --broker-hf-token-file, or run bootstrap interactively"
     );
   }
-  return await promptForBrokerHfToken(params.owner, params.hfIdentity.name, params.runtime);
+  return await promptForBrokerHfToken(params.hfIdentity.name, params.runtime);
 }
-async function promptForBrokerHfToken(owner, account, runtime) {
+async function promptForBrokerHfToken(account, runtime) {
   runtime.prompt.note(
-    "ML Claw will open a Hugging Face token form with BrokerKit's permissions preselected. Create a dedicated token and paste it here. Your current HF CLI login will not be changed.",
+    "ML Claw will open a Hugging Face fine-grained token form. Choose the permissions and resources this broker may use, create a dedicated token, and paste it here. Your current HF CLI login will not be changed.",
     "HF Broker credential"
   );
-  const url = buildBrokerTokenUrl(owner, account);
+  const url = buildBrokerTokenUrl();
   const opened = await runtime.hfCli.openUrl(url);
   runtime.prompt.note(
     `${opened ? "The token form was opened in your browser." : "Open this token form in your browser."}
 
-Name and create the token, then copy it. The URL contains permission names only; it contains no credential. The exact URL is printed below.`,
+Choose the permissions and resources, name and create the token, then copy it. The URL contains no credential. The exact URL is printed below.`,
     "Create the broker token"
   );
   runtime.stdout.log(url);
@@ -24274,7 +24146,7 @@ Name and create the token, then copy it. The URL contains permission names only;
       "Hugging Face broker token"
     );
     try {
-      const verified = await verifyBrokerHfToken(replacement, owner, account, runtime);
+      const verified = await verifyBrokerHfToken(replacement, account, runtime);
       runtime.prompt.note(
         "The dedicated broker token was verified. It will be stored only in ML Claw's trusted broker configuration.",
         "HF Broker credential ready"
@@ -24288,12 +24160,12 @@ Name and create the token, then copy it. The URL contains permission names only;
     }
   }
 }
-async function verifyBrokerHfToken(token, owner, expectedAccount, runtime) {
+async function verifyBrokerHfToken(token, expectedAccount, runtime) {
   const identity = await runtime.hubFactory(token).whoami();
   if (identity.name !== expectedAccount) {
     throw new Error(`broker token belongs to ${identity.name}, not ${expectedAccount}`);
   }
-  const assessment = assessBrokerCredential(identity, owner);
+  const assessment = assessBrokerCredential(identity);
   if (assessment.status !== "sufficient") {
     throw new Error(brokerCredentialAssessmentDetail(assessment));
   }
@@ -24308,10 +24180,7 @@ async function readOptionalBrokerHfTokenFile(file) {
   return token;
 }
 function brokerCredentialAssessmentDetail(assessment) {
-  if (assessment.status === "unsupported") return assessment.reason;
-  const shown = assessment.missing.slice(0, 8);
-  const remaining = assessment.missing.length - shown.length;
-  return `The HF Broker credential is missing ${assessment.missing.length} required permission${assessment.missing.length === 1 ? "" : "s"}: ${shown.join(", ")}${remaining > 0 ? `, and ${remaining} more` : ""}`;
+  return assessment.reason;
 }
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
