@@ -11,7 +11,9 @@ afterEach(async () => {
 
 describe.runIf(brokerBinary)("pinned BrokerKit agent tools", () => {
   it("advertises bounded transcript-safe submission and recovery schemas", async () => {
-    const response = await callMcp("http://127.0.0.1:1", "tools/list");
+    const backend = await startAgentBackend();
+    cleanups.push(backend.close);
+    const response = await callMcp(backend.url, "tools/list");
     const tools = parseMcpTools(response.result.tools);
     const byName = new Map(tools.map((tool) => [tool.name, tool]));
 
@@ -132,6 +134,22 @@ async function startAgentBackend(): Promise<{
     const url = new URL(request.url ?? "/", "http://localhost");
     if (request.headers.authorization !== "Bearer agent-secret-agent-secret-agent-secret-1234") {
       response.writeHead(401).end(JSON.stringify({ error: { code: "unauthorized", message: "unauthorized" } }));
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/.well-known/brokerkit-agent") {
+      response.writeHead(200).end(
+        JSON.stringify({
+          api_version: "brokerkit.io/agent/v1",
+          operations: ["repo.create", "space.secret.set", "space.variable.set"],
+          credential: {
+            ready: true,
+            provider: "huggingface",
+            credential_kind: "fine_grained_user_token",
+            generation: 1,
+            verification_state: "valid",
+          },
+        }),
+      );
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/agent/v1/operations") {
