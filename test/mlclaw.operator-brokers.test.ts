@@ -28,7 +28,10 @@ function approval(id: string, status: string, revision: number) {
     presentation: {
       risk: "medium",
       title: "Update repository",
+      target: "osolmaz/example",
       facts: [{ label: "Repository", value: "osolmaz/example" }],
+      warnings: [{ severity: "medium", text: "This changes repository metadata." }],
+      plan_hash: "sha256:operator-contract-test",
     },
     allowed_actions: status === "pending" ? ["approve", "deny"] : ["revoke"],
     approval_bounds: { max_duration_seconds: 300, max_uses: 1 },
@@ -156,10 +159,15 @@ describe("Brokerkit operator backends", () => {
         });
       }
       if (request.url.includes("cursor=next")) {
-        return new Response(JSON.stringify({ error: { code: "revision_conflict", message: "Request changed" } }), {
-          status: 409,
-          headers: { "content-type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({
+            error: { code: "revision_conflict", message: "Request changed", correlation_id: "test-correlation" },
+          }),
+          {
+            status: 409,
+            headers: { "content-type": "application/json" },
+          },
+        );
       }
       return new Response(JSON.stringify(approval("grant-1", "pending", 1)), {
         headers: { "content-type": "application/json" },

@@ -12,6 +12,24 @@ Do not run mutation testing during ordinary implementation work. Keep its
 configuration and CI declaration current so a dedicated mutation run can be
 performed separately.
 
+Do not report work as complete until the original user-visible workflow has
+been reproduced and verified end to end in its real target environment. Tests,
+mocks, CI, health checks, successful builds, and deployments are supporting
+evidence, not substitutes. If full verification is impossible, state that
+clearly and report the work as unverified.
+
+## Release Versions
+
+- Treat `package.json` as the only hand-edited source for the MLClaw package,
+  OpenClaw, BrokerKit package, BrokerKit binary, and runtime image versions.
+- Keep the `openclaw-brokerkit` dependency exactly equal to
+  `config.brokerkitPluginVersion`.
+- Do not hand-edit Dockerfile release defaults or
+  `src/mlclaw/release-config.generated.ts`. After editing release metadata, run
+  `npm install --package-lock-only` if dependency metadata changed, then run
+  `npm run release:sync`.
+- Run `npm run release:check` before committing. CI rejects version drift.
+
 ## Runtime Boundary
 
 - Treat the OpenClaw process and agent account as untrusted.

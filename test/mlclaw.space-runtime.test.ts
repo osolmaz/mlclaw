@@ -42,7 +42,10 @@ function brokerApproval(
     presentation: {
       risk: "medium",
       title: "Update repository",
+      target: "osolmaz/example",
       facts: [{ label: "Repository", value: "osolmaz/example" }],
+      warnings: [{ severity: "medium", text: "This changes repository metadata." }],
+      plan_hash: "sha256:space-runtime-contract-test",
     },
     allowed_actions: status === "pending" ? ["approve", "deny"] : ["revoke"],
     approval_bounds: approvalBounds,

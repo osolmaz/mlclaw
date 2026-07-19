@@ -1,20 +1,12 @@
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { RELEASE_CONFIG } from "./release-config.generated.js";
 
-const DEFAULT_OPENCLAW_VERSION = "2026.7.1";
-const DEFAULT_BROKERKIT_PLUGIN_VERSION = "0.3.3";
-export const DEFAULT_BROKERKIT_VERSION = "hf-broker/v0.4.0";
-const DEFAULT_RUNTIME_IMAGE_REPOSITORY = "ghcr.io/huggingface/mlclaw";
-
-const PACKAGE_METADATA = readPackageMetadata();
-
-export const PACKAGE_VERSION = packageString("version", "unknown");
-export const OPENCLAW_VERSION = packageConfigString("openclawVersion", DEFAULT_OPENCLAW_VERSION);
+export const PACKAGE_VERSION = RELEASE_CONFIG.packageVersion;
+export const OPENCLAW_VERSION = RELEASE_CONFIG.openclawVersion;
 export const OPENCLAW_BASE_IMAGE = `ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}`;
-export const BROKERKIT_PLUGIN_VERSION = packageConfigString("brokerkitPluginVersion", DEFAULT_BROKERKIT_PLUGIN_VERSION);
-export const BROKERKIT_VERSION = packageConfigString("brokerkitVersion", DEFAULT_BROKERKIT_VERSION);
-export const RUNTIME_IMAGE_REPOSITORY = packageConfigString("runtimeImageRepository", DEFAULT_RUNTIME_IMAGE_REPOSITORY);
+export const BROKERKIT_PLUGIN_VERSION = RELEASE_CONFIG.brokerkitPluginVersion;
+export const BROKERKIT_VERSION = RELEASE_CONFIG.brokerkitVersion;
+export const DEFAULT_BROKERKIT_VERSION = BROKERKIT_VERSION;
+export const RUNTIME_IMAGE_REPOSITORY = RELEASE_CONFIG.runtimeImageRepository;
 export const DEFAULT_RUNTIME_IMAGE_TAG = `${PACKAGE_VERSION}-openclaw-${OPENCLAW_VERSION}`;
 export const DEFAULT_RUNTIME_IMAGE = `${RUNTIME_IMAGE_REPOSITORY}:${DEFAULT_RUNTIME_IMAGE_TAG}`;
 
@@ -41,42 +33,4 @@ export function resolveSpaceRuntimeImage(
 
 export function bundledSpaceRuntimeRef(templateRev: string): string {
   return `bundled:${templateRev}`;
-}
-
-type PackageMetadata = {
-  version?: unknown;
-  config?: Record<string, unknown>;
-};
-
-function packageString(key: keyof PackageMetadata, fallback: string): string {
-  const value = PACKAGE_METADATA[key];
-  return typeof value === "string" && value.trim() ? value.trim() : fallback;
-}
-
-function packageConfigString(key: string, fallback: string): string {
-  const value = PACKAGE_METADATA.config?.[key];
-  return typeof value === "string" && value.trim() ? value.trim() : fallback;
-}
-
-function readPackageMetadata(): PackageMetadata {
-  let dir = path.dirname(fileURLToPath(import.meta.url));
-  while (true) {
-    const candidate = path.join(dir, "package.json");
-    try {
-      return JSON.parse(fs.readFileSync(candidate, "utf8")) as PackageMetadata;
-    } catch (err) {
-      if (!isMissingFileError(err)) {
-        throw err;
-      }
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) {
-      throw new Error("could not find package.json while resolving default runtime image");
-    }
-    dir = parent;
-  }
-}
-
-function isMissingFileError(err: unknown): boolean {
-  return err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT";
 }

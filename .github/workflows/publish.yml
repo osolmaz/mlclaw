@@ -70,6 +70,7 @@ jobs:
           echo "runtime_image=${runtime_image}" >> "$GITHUB_OUTPUT"
           echo "runtime_tag=${version}-openclaw-${openclaw_version}" >> "$GITHUB_OUTPUT"
       - run: npm ci
+      - run: npm run release:check
       - name: Build pinned HF Broker
         run: |
           git init "$RUNNER_TEMP/brokerkit"
@@ -80,8 +81,6 @@ jobs:
             "refs/tags/${{ steps.runtime-config.outputs.brokerkit_version }}^{commit}")" = \
             "$(git -C "$RUNNER_TEMP/brokerkit" rev-parse HEAD)"
           go build -C "$RUNNER_TEMP/brokerkit" -o "$RUNNER_TEMP/hf-broker" ./brokers/huggingface/cmd/hf-broker
-          "$RUNNER_TEMP/hf-broker" credential requirements > "$RUNNER_TEMP/hf-broker-credential-requirements.json"
-          cmp src/mlclaw/hf-broker-credential-requirements.json "$RUNNER_TEMP/hf-broker-credential-requirements.json"
       - name: Test pinned BrokerKit agent tools
         env:
           MLCLAW_HF_BROKER_BINARY: ${{ runner.temp }}/hf-broker

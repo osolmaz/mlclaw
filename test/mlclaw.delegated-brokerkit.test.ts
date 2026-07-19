@@ -20,7 +20,10 @@ function request(id: string, revision = 1, status = "pending") {
     presentation: {
       risk: "high",
       title: "Update repository",
+      target: "osolmaz/example",
       facts: [{ label: "Repository", value: "osolmaz/example" }],
+      warnings: [{ severity: "high", text: "This changes repository metadata." }],
+      plan_hash: "sha256:delegated-contract-test",
     },
     allowed_actions: status === "pending" ? ["approve", "deny"] : ["revoke"],
     approval_bounds: { max_duration_seconds: 300, max_uses: 1 },

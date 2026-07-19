@@ -1,11 +1,11 @@
 {
   "name": "mlclaw",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "license": "MIT",
   "config": {
     "openclawVersion": "2026.7.1",
-    "brokerkitVersion": "hf-broker/v0.4.0",
-    "brokerkitPluginVersion": "0.3.3",
+    "brokerkitVersion": "hf-broker/v0.4.2",
+    "brokerkitPluginVersion": "0.3.4",
     "runtimeImageRepository": "ghcr.io/huggingface/mlclaw"
   },
   "repository": {
@@ -55,16 +55,19 @@
     "pack:check": "node scripts/check-package.mjs",
     "prepack": "npm run build",
     "check:secrets": "node scripts/check-secrets.mjs",
-    "format": "prettier --check eslint.config.mjs vitest.config.ts vitest.stryker.config.ts package.json README.md src/hf-state-sync/archive.ts src/hf-state-sync/cli.ts src/hf-state-sync/paths.ts src/hf-state-sync/prepare.ts src/hf-state-sync/stage-worker.ts src/hf-state-sync/supervise.ts src/mlclaw/auth.ts src/mlclaw/cli.ts src/mlclaw/deployment-state.ts src/mlclaw/docker.ts src/mlclaw/hf-broker-credential.ts src/mlclaw/hf-cli.ts src/mlclaw/hub-api.ts src/mlclaw/local-config.ts src/mlclaw/tailscale.ts src/mlclaw-space-runtime/delegated-brokerkit.ts src/mlclaw-space-runtime/delegated-revisions.ts src/mlclaw-space-runtime/operator-brokers.ts src/mlclaw-space-runtime/openclaw-config.ts src/mlclaw-space-runtime/app.ts src/mlclaw-space-runtime/config.ts src/mlclaw-space-runtime/local-access.ts src/mlclaw-space-runtime/openai-credentials.ts src/mlclaw-space-runtime/proxy.ts src/mlclaw-space-runtime/server.ts src/mlclaw-space-runtime/session.ts src/mlclaw-space-runtime/shell.ts src/mlclaw-control-ui/src/main.tsx src/mlclaw-control-ui/src/styles.css src/mlclaw-control-ui/src/components/ui/utils.ts src/mlclaw/git.ts test/hf-state-sync.archive.test.ts test/hf-state-sync.roundtrip.test.ts test/hf-state-sync.supervise.test.ts test/mlclaw.auth.test.ts test/mlclaw.brokerkit-agent-tools.test.ts test/mlclaw.bundle.test.ts test/mlclaw.cli.test.ts test/mlclaw.delegated-brokerkit.test.ts test/mlclaw.deployment-state.test.ts test/mlclaw.docker.test.ts test/mlclaw.generate-space.test.ts test/mlclaw.hf-broker-credential.test.ts test/mlclaw.hub-api.test.ts test/mlclaw.local-config.test.ts test/mlclaw.operator-brokers.test.ts test/mlclaw.runtime-image.test.ts test/mlclaw.space-runtime.test.ts test/mlclaw.tailscale.test.ts docs/operator-brokers-config.md",
-    "format:write": "prettier --write eslint.config.mjs vitest.config.ts vitest.stryker.config.ts package.json README.md src/hf-state-sync/archive.ts src/hf-state-sync/cli.ts src/hf-state-sync/paths.ts src/hf-state-sync/prepare.ts src/hf-state-sync/stage-worker.ts src/hf-state-sync/supervise.ts src/mlclaw/auth.ts src/mlclaw/cli.ts src/mlclaw/deployment-state.ts src/mlclaw/docker.ts src/mlclaw/hf-broker-credential.ts src/mlclaw/hf-cli.ts src/mlclaw/hub-api.ts src/mlclaw/local-config.ts src/mlclaw/tailscale.ts src/mlclaw-space-runtime/delegated-brokerkit.ts src/mlclaw-space-runtime/delegated-revisions.ts src/mlclaw-space-runtime/operator-brokers.ts src/mlclaw-space-runtime/openclaw-config.ts src/mlclaw-space-runtime/app.ts src/mlclaw-space-runtime/config.ts src/mlclaw-space-runtime/local-access.ts src/mlclaw-space-runtime/openai-credentials.ts src/mlclaw-space-runtime/proxy.ts src/mlclaw-space-runtime/server.ts src/mlclaw-space-runtime/session.ts src/mlclaw-space-runtime/shell.ts src/mlclaw-control-ui/src/main.tsx src/mlclaw-control-ui/src/styles.css src/mlclaw-control-ui/src/components/ui/utils.ts src/mlclaw/git.ts test/hf-state-sync.archive.test.ts test/hf-state-sync.roundtrip.test.ts test/hf-state-sync.supervise.test.ts test/mlclaw.auth.test.ts test/mlclaw.brokerkit-agent-tools.test.ts test/mlclaw.bundle.test.ts test/mlclaw.cli.test.ts test/mlclaw.delegated-brokerkit.test.ts test/mlclaw.deployment-state.test.ts test/mlclaw.docker.test.ts test/mlclaw.generate-space.test.ts test/mlclaw.hf-broker-credential.test.ts test/mlclaw.hub-api.test.ts test/mlclaw.local-config.test.ts test/mlclaw.operator-brokers.test.ts test/mlclaw.runtime-image.test.ts test/mlclaw.space-runtime.test.ts test/mlclaw.tailscale.test.ts docs/operator-brokers-config.md",
+    "format": "prettier --check eslint.config.mjs vitest.config.ts vitest.stryker.config.ts package.json README.md scripts/sync-release-config.mjs src/hf-state-sync/archive.ts src/hf-state-sync/cli.ts src/hf-state-sync/paths.ts src/hf-state-sync/prepare.ts src/hf-state-sync/stage-worker.ts src/hf-state-sync/supervise.ts src/mlclaw/auth.ts src/mlclaw/cli.ts src/mlclaw/deployment-state.ts src/mlclaw/docker.ts src/mlclaw/hf-broker-credential.ts src/mlclaw/hf-cli.ts src/mlclaw/hub-api.ts src/mlclaw/local-config.ts src/mlclaw/tailscale.ts src/mlclaw-space-runtime/delegated-brokerkit.ts src/mlclaw-space-runtime/delegated-revisions.ts src/mlclaw-space-runtime/operator-brokers.ts src/mlclaw-space-runtime/openclaw-config.ts src/mlclaw-space-runtime/app.ts src/mlclaw-space-runtime/config.ts src/mlclaw-space-runtime/local-access.ts src/mlclaw-space-runtime/openai-credentials.ts src/mlclaw-space-runtime/proxy.ts src/mlclaw-space-runtime/server.ts src/mlclaw-space-runtime/session.ts src/mlclaw-space-runtime/shell.ts src/mlclaw-control-ui/src/main.tsx src/mlclaw-control-ui/src/styles.css src/mlclaw-control-ui/src/components/ui/utils.ts src/mlclaw/git.ts test/hf-state-sync.archive.test.ts test/hf-state-sync.roundtrip.test.ts test/hf-state-sync.supervise.test.ts test/mlclaw.auth.test.ts test/mlclaw.brokerkit-agent-tools.test.ts test/mlclaw.bundle.test.ts test/mlclaw.cli.test.ts test/mlclaw.delegated-brokerkit.test.ts test/mlclaw.deployment-state.test.ts test/mlclaw.docker.test.ts test/mlclaw.generate-space.test.ts test/mlclaw.hf-broker-credential.test.ts test/mlclaw.hub-api.test.ts test/mlclaw.local-config.test.ts test/mlclaw.operator-brokers.test.ts test/mlclaw.runtime-image.test.ts test/mlclaw.space-runtime.test.ts test/mlclaw.tailscale.test.ts docs/operator-brokers-config.md",
+    "format:write": "prettier --write eslint.config.mjs vitest.config.ts vitest.stryker.config.ts package.json README.md scripts/sync-release-config.mjs src/hf-state-sync/archive.ts src/hf-state-sync/cli.ts src/hf-state-sync/paths.ts src/hf-state-sync/prepare.ts src/hf-state-sync/stage-worker.ts src/hf-state-sync/supervise.ts src/mlclaw/auth.ts src/mlclaw/cli.ts src/mlclaw/deployment-state.ts src/mlclaw/docker.ts src/mlclaw/hf-broker-credential.ts src/mlclaw/hf-cli.ts src/mlclaw/hub-api.ts src/mlclaw/local-config.ts src/mlclaw/tailscale.ts src/mlclaw-space-runtime/delegated-brokerkit.ts src/mlclaw-space-runtime/delegated-revisions.ts src/mlclaw-space-runtime/operator-brokers.ts src/mlclaw-space-runtime/openclaw-config.ts src/mlclaw-space-runtime/app.ts src/mlclaw-space-runtime/config.ts src/mlclaw-space-runtime/local-access.ts src/mlclaw-space-runtime/openai-credentials.ts src/mlclaw-space-runtime/proxy.ts src/mlclaw-space-runtime/server.ts src/mlclaw-space-runtime/session.ts src/mlclaw-space-runtime/shell.ts src/mlclaw-control-ui/src/main.tsx src/mlclaw-control-ui/src/styles.css src/mlclaw-control-ui/src/components/ui/utils.ts src/mlclaw/git.ts test/hf-state-sync.archive.test.ts test/hf-state-sync.roundtrip.test.ts test/hf-state-sync.supervise.test.ts test/mlclaw.auth.test.ts test/mlclaw.brokerkit-agent-tools.test.ts test/mlclaw.bundle.test.ts test/mlclaw.cli.test.ts test/mlclaw.delegated-brokerkit.test.ts test/mlclaw.deployment-state.test.ts test/mlclaw.docker.test.ts test/mlclaw.generate-space.test.ts test/mlclaw.hf-broker-credential.test.ts test/mlclaw.hub-api.test.ts test/mlclaw.local-config.test.ts test/mlclaw.operator-brokers.test.ts test/mlclaw.runtime-image.test.ts test/mlclaw.space-runtime.test.ts test/mlclaw.tailscale.test.ts docs/operator-brokers-config.md",
     "lint": "eslint --max-warnings 0 src/mlclaw-space-runtime/delegated-brokerkit.ts src/mlclaw-space-runtime/delegated-revisions.ts src/mlclaw-space-runtime/operator-brokers.ts src/mlclaw-space-runtime/openclaw-config.ts",
     "coverage": "vitest run --coverage",
     "dry": "slophammer-ts dry .",
     "mutate": "stryker run --dryRunOnly",
     "slophammer": "slophammer-ts check .",
-    "check": "npm run format && npm run lint && npm run typecheck && npm test && npm run coverage && npm run build && npm run check:secrets && npm run pack:check && npm run dry && npm run slophammer",
+    "check": "npm run release:check && npm run format && npm run lint && npm run typecheck && npm test && npm run coverage && npm run build && npm run check:secrets && npm run pack:check && npm run dry && npm run slophammer",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "release:check": "node scripts/sync-release-config.mjs --check",
+    "release:sync": "node scripts/sync-release-config.mjs",
+    "version": "npm run release:sync"
   },
   "dependencies": {
     "@clack/prompts": "^1.4.0",
@@ -73,6 +76,7 @@
     "commander": "^14.0.3",
     "hono": "^4.12.28",
     "lucide-react": "^0.468.0",
+    "openclaw-brokerkit": "0.3.4",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "skillflag": "^0.2.0",

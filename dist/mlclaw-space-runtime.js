@@ -1,10 +1,309 @@
 #!/usr/bin/env node
 import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);
+var __create = Object.create;
 var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __commonJS = (cb, mod) => function __require() {
+  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+};
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
 };
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
+
+// node_modules/ajv-formats/dist/formats.js
+var require_formats = __commonJS({
+  "node_modules/ajv-formats/dist/formats.js"(exports) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    exports.formatNames = exports.fastFormats = exports.fullFormats = void 0;
+    function fmtDef(validate, compare) {
+      return { validate, compare };
+    }
+    exports.fullFormats = {
+      // date: http://tools.ietf.org/html/rfc3339#section-5.6
+      date: fmtDef(date, compareDate),
+      // date-time: http://tools.ietf.org/html/rfc3339#section-5.6
+      time: fmtDef(getTime(true), compareTime),
+      "date-time": fmtDef(getDateTime(true), compareDateTime),
+      "iso-time": fmtDef(getTime(), compareIsoTime),
+      "iso-date-time": fmtDef(getDateTime(), compareIsoDateTime),
+      // duration: https://tools.ietf.org/html/rfc3339#appendix-A
+      duration: /^P(?!$)((\d+Y)?(\d+M)?(\d+D)?(T(?=\d)(\d+H)?(\d+M)?(\d+S)?)?|(\d+W)?)$/,
+      uri,
+      "uri-reference": /^(?:[a-z][a-z0-9+\-.]*:)?(?:\/?\/(?:(?:[a-z0-9\-._~!$&'()*+,;=:]|%[0-9a-f]{2})*@)?(?:\[(?:(?:(?:(?:[0-9a-f]{1,4}:){6}|::(?:[0-9a-f]{1,4}:){5}|(?:[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){4}|(?:(?:[0-9a-f]{1,4}:){0,1}[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){3}|(?:(?:[0-9a-f]{1,4}:){0,2}[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){2}|(?:(?:[0-9a-f]{1,4}:){0,3}[0-9a-f]{1,4})?::[0-9a-f]{1,4}:|(?:(?:[0-9a-f]{1,4}:){0,4}[0-9a-f]{1,4})?::)(?:[0-9a-f]{1,4}:[0-9a-f]{1,4}|(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?))|(?:(?:[0-9a-f]{1,4}:){0,5}[0-9a-f]{1,4})?::[0-9a-f]{1,4}|(?:(?:[0-9a-f]{1,4}:){0,6}[0-9a-f]{1,4})?::)|[Vv][0-9a-f]+\.[a-z0-9\-._~!$&'()*+,;=:]+)\]|(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)|(?:[a-z0-9\-._~!$&'"()*+,;=]|%[0-9a-f]{2})*)(?::\d*)?(?:\/(?:[a-z0-9\-._~!$&'"()*+,;=:@]|%[0-9a-f]{2})*)*|\/(?:(?:[a-z0-9\-._~!$&'"()*+,;=:@]|%[0-9a-f]{2})+(?:\/(?:[a-z0-9\-._~!$&'"()*+,;=:@]|%[0-9a-f]{2})*)*)?|(?:[a-z0-9\-._~!$&'"()*+,;=:@]|%[0-9a-f]{2})+(?:\/(?:[a-z0-9\-._~!$&'"()*+,;=:@]|%[0-9a-f]{2})*)*)?(?:\?(?:[a-z0-9\-._~!$&'"()*+,;=:@/?]|%[0-9a-f]{2})*)?(?:#(?:[a-z0-9\-._~!$&'"()*+,;=:@/?]|%[0-9a-f]{2})*)?$/i,
+      // uri-template: https://tools.ietf.org/html/rfc6570
+      "uri-template": /^(?:(?:[^\x00-\x20"'<>%\\^`{|}]|%[0-9a-f]{2})|\{[+#./;?&=,!@|]?(?:[a-z0-9_]|%[0-9a-f]{2})+(?::[1-9][0-9]{0,3}|\*)?(?:,(?:[a-z0-9_]|%[0-9a-f]{2})+(?::[1-9][0-9]{0,3}|\*)?)*\})*$/i,
+      // For the source: https://gist.github.com/dperini/729294
+      // For test cases: https://mathiasbynens.be/demo/url-regex
+      url: /^(?:https?|ftp):\/\/(?:\S+(?::\S*)?@)?(?:(?!(?:10|127)(?:\.\d{1,3}){3})(?!(?:169\.254|192\.168)(?:\.\d{1,3}){2})(?!172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})(?:[1-9]\d?|1\d\d|2[01]\d|22[0-3])(?:\.(?:1?\d{1,2}|2[0-4]\d|25[0-5])){2}(?:\.(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-4]))|(?:(?:[a-z0-9\u{00a1}-\u{ffff}]+-)*[a-z0-9\u{00a1}-\u{ffff}]+)(?:\.(?:[a-z0-9\u{00a1}-\u{ffff}]+-)*[a-z0-9\u{00a1}-\u{ffff}]+)*(?:\.(?:[a-z\u{00a1}-\u{ffff}]{2,})))(?::\d{2,5})?(?:\/[^\s]*)?$/iu,
+      email: /^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i,
+      hostname: /^(?=.{1,253}\.?$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[-0-9a-z]{0,61}[0-9a-z])?)*\.?$/i,
+      // optimized https://www.safaribooksonline.com/library/view/regular-expressions-cookbook/9780596802837/ch07s16.html
+      ipv4: /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/,
+      ipv6: /^((([0-9a-f]{1,4}:){7}([0-9a-f]{1,4}|:))|(([0-9a-f]{1,4}:){6}(:[0-9a-f]{1,4}|((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(([0-9a-f]{1,4}:){5}(((:[0-9a-f]{1,4}){1,2})|:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(([0-9a-f]{1,4}:){4}(((:[0-9a-f]{1,4}){1,3})|((:[0-9a-f]{1,4})?:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9a-f]{1,4}:){3}(((:[0-9a-f]{1,4}){1,4})|((:[0-9a-f]{1,4}){0,2}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9a-f]{1,4}:){2}(((:[0-9a-f]{1,4}){1,5})|((:[0-9a-f]{1,4}){0,3}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9a-f]{1,4}:){1}(((:[0-9a-f]{1,4}){1,6})|((:[0-9a-f]{1,4}){0,4}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(:(((:[0-9a-f]{1,4}){1,7})|((:[0-9a-f]{1,4}){0,5}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:)))$/i,
+      regex,
+      // uuid: http://tools.ietf.org/html/rfc4122
+      uuid: /^(?:urn:uuid:)?[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i,
+      // JSON-pointer: https://tools.ietf.org/html/rfc6901
+      // uri fragment: https://tools.ietf.org/html/rfc3986#appendix-A
+      "json-pointer": /^(?:\/(?:[^~/]|~0|~1)*)*$/,
+      "json-pointer-uri-fragment": /^#(?:\/(?:[a-z0-9_\-.!$&'()*+,;:=@]|%[0-9a-f]{2}|~0|~1)*)*$/i,
+      // relative JSON-pointer: http://tools.ietf.org/html/draft-luff-relative-json-pointer-00
+      "relative-json-pointer": /^(?:0|[1-9][0-9]*)(?:#|(?:\/(?:[^~/]|~0|~1)*)*)$/,
+      // the following formats are used by the openapi specification: https://spec.openapis.org/oas/v3.0.0#data-types
+      // byte: https://github.com/miguelmota/is-base64
+      byte,
+      // signed 32 bit integer
+      int32: { type: "number", validate: validateInt32 },
+      // signed 64 bit integer
+      int64: { type: "number", validate: validateInt64 },
+      // C-type float
+      float: { type: "number", validate: validateNumber },
+      // C-type double
+      double: { type: "number", validate: validateNumber },
+      // hint to the UI to hide input strings
+      password: true,
+      // unchecked string payload
+      binary: true
+    };
+    exports.fastFormats = {
+      ...exports.fullFormats,
+      date: fmtDef(/^\d\d\d\d-[0-1]\d-[0-3]\d$/, compareDate),
+      time: fmtDef(/^(?:[0-2]\d:[0-5]\d:[0-5]\d|23:59:60)(?:\.\d+)?(?:z|[+-]\d\d(?::?\d\d)?)$/i, compareTime),
+      "date-time": fmtDef(/^\d\d\d\d-[0-1]\d-[0-3]\dt(?:[0-2]\d:[0-5]\d:[0-5]\d|23:59:60)(?:\.\d+)?(?:z|[+-]\d\d(?::?\d\d)?)$/i, compareDateTime),
+      "iso-time": fmtDef(/^(?:[0-2]\d:[0-5]\d:[0-5]\d|23:59:60)(?:\.\d+)?(?:z|[+-]\d\d(?::?\d\d)?)?$/i, compareIsoTime),
+      "iso-date-time": fmtDef(/^\d\d\d\d-[0-1]\d-[0-3]\d[t\s](?:[0-2]\d:[0-5]\d:[0-5]\d|23:59:60)(?:\.\d+)?(?:z|[+-]\d\d(?::?\d\d)?)?$/i, compareIsoDateTime),
+      // uri: https://github.com/mafintosh/is-my-json-valid/blob/master/formats.js
+      uri: /^(?:[a-z][a-z0-9+\-.]*:)(?:\/?\/)?[^\s]*$/i,
+      "uri-reference": /^(?:(?:[a-z][a-z0-9+\-.]*:)?\/?\/)?(?:[^\\\s#][^\s#]*)?(?:#[^\\\s]*)?$/i,
+      // email (sources from jsen validator):
+      // http://stackoverflow.com/questions/201323/using-a-regular-expression-to-validate-an-email-address#answer-8829363
+      // http://www.w3.org/TR/html5/forms.html#valid-e-mail-address (search for 'wilful violation')
+      email: /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/i
+    };
+    exports.formatNames = Object.keys(exports.fullFormats);
+    function isLeapYear(year) {
+      return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    }
+    var DATE = /^(\d\d\d\d)-(\d\d)-(\d\d)$/;
+    var DAYS = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    function date(str) {
+      const matches = DATE.exec(str);
+      if (!matches)
+        return false;
+      const year = +matches[1];
+      const month = +matches[2];
+      const day = +matches[3];
+      return month >= 1 && month <= 12 && day >= 1 && day <= (month === 2 && isLeapYear(year) ? 29 : DAYS[month]);
+    }
+    function compareDate(d1, d2) {
+      if (!(d1 && d2))
+        return void 0;
+      if (d1 > d2)
+        return 1;
+      if (d1 < d2)
+        return -1;
+      return 0;
+    }
+    var TIME = /^(\d\d):(\d\d):(\d\d(?:\.\d+)?)(z|([+-])(\d\d)(?::?(\d\d))?)?$/i;
+    function getTime(strictTimeZone) {
+      return function time(str) {
+        const matches = TIME.exec(str);
+        if (!matches)
+          return false;
+        const hr = +matches[1];
+        const min = +matches[2];
+        const sec = +matches[3];
+        const tz = matches[4];
+        const tzSign = matches[5] === "-" ? -1 : 1;
+        const tzH = +(matches[6] || 0);
+        const tzM = +(matches[7] || 0);
+        if (tzH > 23 || tzM > 59 || strictTimeZone && !tz)
+          return false;
+        if (hr <= 23 && min <= 59 && sec < 60)
+          return true;
+        const utcMin = min - tzM * tzSign;
+        const utcHr = hr - tzH * tzSign - (utcMin < 0 ? 1 : 0);
+        return (utcHr === 23 || utcHr === -1) && (utcMin === 59 || utcMin === -1) && sec < 61;
+      };
+    }
+    function compareTime(s1, s2) {
+      if (!(s1 && s2))
+        return void 0;
+      const t1 = (/* @__PURE__ */ new Date("2020-01-01T" + s1)).valueOf();
+      const t2 = (/* @__PURE__ */ new Date("2020-01-01T" + s2)).valueOf();
+      if (!(t1 && t2))
+        return void 0;
+      return t1 - t2;
+    }
+    function compareIsoTime(t1, t2) {
+      if (!(t1 && t2))
+        return void 0;
+      const a1 = TIME.exec(t1);
+      const a2 = TIME.exec(t2);
+      if (!(a1 && a2))
+        return void 0;
+      t1 = a1[1] + a1[2] + a1[3];
+      t2 = a2[1] + a2[2] + a2[3];
+      if (t1 > t2)
+        return 1;
+      if (t1 < t2)
+        return -1;
+      return 0;
+    }
+    var DATE_TIME_SEPARATOR = /t|\s/i;
+    function getDateTime(strictTimeZone) {
+      const time = getTime(strictTimeZone);
+      return function date_time(str) {
+        const dateTime = str.split(DATE_TIME_SEPARATOR);
+        return dateTime.length === 2 && date(dateTime[0]) && time(dateTime[1]);
+      };
+    }
+    function compareDateTime(dt1, dt2) {
+      if (!(dt1 && dt2))
+        return void 0;
+      const d1 = new Date(dt1).valueOf();
+      const d2 = new Date(dt2).valueOf();
+      if (!(d1 && d2))
+        return void 0;
+      return d1 - d2;
+    }
+    function compareIsoDateTime(dt1, dt2) {
+      if (!(dt1 && dt2))
+        return void 0;
+      const [d1, t1] = dt1.split(DATE_TIME_SEPARATOR);
+      const [d2, t2] = dt2.split(DATE_TIME_SEPARATOR);
+      const res = compareDate(d1, d2);
+      if (res === void 0)
+        return void 0;
+      return res || compareTime(t1, t2);
+    }
+    var NOT_URI_FRAGMENT = /\/|:/;
+    var URI = /^(?:[a-z][a-z0-9+\-.]*:)(?:\/?\/(?:(?:[a-z0-9\-._~!$&'()*+,;=:]|%[0-9a-f]{2})*@)?(?:\[(?:(?:(?:(?:[0-9a-f]{1,4}:){6}|::(?:[0-9a-f]{1,4}:){5}|(?:[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){4}|(?:(?:[0-9a-f]{1,4}:){0,1}[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){3}|(?:(?:[0-9a-f]{1,4}:){0,2}[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){2}|(?:(?:[0-9a-f]{1,4}:){0,3}[0-9a-f]{1,4})?::[0-9a-f]{1,4}:|(?:(?:[0-9a-f]{1,4}:){0,4}[0-9a-f]{1,4})?::)(?:[0-9a-f]{1,4}:[0-9a-f]{1,4}|(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?))|(?:(?:[0-9a-f]{1,4}:){0,5}[0-9a-f]{1,4})?::[0-9a-f]{1,4}|(?:(?:[0-9a-f]{1,4}:){0,6}[0-9a-f]{1,4})?::)|[Vv][0-9a-f]+\.[a-z0-9\-._~!$&'()*+,;=:]+)\]|(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)|(?:[a-z0-9\-._~!$&'()*+,;=]|%[0-9a-f]{2})*)(?::\d*)?(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*|\/(?:(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})+(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*)?|(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})+(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*)(?:\?(?:[a-z0-9\-._~!$&'()*+,;=:@/?]|%[0-9a-f]{2})*)?(?:#(?:[a-z0-9\-._~!$&'()*+,;=:@/?]|%[0-9a-f]{2})*)?$/i;
+    function uri(str) {
+      return NOT_URI_FRAGMENT.test(str) && URI.test(str);
+    }
+    var BYTE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/gm;
+    function byte(str) {
+      BYTE.lastIndex = 0;
+      return BYTE.test(str);
+    }
+    var MIN_INT32 = -(2 ** 31);
+    var MAX_INT32 = 2 ** 31 - 1;
+    function validateInt32(value) {
+      return Number.isInteger(value) && value <= MAX_INT32 && value >= MIN_INT32;
+    }
+    function validateInt64(value) {
+      return Number.isInteger(value);
+    }
+    function validateNumber() {
+      return true;
+    }
+    var Z_ANCHOR = /[^\\]\\Z/;
+    function regex(str) {
+      if (Z_ANCHOR.test(str))
+        return false;
+      try {
+        new RegExp(str);
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+  }
+});
+
+// node_modules/fast-deep-equal/index.js
+var require_fast_deep_equal = __commonJS({
+  "node_modules/fast-deep-equal/index.js"(exports, module) {
+    "use strict";
+    module.exports = function equal2(a, b) {
+      if (a === b) return true;
+      if (a && b && typeof a == "object" && typeof b == "object") {
+        if (a.constructor !== b.constructor) return false;
+        var length, i, keys;
+        if (Array.isArray(a)) {
+          length = a.length;
+          if (length != b.length) return false;
+          for (i = length; i-- !== 0; )
+            if (!equal2(a[i], b[i])) return false;
+          return true;
+        }
+        if (a.constructor === RegExp) return a.source === b.source && a.flags === b.flags;
+        if (a.valueOf !== Object.prototype.valueOf) return a.valueOf() === b.valueOf();
+        if (a.toString !== Object.prototype.toString) return a.toString() === b.toString();
+        keys = Object.keys(a);
+        length = keys.length;
+        if (length !== Object.keys(b).length) return false;
+        for (i = length; i-- !== 0; )
+          if (!Object.prototype.hasOwnProperty.call(b, keys[i])) return false;
+        for (i = length; i-- !== 0; ) {
+          var key = keys[i];
+          if (!equal2(a[key], b[key])) return false;
+        }
+        return true;
+      }
+      return a !== a && b !== b;
+    };
+  }
+});
+
+// node_modules/openclaw-brokerkit/node_modules/ajv/dist/runtime/equal.js
+var require_equal = __commonJS({
+  "node_modules/openclaw-brokerkit/node_modules/ajv/dist/runtime/equal.js"(exports) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    var equal2 = require_fast_deep_equal();
+    equal2.code = 'require("ajv/dist/runtime/equal").default';
+    exports.default = equal2;
+  }
+});
+
+// node_modules/openclaw-brokerkit/node_modules/ajv/dist/runtime/ucs2length.js
+var require_ucs2length = __commonJS({
+  "node_modules/openclaw-brokerkit/node_modules/ajv/dist/runtime/ucs2length.js"(exports) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    function ucs2length2(str) {
+      const len = str.length;
+      let length = 0;
+      let pos = 0;
+      let value;
+      while (pos < len) {
+        length++;
+        value = str.charCodeAt(pos++);
+        if (value >= 55296 && value <= 56319 && pos < len) {
+          value = str.charCodeAt(pos);
+          if ((value & 64512) === 56320)
+            pos++;
+        }
+      }
+      return length;
+    }
+    exports.default = ucs2length2;
+    ucs2length2.code = 'require("ajv/dist/runtime/ucs2length").default';
+  }
+});
 
 // src/mlclaw-space-runtime/cli.ts
 import { spawn as spawn2 } from "node:child_process";
@@ -639,6 +938,6201 @@ function positiveNumber(value) {
 // src/mlclaw-space-runtime/operator-brokers.ts
 import { isAbsolute } from "node:path";
 import { readFileSync } from "node:fs";
+
+// node_modules/openclaw-brokerkit/dist/src/generated/operator-validators.js
+var import_formats = __toESM(require_formats(), 1);
+var import_equal = __toESM(require_equal(), 1);
+var import_ucs2length = __toESM(require_ucs2length(), 1);
+var formats = import_formats.default.fullFormats;
+var equal = import_equal.default.default ?? import_equal.default;
+var ucs2length = import_ucs2length.default.default ?? import_ucs2length.default;
+var validateDescriptor = validate20;
+function validate20(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {
+  ;
+  let vErrors = null;
+  let errors = 0;
+  const evaluated0 = validate20.evaluated;
+  if (evaluated0.dynamicProps) {
+    evaluated0.props = void 0;
+  }
+  if (evaluated0.dynamicItems) {
+    evaluated0.items = void 0;
+  }
+  const _errs0 = errors;
+  if (errors === _errs0) {
+    if (data && typeof data == "object" && !Array.isArray(data)) {
+      let missing0;
+      if (data.api_version === void 0 && (missing0 = "api_version")) {
+        validate20.errors = [{ instancePath, schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/Descriptor/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        return false;
+      } else {
+        const _errs2 = errors;
+        for (const key0 in data) {
+          if (!(key0 === "api_version")) {
+            validate20.errors = [{ instancePath, schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/Descriptor/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            return false;
+            break;
+          }
+        }
+        if (_errs2 === errors) {
+          if (data.api_version !== void 0) {
+            let data0 = data.api_version;
+            if (typeof data0 !== "string") {
+              validate20.errors = [{ instancePath: instancePath + "/api_version", schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/Descriptor/properties/api_version/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+              return false;
+            }
+            if ("brokerkit.io/operator/v1" !== data0) {
+              validate20.errors = [{ instancePath: instancePath + "/api_version", schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/Descriptor/properties/api_version/const", keyword: "const", params: { allowedValue: "brokerkit.io/operator/v1" }, message: "must be equal to constant" }];
+              return false;
+            }
+          }
+        }
+      }
+    } else {
+      validate20.errors = [{ instancePath, schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/Descriptor/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      return false;
+    }
+  }
+  validate20.errors = vErrors;
+  return errors === 0;
+}
+validate20.evaluated = { "props": true, "dynamicProps": false, "dynamicItems": false };
+var func1 = ucs2length;
+function validate22(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {
+  ;
+  let vErrors = null;
+  let errors = 0;
+  const evaluated0 = validate22.evaluated;
+  if (evaluated0.dynamicProps) {
+    evaluated0.props = void 0;
+  }
+  if (evaluated0.dynamicItems) {
+    evaluated0.items = void 0;
+  }
+  const _errs0 = errors;
+  if (errors === _errs0) {
+    if (data && typeof data == "object" && !Array.isArray(data)) {
+      let missing0;
+      if (data.status === void 0 && (missing0 = "status")) {
+        validate22.errors = [{ instancePath, schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/Health/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        return false;
+      } else {
+        const _errs2 = errors;
+        for (const key0 in data) {
+          if (!(key0 === "status")) {
+            validate22.errors = [{ instancePath, schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/Health/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            return false;
+            break;
+          }
+        }
+        if (_errs2 === errors) {
+          if (data.status !== void 0) {
+            let data0 = data.status;
+            const _errs3 = errors;
+            if (errors === _errs3) {
+              if (typeof data0 === "string") {
+                if (func1(data0) > 128) {
+                  validate22.errors = [{ instancePath: instancePath + "/status", schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/Health/properties/status/maxLength", keyword: "maxLength", params: { limit: 128 }, message: "must NOT have more than 128 characters" }];
+                  return false;
+                } else {
+                  if (func1(data0) < 1) {
+                    validate22.errors = [{ instancePath: instancePath + "/status", schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/Health/properties/status/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                    return false;
+                  }
+                }
+              } else {
+                validate22.errors = [{ instancePath: instancePath + "/status", schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/Health/properties/status/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                return false;
+              }
+            }
+          }
+        }
+      }
+    } else {
+      validate22.errors = [{ instancePath, schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/Health/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      return false;
+    }
+  }
+  validate22.errors = vErrors;
+  return errors === 0;
+}
+validate22.evaluated = { "props": true, "dynamicProps": false, "dynamicItems": false };
+var validateBrokerRequest = validate23;
+var schema37 = { "type": "object", "additionalProperties": false, "required": ["id", "revision", "requester", "operation", "status", "requested_at", "requested_duration_seconds", "requested_max_uses", "granted_max_uses", "used_count", "presentation", "allowed_actions"], "properties": { "id": { "type": "string", "minLength": 1, "maxLength": 128 }, "revision": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }, "requester": { "type": "string", "minLength": 1, "maxLength": 80 }, "operation": { "type": "string", "minLength": 1, "maxLength": 500 }, "status": { "$ref": "#/$defs/Status" }, "requested_at": { "type": "string", "format": "date-time" }, "pending_expires_at": { "type": "string", "format": "date-time" }, "active_expires_at": { "type": "string", "format": "date-time" }, "requested_duration_seconds": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }, "requested_max_uses": { "type": ["integer", "null"], "minimum": 1, "maximum": 9007199254740991 }, "granted_max_uses": { "type": ["integer", "null"], "minimum": 1, "maximum": 9007199254740991 }, "used_count": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }, "request_reason": { "type": "string", "maxLength": 2e3 }, "decided_at": { "type": "string", "format": "date-time" }, "decided_by": { "type": "string", "maxLength": 200 }, "decided_on_behalf_of": { "type": "string", "maxLength": 200 }, "presentation": { "$ref": "#/$defs/Presentation" }, "presentation_unavailable": { "type": "boolean" }, "allowed_actions": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/Action" } }, "approval_bounds": { "$ref": "#/$defs/ApprovalBounds" } } };
+var schema38 = { "type": "string", "enum": ["pending", "active", "denied", "canceled", "expired", "consumed", "revoked"] };
+var schema44 = { "type": "string", "enum": ["approve", "deny", "revoke"] };
+var schema45 = { "type": "object", "additionalProperties": false, "required": ["max_duration_seconds", "max_uses"], "properties": { "max_duration_seconds": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }, "max_uses": { "type": ["integer", "null"], "minimum": 1, "maximum": 9007199254740991 } } };
+var func3 = Object.prototype.hasOwnProperty;
+var func0 = equal;
+var formats0 = formats["date-time"];
+var schema40 = { "type": "string", "enum": ["unknown", "low", "medium", "high", "critical"] };
+function validate26(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  const evaluated0 = validate26.evaluated;
+  if (evaluated0.dynamicProps) {
+    evaluated0.props = void 0;
+  }
+  if (evaluated0.dynamicItems) {
+    evaluated0.items = void 0;
+  }
+  if (errors === 0) {
+    if (data && typeof data == "object" && !Array.isArray(data)) {
+      let missing0;
+      if (data.severity === void 0 && (missing0 = "severity") || data.text === void 0 && (missing0 = "text")) {
+        validate26.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        return false;
+      } else {
+        const _errs1 = errors;
+        for (const key0 in data) {
+          if (!(key0 === "severity" || key0 === "text")) {
+            validate26.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            return false;
+            break;
+          }
+        }
+        if (_errs1 === errors) {
+          if (data.severity !== void 0) {
+            let data0 = data.severity;
+            const _errs2 = errors;
+            if (typeof data0 !== "string") {
+              validate26.errors = [{ instancePath: instancePath + "/severity", schemaPath: "#/$defs/PresentationRisk/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+              return false;
+            }
+            if (!(data0 === "unknown" || data0 === "low" || data0 === "medium" || data0 === "high" || data0 === "critical")) {
+              validate26.errors = [{ instancePath: instancePath + "/severity", schemaPath: "#/$defs/PresentationRisk/enum", keyword: "enum", params: { allowedValues: schema40.enum }, message: "must be equal to one of the allowed values" }];
+              return false;
+            }
+            var valid0 = _errs2 === errors;
+          } else {
+            var valid0 = true;
+          }
+          if (valid0) {
+            if (data.text !== void 0) {
+              let data1 = data.text;
+              const _errs5 = errors;
+              if (errors === _errs5) {
+                if (typeof data1 === "string") {
+                  if (func1(data1) > 500) {
+                    validate26.errors = [{ instancePath: instancePath + "/text", schemaPath: "#/properties/text/maxLength", keyword: "maxLength", params: { limit: 500 }, message: "must NOT have more than 500 characters" }];
+                    return false;
+                  } else {
+                    if (func1(data1) < 1) {
+                      validate26.errors = [{ instancePath: instancePath + "/text", schemaPath: "#/properties/text/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                      return false;
+                    }
+                  }
+                } else {
+                  validate26.errors = [{ instancePath: instancePath + "/text", schemaPath: "#/properties/text/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                  return false;
+                }
+              }
+              var valid0 = _errs5 === errors;
+            } else {
+              var valid0 = true;
+            }
+          }
+        }
+      }
+    } else {
+      validate26.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      return false;
+    }
+  }
+  validate26.errors = vErrors;
+  return errors === 0;
+}
+validate26.evaluated = { "props": true, "dynamicProps": false, "dynamicItems": false };
+function validate25(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  const evaluated0 = validate25.evaluated;
+  if (evaluated0.dynamicProps) {
+    evaluated0.props = void 0;
+  }
+  if (evaluated0.dynamicItems) {
+    evaluated0.items = void 0;
+  }
+  if (errors === 0) {
+    if (data && typeof data == "object" && !Array.isArray(data)) {
+      let missing0;
+      if (data.risk === void 0 && (missing0 = "risk") || data.title === void 0 && (missing0 = "title") || data.target === void 0 && (missing0 = "target")) {
+        validate25.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        return false;
+      } else {
+        const _errs1 = errors;
+        for (const key0 in data) {
+          if (!(key0 === "risk" || key0 === "title" || key0 === "summary" || key0 === "target" || key0 === "facts" || key0 === "warnings" || key0 === "plan_hash")) {
+            validate25.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            return false;
+            break;
+          }
+        }
+        if (_errs1 === errors) {
+          if (data.risk !== void 0) {
+            let data0 = data.risk;
+            const _errs2 = errors;
+            if (typeof data0 !== "string") {
+              validate25.errors = [{ instancePath: instancePath + "/risk", schemaPath: "#/$defs/PresentationRisk/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+              return false;
+            }
+            if (!(data0 === "unknown" || data0 === "low" || data0 === "medium" || data0 === "high" || data0 === "critical")) {
+              validate25.errors = [{ instancePath: instancePath + "/risk", schemaPath: "#/$defs/PresentationRisk/enum", keyword: "enum", params: { allowedValues: schema40.enum }, message: "must be equal to one of the allowed values" }];
+              return false;
+            }
+            var valid0 = _errs2 === errors;
+          } else {
+            var valid0 = true;
+          }
+          if (valid0) {
+            if (data.title !== void 0) {
+              let data1 = data.title;
+              const _errs5 = errors;
+              if (errors === _errs5) {
+                if (typeof data1 === "string") {
+                  if (func1(data1) > 200) {
+                    validate25.errors = [{ instancePath: instancePath + "/title", schemaPath: "#/properties/title/maxLength", keyword: "maxLength", params: { limit: 200 }, message: "must NOT have more than 200 characters" }];
+                    return false;
+                  } else {
+                    if (func1(data1) < 1) {
+                      validate25.errors = [{ instancePath: instancePath + "/title", schemaPath: "#/properties/title/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                      return false;
+                    }
+                  }
+                } else {
+                  validate25.errors = [{ instancePath: instancePath + "/title", schemaPath: "#/properties/title/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                  return false;
+                }
+              }
+              var valid0 = _errs5 === errors;
+            } else {
+              var valid0 = true;
+            }
+            if (valid0) {
+              if (data.summary !== void 0) {
+                let data2 = data.summary;
+                const _errs7 = errors;
+                if (errors === _errs7) {
+                  if (typeof data2 === "string") {
+                    if (func1(data2) > 2e3) {
+                      validate25.errors = [{ instancePath: instancePath + "/summary", schemaPath: "#/properties/summary/maxLength", keyword: "maxLength", params: { limit: 2e3 }, message: "must NOT have more than 2000 characters" }];
+                      return false;
+                    }
+                  } else {
+                    validate25.errors = [{ instancePath: instancePath + "/summary", schemaPath: "#/properties/summary/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                    return false;
+                  }
+                }
+                var valid0 = _errs7 === errors;
+              } else {
+                var valid0 = true;
+              }
+              if (valid0) {
+                if (data.target !== void 0) {
+                  let data3 = data.target;
+                  const _errs9 = errors;
+                  if (errors === _errs9) {
+                    if (typeof data3 === "string") {
+                      if (func1(data3) > 500) {
+                        validate25.errors = [{ instancePath: instancePath + "/target", schemaPath: "#/properties/target/maxLength", keyword: "maxLength", params: { limit: 500 }, message: "must NOT have more than 500 characters" }];
+                        return false;
+                      } else {
+                        if (func1(data3) < 1) {
+                          validate25.errors = [{ instancePath: instancePath + "/target", schemaPath: "#/properties/target/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                          return false;
+                        }
+                      }
+                    } else {
+                      validate25.errors = [{ instancePath: instancePath + "/target", schemaPath: "#/properties/target/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                      return false;
+                    }
+                  }
+                  var valid0 = _errs9 === errors;
+                } else {
+                  var valid0 = true;
+                }
+                if (valid0) {
+                  if (data.facts !== void 0) {
+                    let data4 = data.facts;
+                    const _errs11 = errors;
+                    if (errors === _errs11) {
+                      if (Array.isArray(data4)) {
+                        if (data4.length > 20) {
+                          validate25.errors = [{ instancePath: instancePath + "/facts", schemaPath: "#/properties/facts/maxItems", keyword: "maxItems", params: { limit: 20 }, message: "must NOT have more than 20 items" }];
+                          return false;
+                        } else {
+                          var valid2 = true;
+                          const len0 = data4.length;
+                          for (let i0 = 0; i0 < len0; i0++) {
+                            let data5 = data4[i0];
+                            const _errs13 = errors;
+                            const _errs14 = errors;
+                            if (errors === _errs14) {
+                              if (data5 && typeof data5 == "object" && !Array.isArray(data5)) {
+                                let missing1;
+                                if (data5.label === void 0 && (missing1 = "label") || data5.value === void 0 && (missing1 = "value")) {
+                                  validate25.errors = [{ instancePath: instancePath + "/facts/" + i0, schemaPath: "#/$defs/Fact/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
+                                  return false;
+                                } else {
+                                  const _errs16 = errors;
+                                  for (const key1 in data5) {
+                                    if (!(key1 === "label" || key1 === "value")) {
+                                      validate25.errors = [{ instancePath: instancePath + "/facts/" + i0, schemaPath: "#/$defs/Fact/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
+                                      return false;
+                                      break;
+                                    }
+                                  }
+                                  if (_errs16 === errors) {
+                                    if (data5.label !== void 0) {
+                                      let data6 = data5.label;
+                                      const _errs17 = errors;
+                                      if (errors === _errs17) {
+                                        if (typeof data6 === "string") {
+                                          if (func1(data6) > 80) {
+                                            validate25.errors = [{ instancePath: instancePath + "/facts/" + i0 + "/label", schemaPath: "#/$defs/Fact/properties/label/maxLength", keyword: "maxLength", params: { limit: 80 }, message: "must NOT have more than 80 characters" }];
+                                            return false;
+                                          } else {
+                                            if (func1(data6) < 1) {
+                                              validate25.errors = [{ instancePath: instancePath + "/facts/" + i0 + "/label", schemaPath: "#/$defs/Fact/properties/label/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                                              return false;
+                                            }
+                                          }
+                                        } else {
+                                          validate25.errors = [{ instancePath: instancePath + "/facts/" + i0 + "/label", schemaPath: "#/$defs/Fact/properties/label/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                          return false;
+                                        }
+                                      }
+                                      var valid4 = _errs17 === errors;
+                                    } else {
+                                      var valid4 = true;
+                                    }
+                                    if (valid4) {
+                                      if (data5.value !== void 0) {
+                                        let data7 = data5.value;
+                                        const _errs19 = errors;
+                                        if (errors === _errs19) {
+                                          if (typeof data7 === "string") {
+                                            if (func1(data7) > 500) {
+                                              validate25.errors = [{ instancePath: instancePath + "/facts/" + i0 + "/value", schemaPath: "#/$defs/Fact/properties/value/maxLength", keyword: "maxLength", params: { limit: 500 }, message: "must NOT have more than 500 characters" }];
+                                              return false;
+                                            } else {
+                                              if (func1(data7) < 1) {
+                                                validate25.errors = [{ instancePath: instancePath + "/facts/" + i0 + "/value", schemaPath: "#/$defs/Fact/properties/value/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                                                return false;
+                                              }
+                                            }
+                                          } else {
+                                            validate25.errors = [{ instancePath: instancePath + "/facts/" + i0 + "/value", schemaPath: "#/$defs/Fact/properties/value/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                            return false;
+                                          }
+                                        }
+                                        var valid4 = _errs19 === errors;
+                                      } else {
+                                        var valid4 = true;
+                                      }
+                                    }
+                                  }
+                                }
+                              } else {
+                                validate25.errors = [{ instancePath: instancePath + "/facts/" + i0, schemaPath: "#/$defs/Fact/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+                                return false;
+                              }
+                            }
+                            var valid2 = _errs13 === errors;
+                            if (!valid2) {
+                              break;
+                            }
+                          }
+                        }
+                      } else {
+                        validate25.errors = [{ instancePath: instancePath + "/facts", schemaPath: "#/properties/facts/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                        return false;
+                      }
+                    }
+                    var valid0 = _errs11 === errors;
+                  } else {
+                    var valid0 = true;
+                  }
+                  if (valid0) {
+                    if (data.warnings !== void 0) {
+                      let data8 = data.warnings;
+                      const _errs21 = errors;
+                      if (errors === _errs21) {
+                        if (Array.isArray(data8)) {
+                          if (data8.length > 10) {
+                            validate25.errors = [{ instancePath: instancePath + "/warnings", schemaPath: "#/properties/warnings/maxItems", keyword: "maxItems", params: { limit: 10 }, message: "must NOT have more than 10 items" }];
+                            return false;
+                          } else {
+                            var valid5 = true;
+                            const len1 = data8.length;
+                            for (let i1 = 0; i1 < len1; i1++) {
+                              const _errs23 = errors;
+                              if (!validate26(data8[i1], { instancePath: instancePath + "/warnings/" + i1, parentData: data8, parentDataProperty: i1, rootData, dynamicAnchors })) {
+                                vErrors = vErrors === null ? validate26.errors : vErrors.concat(validate26.errors);
+                                errors = vErrors.length;
+                              }
+                              var valid5 = _errs23 === errors;
+                              if (!valid5) {
+                                break;
+                              }
+                            }
+                          }
+                        } else {
+                          validate25.errors = [{ instancePath: instancePath + "/warnings", schemaPath: "#/properties/warnings/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                          return false;
+                        }
+                      }
+                      var valid0 = _errs21 === errors;
+                    } else {
+                      var valid0 = true;
+                    }
+                    if (valid0) {
+                      if (data.plan_hash !== void 0) {
+                        let data10 = data.plan_hash;
+                        const _errs24 = errors;
+                        if (errors === _errs24) {
+                          if (typeof data10 === "string") {
+                            if (func1(data10) > 128) {
+                              validate25.errors = [{ instancePath: instancePath + "/plan_hash", schemaPath: "#/properties/plan_hash/maxLength", keyword: "maxLength", params: { limit: 128 }, message: "must NOT have more than 128 characters" }];
+                              return false;
+                            }
+                          } else {
+                            validate25.errors = [{ instancePath: instancePath + "/plan_hash", schemaPath: "#/properties/plan_hash/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                            return false;
+                          }
+                        }
+                        var valid0 = _errs24 === errors;
+                      } else {
+                        var valid0 = true;
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    } else {
+      validate25.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      return false;
+    }
+  }
+  validate25.errors = vErrors;
+  return errors === 0;
+}
+validate25.evaluated = { "props": true, "dynamicProps": false, "dynamicItems": false };
+function validate24(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  const evaluated0 = validate24.evaluated;
+  if (evaluated0.dynamicProps) {
+    evaluated0.props = void 0;
+  }
+  if (evaluated0.dynamicItems) {
+    evaluated0.items = void 0;
+  }
+  if (errors === 0) {
+    if (data && typeof data == "object" && !Array.isArray(data)) {
+      let missing0;
+      if (data.id === void 0 && (missing0 = "id") || data.revision === void 0 && (missing0 = "revision") || data.requester === void 0 && (missing0 = "requester") || data.operation === void 0 && (missing0 = "operation") || data.status === void 0 && (missing0 = "status") || data.requested_at === void 0 && (missing0 = "requested_at") || data.requested_duration_seconds === void 0 && (missing0 = "requested_duration_seconds") || data.requested_max_uses === void 0 && (missing0 = "requested_max_uses") || data.granted_max_uses === void 0 && (missing0 = "granted_max_uses") || data.used_count === void 0 && (missing0 = "used_count") || data.presentation === void 0 && (missing0 = "presentation") || data.allowed_actions === void 0 && (missing0 = "allowed_actions")) {
+        validate24.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        return false;
+      } else {
+        const _errs1 = errors;
+        for (const key0 in data) {
+          if (!func3.call(schema37.properties, key0)) {
+            validate24.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            return false;
+            break;
+          }
+        }
+        if (_errs1 === errors) {
+          if (data.id !== void 0) {
+            let data0 = data.id;
+            const _errs2 = errors;
+            if (errors === _errs2) {
+              if (typeof data0 === "string") {
+                if (func1(data0) > 128) {
+                  validate24.errors = [{ instancePath: instancePath + "/id", schemaPath: "#/properties/id/maxLength", keyword: "maxLength", params: { limit: 128 }, message: "must NOT have more than 128 characters" }];
+                  return false;
+                } else {
+                  if (func1(data0) < 1) {
+                    validate24.errors = [{ instancePath: instancePath + "/id", schemaPath: "#/properties/id/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                    return false;
+                  }
+                }
+              } else {
+                validate24.errors = [{ instancePath: instancePath + "/id", schemaPath: "#/properties/id/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                return false;
+              }
+            }
+            var valid0 = _errs2 === errors;
+          } else {
+            var valid0 = true;
+          }
+          if (valid0) {
+            if (data.revision !== void 0) {
+              let data1 = data.revision;
+              const _errs4 = errors;
+              if (!(typeof data1 == "number" && (!(data1 % 1) && !isNaN(data1)) && isFinite(data1))) {
+                validate24.errors = [{ instancePath: instancePath + "/revision", schemaPath: "#/properties/revision/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
+                return false;
+              }
+              if (errors === _errs4) {
+                if (typeof data1 == "number" && isFinite(data1)) {
+                  if (data1 > 9007199254740991 || isNaN(data1)) {
+                    validate24.errors = [{ instancePath: instancePath + "/revision", schemaPath: "#/properties/revision/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
+                    return false;
+                  } else {
+                    if (data1 < 1 || isNaN(data1)) {
+                      validate24.errors = [{ instancePath: instancePath + "/revision", schemaPath: "#/properties/revision/minimum", keyword: "minimum", params: { comparison: ">=", limit: 1 }, message: "must be >= 1" }];
+                      return false;
+                    }
+                  }
+                }
+              }
+              var valid0 = _errs4 === errors;
+            } else {
+              var valid0 = true;
+            }
+            if (valid0) {
+              if (data.requester !== void 0) {
+                let data2 = data.requester;
+                const _errs6 = errors;
+                if (errors === _errs6) {
+                  if (typeof data2 === "string") {
+                    if (func1(data2) > 80) {
+                      validate24.errors = [{ instancePath: instancePath + "/requester", schemaPath: "#/properties/requester/maxLength", keyword: "maxLength", params: { limit: 80 }, message: "must NOT have more than 80 characters" }];
+                      return false;
+                    } else {
+                      if (func1(data2) < 1) {
+                        validate24.errors = [{ instancePath: instancePath + "/requester", schemaPath: "#/properties/requester/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                        return false;
+                      }
+                    }
+                  } else {
+                    validate24.errors = [{ instancePath: instancePath + "/requester", schemaPath: "#/properties/requester/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                    return false;
+                  }
+                }
+                var valid0 = _errs6 === errors;
+              } else {
+                var valid0 = true;
+              }
+              if (valid0) {
+                if (data.operation !== void 0) {
+                  let data3 = data.operation;
+                  const _errs8 = errors;
+                  if (errors === _errs8) {
+                    if (typeof data3 === "string") {
+                      if (func1(data3) > 500) {
+                        validate24.errors = [{ instancePath: instancePath + "/operation", schemaPath: "#/properties/operation/maxLength", keyword: "maxLength", params: { limit: 500 }, message: "must NOT have more than 500 characters" }];
+                        return false;
+                      } else {
+                        if (func1(data3) < 1) {
+                          validate24.errors = [{ instancePath: instancePath + "/operation", schemaPath: "#/properties/operation/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                          return false;
+                        }
+                      }
+                    } else {
+                      validate24.errors = [{ instancePath: instancePath + "/operation", schemaPath: "#/properties/operation/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                      return false;
+                    }
+                  }
+                  var valid0 = _errs8 === errors;
+                } else {
+                  var valid0 = true;
+                }
+                if (valid0) {
+                  if (data.status !== void 0) {
+                    let data4 = data.status;
+                    const _errs10 = errors;
+                    if (typeof data4 !== "string") {
+                      validate24.errors = [{ instancePath: instancePath + "/status", schemaPath: "#/$defs/Status/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                      return false;
+                    }
+                    if (!(data4 === "pending" || data4 === "active" || data4 === "denied" || data4 === "canceled" || data4 === "expired" || data4 === "consumed" || data4 === "revoked")) {
+                      validate24.errors = [{ instancePath: instancePath + "/status", schemaPath: "#/$defs/Status/enum", keyword: "enum", params: { allowedValues: schema38.enum }, message: "must be equal to one of the allowed values" }];
+                      return false;
+                    }
+                    var valid0 = _errs10 === errors;
+                  } else {
+                    var valid0 = true;
+                  }
+                  if (valid0) {
+                    if (data.requested_at !== void 0) {
+                      let data5 = data.requested_at;
+                      const _errs13 = errors;
+                      if (errors === _errs13) {
+                        if (errors === _errs13) {
+                          if (typeof data5 === "string") {
+                            if (!formats0.validate(data5)) {
+                              validate24.errors = [{ instancePath: instancePath + "/requested_at", schemaPath: "#/properties/requested_at/format", keyword: "format", params: { format: "date-time" }, message: 'must match format "date-time"' }];
+                              return false;
+                            }
+                          } else {
+                            validate24.errors = [{ instancePath: instancePath + "/requested_at", schemaPath: "#/properties/requested_at/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                            return false;
+                          }
+                        }
+                      }
+                      var valid0 = _errs13 === errors;
+                    } else {
+                      var valid0 = true;
+                    }
+                    if (valid0) {
+                      if (data.pending_expires_at !== void 0) {
+                        let data6 = data.pending_expires_at;
+                        const _errs15 = errors;
+                        if (errors === _errs15) {
+                          if (errors === _errs15) {
+                            if (typeof data6 === "string") {
+                              if (!formats0.validate(data6)) {
+                                validate24.errors = [{ instancePath: instancePath + "/pending_expires_at", schemaPath: "#/properties/pending_expires_at/format", keyword: "format", params: { format: "date-time" }, message: 'must match format "date-time"' }];
+                                return false;
+                              }
+                            } else {
+                              validate24.errors = [{ instancePath: instancePath + "/pending_expires_at", schemaPath: "#/properties/pending_expires_at/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                              return false;
+                            }
+                          }
+                        }
+                        var valid0 = _errs15 === errors;
+                      } else {
+                        var valid0 = true;
+                      }
+                      if (valid0) {
+                        if (data.active_expires_at !== void 0) {
+                          let data7 = data.active_expires_at;
+                          const _errs17 = errors;
+                          if (errors === _errs17) {
+                            if (errors === _errs17) {
+                              if (typeof data7 === "string") {
+                                if (!formats0.validate(data7)) {
+                                  validate24.errors = [{ instancePath: instancePath + "/active_expires_at", schemaPath: "#/properties/active_expires_at/format", keyword: "format", params: { format: "date-time" }, message: 'must match format "date-time"' }];
+                                  return false;
+                                }
+                              } else {
+                                validate24.errors = [{ instancePath: instancePath + "/active_expires_at", schemaPath: "#/properties/active_expires_at/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                return false;
+                              }
+                            }
+                          }
+                          var valid0 = _errs17 === errors;
+                        } else {
+                          var valid0 = true;
+                        }
+                        if (valid0) {
+                          if (data.requested_duration_seconds !== void 0) {
+                            let data8 = data.requested_duration_seconds;
+                            const _errs19 = errors;
+                            if (!(typeof data8 == "number" && (!(data8 % 1) && !isNaN(data8)) && isFinite(data8))) {
+                              validate24.errors = [{ instancePath: instancePath + "/requested_duration_seconds", schemaPath: "#/properties/requested_duration_seconds/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
+                              return false;
+                            }
+                            if (errors === _errs19) {
+                              if (typeof data8 == "number" && isFinite(data8)) {
+                                if (data8 > 9007199254740991 || isNaN(data8)) {
+                                  validate24.errors = [{ instancePath: instancePath + "/requested_duration_seconds", schemaPath: "#/properties/requested_duration_seconds/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
+                                  return false;
+                                } else {
+                                  if (data8 < 1 || isNaN(data8)) {
+                                    validate24.errors = [{ instancePath: instancePath + "/requested_duration_seconds", schemaPath: "#/properties/requested_duration_seconds/minimum", keyword: "minimum", params: { comparison: ">=", limit: 1 }, message: "must be >= 1" }];
+                                    return false;
+                                  }
+                                }
+                              }
+                            }
+                            var valid0 = _errs19 === errors;
+                          } else {
+                            var valid0 = true;
+                          }
+                          if (valid0) {
+                            if (data.requested_max_uses !== void 0) {
+                              let data9 = data.requested_max_uses;
+                              const _errs21 = errors;
+                              if (!(typeof data9 == "number" && (!(data9 % 1) && !isNaN(data9)) && isFinite(data9)) && data9 !== null) {
+                                validate24.errors = [{ instancePath: instancePath + "/requested_max_uses", schemaPath: "#/properties/requested_max_uses/type", keyword: "type", params: { type: schema37.properties.requested_max_uses.type }, message: "must be integer,null" }];
+                                return false;
+                              }
+                              if (errors === _errs21) {
+                                if (typeof data9 == "number" && isFinite(data9)) {
+                                  if (data9 > 9007199254740991 || isNaN(data9)) {
+                                    validate24.errors = [{ instancePath: instancePath + "/requested_max_uses", schemaPath: "#/properties/requested_max_uses/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
+                                    return false;
+                                  } else {
+                                    if (data9 < 1 || isNaN(data9)) {
+                                      validate24.errors = [{ instancePath: instancePath + "/requested_max_uses", schemaPath: "#/properties/requested_max_uses/minimum", keyword: "minimum", params: { comparison: ">=", limit: 1 }, message: "must be >= 1" }];
+                                      return false;
+                                    }
+                                  }
+                                }
+                              }
+                              var valid0 = _errs21 === errors;
+                            } else {
+                              var valid0 = true;
+                            }
+                            if (valid0) {
+                              if (data.granted_max_uses !== void 0) {
+                                let data10 = data.granted_max_uses;
+                                const _errs23 = errors;
+                                if (!(typeof data10 == "number" && (!(data10 % 1) && !isNaN(data10)) && isFinite(data10)) && data10 !== null) {
+                                  validate24.errors = [{ instancePath: instancePath + "/granted_max_uses", schemaPath: "#/properties/granted_max_uses/type", keyword: "type", params: { type: schema37.properties.granted_max_uses.type }, message: "must be integer,null" }];
+                                  return false;
+                                }
+                                if (errors === _errs23) {
+                                  if (typeof data10 == "number" && isFinite(data10)) {
+                                    if (data10 > 9007199254740991 || isNaN(data10)) {
+                                      validate24.errors = [{ instancePath: instancePath + "/granted_max_uses", schemaPath: "#/properties/granted_max_uses/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
+                                      return false;
+                                    } else {
+                                      if (data10 < 1 || isNaN(data10)) {
+                                        validate24.errors = [{ instancePath: instancePath + "/granted_max_uses", schemaPath: "#/properties/granted_max_uses/minimum", keyword: "minimum", params: { comparison: ">=", limit: 1 }, message: "must be >= 1" }];
+                                        return false;
+                                      }
+                                    }
+                                  }
+                                }
+                                var valid0 = _errs23 === errors;
+                              } else {
+                                var valid0 = true;
+                              }
+                              if (valid0) {
+                                if (data.used_count !== void 0) {
+                                  let data11 = data.used_count;
+                                  const _errs25 = errors;
+                                  if (!(typeof data11 == "number" && (!(data11 % 1) && !isNaN(data11)) && isFinite(data11))) {
+                                    validate24.errors = [{ instancePath: instancePath + "/used_count", schemaPath: "#/properties/used_count/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
+                                    return false;
+                                  }
+                                  if (errors === _errs25) {
+                                    if (typeof data11 == "number" && isFinite(data11)) {
+                                      if (data11 > 9007199254740991 || isNaN(data11)) {
+                                        validate24.errors = [{ instancePath: instancePath + "/used_count", schemaPath: "#/properties/used_count/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
+                                        return false;
+                                      } else {
+                                        if (data11 < 0 || isNaN(data11)) {
+                                          validate24.errors = [{ instancePath: instancePath + "/used_count", schemaPath: "#/properties/used_count/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
+                                          return false;
+                                        }
+                                      }
+                                    }
+                                  }
+                                  var valid0 = _errs25 === errors;
+                                } else {
+                                  var valid0 = true;
+                                }
+                                if (valid0) {
+                                  if (data.request_reason !== void 0) {
+                                    let data12 = data.request_reason;
+                                    const _errs27 = errors;
+                                    if (errors === _errs27) {
+                                      if (typeof data12 === "string") {
+                                        if (func1(data12) > 2e3) {
+                                          validate24.errors = [{ instancePath: instancePath + "/request_reason", schemaPath: "#/properties/request_reason/maxLength", keyword: "maxLength", params: { limit: 2e3 }, message: "must NOT have more than 2000 characters" }];
+                                          return false;
+                                        }
+                                      } else {
+                                        validate24.errors = [{ instancePath: instancePath + "/request_reason", schemaPath: "#/properties/request_reason/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                        return false;
+                                      }
+                                    }
+                                    var valid0 = _errs27 === errors;
+                                  } else {
+                                    var valid0 = true;
+                                  }
+                                  if (valid0) {
+                                    if (data.decided_at !== void 0) {
+                                      let data13 = data.decided_at;
+                                      const _errs29 = errors;
+                                      if (errors === _errs29) {
+                                        if (errors === _errs29) {
+                                          if (typeof data13 === "string") {
+                                            if (!formats0.validate(data13)) {
+                                              validate24.errors = [{ instancePath: instancePath + "/decided_at", schemaPath: "#/properties/decided_at/format", keyword: "format", params: { format: "date-time" }, message: 'must match format "date-time"' }];
+                                              return false;
+                                            }
+                                          } else {
+                                            validate24.errors = [{ instancePath: instancePath + "/decided_at", schemaPath: "#/properties/decided_at/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                            return false;
+                                          }
+                                        }
+                                      }
+                                      var valid0 = _errs29 === errors;
+                                    } else {
+                                      var valid0 = true;
+                                    }
+                                    if (valid0) {
+                                      if (data.decided_by !== void 0) {
+                                        let data14 = data.decided_by;
+                                        const _errs31 = errors;
+                                        if (errors === _errs31) {
+                                          if (typeof data14 === "string") {
+                                            if (func1(data14) > 200) {
+                                              validate24.errors = [{ instancePath: instancePath + "/decided_by", schemaPath: "#/properties/decided_by/maxLength", keyword: "maxLength", params: { limit: 200 }, message: "must NOT have more than 200 characters" }];
+                                              return false;
+                                            }
+                                          } else {
+                                            validate24.errors = [{ instancePath: instancePath + "/decided_by", schemaPath: "#/properties/decided_by/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                            return false;
+                                          }
+                                        }
+                                        var valid0 = _errs31 === errors;
+                                      } else {
+                                        var valid0 = true;
+                                      }
+                                      if (valid0) {
+                                        if (data.decided_on_behalf_of !== void 0) {
+                                          let data15 = data.decided_on_behalf_of;
+                                          const _errs33 = errors;
+                                          if (errors === _errs33) {
+                                            if (typeof data15 === "string") {
+                                              if (func1(data15) > 200) {
+                                                validate24.errors = [{ instancePath: instancePath + "/decided_on_behalf_of", schemaPath: "#/properties/decided_on_behalf_of/maxLength", keyword: "maxLength", params: { limit: 200 }, message: "must NOT have more than 200 characters" }];
+                                                return false;
+                                              }
+                                            } else {
+                                              validate24.errors = [{ instancePath: instancePath + "/decided_on_behalf_of", schemaPath: "#/properties/decided_on_behalf_of/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                              return false;
+                                            }
+                                          }
+                                          var valid0 = _errs33 === errors;
+                                        } else {
+                                          var valid0 = true;
+                                        }
+                                        if (valid0) {
+                                          if (data.presentation !== void 0) {
+                                            const _errs35 = errors;
+                                            if (!validate25(data.presentation, { instancePath: instancePath + "/presentation", parentData: data, parentDataProperty: "presentation", rootData, dynamicAnchors })) {
+                                              vErrors = vErrors === null ? validate25.errors : vErrors.concat(validate25.errors);
+                                              errors = vErrors.length;
+                                            }
+                                            var valid0 = _errs35 === errors;
+                                          } else {
+                                            var valid0 = true;
+                                          }
+                                          if (valid0) {
+                                            if (data.presentation_unavailable !== void 0) {
+                                              const _errs36 = errors;
+                                              if (typeof data.presentation_unavailable !== "boolean") {
+                                                validate24.errors = [{ instancePath: instancePath + "/presentation_unavailable", schemaPath: "#/properties/presentation_unavailable/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
+                                                return false;
+                                              }
+                                              var valid0 = _errs36 === errors;
+                                            } else {
+                                              var valid0 = true;
+                                            }
+                                            if (valid0) {
+                                              if (data.allowed_actions !== void 0) {
+                                                let data18 = data.allowed_actions;
+                                                const _errs38 = errors;
+                                                if (errors === _errs38) {
+                                                  if (Array.isArray(data18)) {
+                                                    var valid2 = true;
+                                                    const len0 = data18.length;
+                                                    for (let i0 = 0; i0 < len0; i0++) {
+                                                      let data19 = data18[i0];
+                                                      const _errs40 = errors;
+                                                      if (typeof data19 !== "string") {
+                                                        validate24.errors = [{ instancePath: instancePath + "/allowed_actions/" + i0, schemaPath: "#/$defs/Action/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                                        return false;
+                                                      }
+                                                      if (!(data19 === "approve" || data19 === "deny" || data19 === "revoke")) {
+                                                        validate24.errors = [{ instancePath: instancePath + "/allowed_actions/" + i0, schemaPath: "#/$defs/Action/enum", keyword: "enum", params: { allowedValues: schema44.enum }, message: "must be equal to one of the allowed values" }];
+                                                        return false;
+                                                      }
+                                                      var valid2 = _errs40 === errors;
+                                                      if (!valid2) {
+                                                        break;
+                                                      }
+                                                    }
+                                                    if (valid2) {
+                                                      let i1 = data18.length;
+                                                      let j0;
+                                                      if (i1 > 1) {
+                                                        outer0: for (; i1--; ) {
+                                                          for (j0 = i1; j0--; ) {
+                                                            if (func0(data18[i1], data18[j0])) {
+                                                              validate24.errors = [{ instancePath: instancePath + "/allowed_actions", schemaPath: "#/properties/allowed_actions/uniqueItems", keyword: "uniqueItems", params: { i: i1, j: j0 }, message: "must NOT have duplicate items (items ## " + j0 + " and " + i1 + " are identical)" }];
+                                                              return false;
+                                                              break outer0;
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  } else {
+                                                    validate24.errors = [{ instancePath: instancePath + "/allowed_actions", schemaPath: "#/properties/allowed_actions/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                                                    return false;
+                                                  }
+                                                }
+                                                var valid0 = _errs38 === errors;
+                                              } else {
+                                                var valid0 = true;
+                                              }
+                                              if (valid0) {
+                                                if (data.approval_bounds !== void 0) {
+                                                  let data20 = data.approval_bounds;
+                                                  const _errs43 = errors;
+                                                  const _errs44 = errors;
+                                                  if (errors === _errs44) {
+                                                    if (data20 && typeof data20 == "object" && !Array.isArray(data20)) {
+                                                      let missing1;
+                                                      if (data20.max_duration_seconds === void 0 && (missing1 = "max_duration_seconds") || data20.max_uses === void 0 && (missing1 = "max_uses")) {
+                                                        validate24.errors = [{ instancePath: instancePath + "/approval_bounds", schemaPath: "#/$defs/ApprovalBounds/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
+                                                        return false;
+                                                      } else {
+                                                        const _errs46 = errors;
+                                                        for (const key1 in data20) {
+                                                          if (!(key1 === "max_duration_seconds" || key1 === "max_uses")) {
+                                                            validate24.errors = [{ instancePath: instancePath + "/approval_bounds", schemaPath: "#/$defs/ApprovalBounds/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
+                                                            return false;
+                                                            break;
+                                                          }
+                                                        }
+                                                        if (_errs46 === errors) {
+                                                          if (data20.max_duration_seconds !== void 0) {
+                                                            let data21 = data20.max_duration_seconds;
+                                                            const _errs47 = errors;
+                                                            if (!(typeof data21 == "number" && (!(data21 % 1) && !isNaN(data21)) && isFinite(data21))) {
+                                                              validate24.errors = [{ instancePath: instancePath + "/approval_bounds/max_duration_seconds", schemaPath: "#/$defs/ApprovalBounds/properties/max_duration_seconds/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
+                                                              return false;
+                                                            }
+                                                            if (errors === _errs47) {
+                                                              if (typeof data21 == "number" && isFinite(data21)) {
+                                                                if (data21 > 9007199254740991 || isNaN(data21)) {
+                                                                  validate24.errors = [{ instancePath: instancePath + "/approval_bounds/max_duration_seconds", schemaPath: "#/$defs/ApprovalBounds/properties/max_duration_seconds/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
+                                                                  return false;
+                                                                } else {
+                                                                  if (data21 < 1 || isNaN(data21)) {
+                                                                    validate24.errors = [{ instancePath: instancePath + "/approval_bounds/max_duration_seconds", schemaPath: "#/$defs/ApprovalBounds/properties/max_duration_seconds/minimum", keyword: "minimum", params: { comparison: ">=", limit: 1 }, message: "must be >= 1" }];
+                                                                    return false;
+                                                                  }
+                                                                }
+                                                              }
+                                                            }
+                                                            var valid6 = _errs47 === errors;
+                                                          } else {
+                                                            var valid6 = true;
+                                                          }
+                                                          if (valid6) {
+                                                            if (data20.max_uses !== void 0) {
+                                                              let data22 = data20.max_uses;
+                                                              const _errs49 = errors;
+                                                              if (!(typeof data22 == "number" && (!(data22 % 1) && !isNaN(data22)) && isFinite(data22)) && data22 !== null) {
+                                                                validate24.errors = [{ instancePath: instancePath + "/approval_bounds/max_uses", schemaPath: "#/$defs/ApprovalBounds/properties/max_uses/type", keyword: "type", params: { type: schema45.properties.max_uses.type }, message: "must be integer,null" }];
+                                                                return false;
+                                                              }
+                                                              if (errors === _errs49) {
+                                                                if (typeof data22 == "number" && isFinite(data22)) {
+                                                                  if (data22 > 9007199254740991 || isNaN(data22)) {
+                                                                    validate24.errors = [{ instancePath: instancePath + "/approval_bounds/max_uses", schemaPath: "#/$defs/ApprovalBounds/properties/max_uses/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
+                                                                    return false;
+                                                                  } else {
+                                                                    if (data22 < 1 || isNaN(data22)) {
+                                                                      validate24.errors = [{ instancePath: instancePath + "/approval_bounds/max_uses", schemaPath: "#/$defs/ApprovalBounds/properties/max_uses/minimum", keyword: "minimum", params: { comparison: ">=", limit: 1 }, message: "must be >= 1" }];
+                                                                      return false;
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                              var valid6 = _errs49 === errors;
+                                                            } else {
+                                                              var valid6 = true;
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    } else {
+                                                      validate24.errors = [{ instancePath: instancePath + "/approval_bounds", schemaPath: "#/$defs/ApprovalBounds/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+                                                      return false;
+                                                    }
+                                                  }
+                                                  var valid0 = _errs43 === errors;
+                                                } else {
+                                                  var valid0 = true;
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    } else {
+      validate24.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      return false;
+    }
+  }
+  validate24.errors = vErrors;
+  return errors === 0;
+}
+validate24.evaluated = { "props": true, "dynamicProps": false, "dynamicItems": false };
+function validate23(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {
+  ;
+  let vErrors = null;
+  let errors = 0;
+  const evaluated0 = validate23.evaluated;
+  if (evaluated0.dynamicProps) {
+    evaluated0.props = void 0;
+  }
+  if (evaluated0.dynamicItems) {
+    evaluated0.items = void 0;
+  }
+  if (!validate24(data, { instancePath, parentData, parentDataProperty, rootData, dynamicAnchors })) {
+    vErrors = vErrors === null ? validate24.errors : vErrors.concat(validate24.errors);
+    errors = vErrors.length;
+  }
+  validate23.errors = vErrors;
+  return errors === 0;
+}
+validate23.evaluated = { "props": true, "dynamicProps": false, "dynamicItems": false };
+var validateRequestPage = validate30;
+function validate32(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  const evaluated0 = validate32.evaluated;
+  if (evaluated0.dynamicProps) {
+    evaluated0.props = void 0;
+  }
+  if (evaluated0.dynamicItems) {
+    evaluated0.items = void 0;
+  }
+  if (errors === 0) {
+    if (data && typeof data == "object" && !Array.isArray(data)) {
+      let missing0;
+      if (data.id === void 0 && (missing0 = "id") || data.revision === void 0 && (missing0 = "revision") || data.requester === void 0 && (missing0 = "requester") || data.operation === void 0 && (missing0 = "operation") || data.status === void 0 && (missing0 = "status") || data.requested_at === void 0 && (missing0 = "requested_at") || data.requested_duration_seconds === void 0 && (missing0 = "requested_duration_seconds") || data.requested_max_uses === void 0 && (missing0 = "requested_max_uses") || data.granted_max_uses === void 0 && (missing0 = "granted_max_uses") || data.used_count === void 0 && (missing0 = "used_count") || data.presentation === void 0 && (missing0 = "presentation") || data.allowed_actions === void 0 && (missing0 = "allowed_actions")) {
+        validate32.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        return false;
+      } else {
+        const _errs1 = errors;
+        for (const key0 in data) {
+          if (!func3.call(schema37.properties, key0)) {
+            validate32.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            return false;
+            break;
+          }
+        }
+        if (_errs1 === errors) {
+          if (data.id !== void 0) {
+            let data0 = data.id;
+            const _errs2 = errors;
+            if (errors === _errs2) {
+              if (typeof data0 === "string") {
+                if (func1(data0) > 128) {
+                  validate32.errors = [{ instancePath: instancePath + "/id", schemaPath: "#/properties/id/maxLength", keyword: "maxLength", params: { limit: 128 }, message: "must NOT have more than 128 characters" }];
+                  return false;
+                } else {
+                  if (func1(data0) < 1) {
+                    validate32.errors = [{ instancePath: instancePath + "/id", schemaPath: "#/properties/id/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                    return false;
+                  }
+                }
+              } else {
+                validate32.errors = [{ instancePath: instancePath + "/id", schemaPath: "#/properties/id/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                return false;
+              }
+            }
+            var valid0 = _errs2 === errors;
+          } else {
+            var valid0 = true;
+          }
+          if (valid0) {
+            if (data.revision !== void 0) {
+              let data1 = data.revision;
+              const _errs4 = errors;
+              if (!(typeof data1 == "number" && (!(data1 % 1) && !isNaN(data1)) && isFinite(data1))) {
+                validate32.errors = [{ instancePath: instancePath + "/revision", schemaPath: "#/properties/revision/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
+                return false;
+              }
+              if (errors === _errs4) {
+                if (typeof data1 == "number" && isFinite(data1)) {
+                  if (data1 > 9007199254740991 || isNaN(data1)) {
+                    validate32.errors = [{ instancePath: instancePath + "/revision", schemaPath: "#/properties/revision/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
+                    return false;
+                  } else {
+                    if (data1 < 1 || isNaN(data1)) {
+                      validate32.errors = [{ instancePath: instancePath + "/revision", schemaPath: "#/properties/revision/minimum", keyword: "minimum", params: { comparison: ">=", limit: 1 }, message: "must be >= 1" }];
+                      return false;
+                    }
+                  }
+                }
+              }
+              var valid0 = _errs4 === errors;
+            } else {
+              var valid0 = true;
+            }
+            if (valid0) {
+              if (data.requester !== void 0) {
+                let data2 = data.requester;
+                const _errs6 = errors;
+                if (errors === _errs6) {
+                  if (typeof data2 === "string") {
+                    if (func1(data2) > 80) {
+                      validate32.errors = [{ instancePath: instancePath + "/requester", schemaPath: "#/properties/requester/maxLength", keyword: "maxLength", params: { limit: 80 }, message: "must NOT have more than 80 characters" }];
+                      return false;
+                    } else {
+                      if (func1(data2) < 1) {
+                        validate32.errors = [{ instancePath: instancePath + "/requester", schemaPath: "#/properties/requester/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                        return false;
+                      }
+                    }
+                  } else {
+                    validate32.errors = [{ instancePath: instancePath + "/requester", schemaPath: "#/properties/requester/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                    return false;
+                  }
+                }
+                var valid0 = _errs6 === errors;
+              } else {
+                var valid0 = true;
+              }
+              if (valid0) {
+                if (data.operation !== void 0) {
+                  let data3 = data.operation;
+                  const _errs8 = errors;
+                  if (errors === _errs8) {
+                    if (typeof data3 === "string") {
+                      if (func1(data3) > 500) {
+                        validate32.errors = [{ instancePath: instancePath + "/operation", schemaPath: "#/properties/operation/maxLength", keyword: "maxLength", params: { limit: 500 }, message: "must NOT have more than 500 characters" }];
+                        return false;
+                      } else {
+                        if (func1(data3) < 1) {
+                          validate32.errors = [{ instancePath: instancePath + "/operation", schemaPath: "#/properties/operation/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                          return false;
+                        }
+                      }
+                    } else {
+                      validate32.errors = [{ instancePath: instancePath + "/operation", schemaPath: "#/properties/operation/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                      return false;
+                    }
+                  }
+                  var valid0 = _errs8 === errors;
+                } else {
+                  var valid0 = true;
+                }
+                if (valid0) {
+                  if (data.status !== void 0) {
+                    let data4 = data.status;
+                    const _errs10 = errors;
+                    if (typeof data4 !== "string") {
+                      validate32.errors = [{ instancePath: instancePath + "/status", schemaPath: "#/$defs/Status/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                      return false;
+                    }
+                    if (!(data4 === "pending" || data4 === "active" || data4 === "denied" || data4 === "canceled" || data4 === "expired" || data4 === "consumed" || data4 === "revoked")) {
+                      validate32.errors = [{ instancePath: instancePath + "/status", schemaPath: "#/$defs/Status/enum", keyword: "enum", params: { allowedValues: schema38.enum }, message: "must be equal to one of the allowed values" }];
+                      return false;
+                    }
+                    var valid0 = _errs10 === errors;
+                  } else {
+                    var valid0 = true;
+                  }
+                  if (valid0) {
+                    if (data.requested_at !== void 0) {
+                      let data5 = data.requested_at;
+                      const _errs13 = errors;
+                      if (errors === _errs13) {
+                        if (errors === _errs13) {
+                          if (typeof data5 === "string") {
+                            if (!formats0.validate(data5)) {
+                              validate32.errors = [{ instancePath: instancePath + "/requested_at", schemaPath: "#/properties/requested_at/format", keyword: "format", params: { format: "date-time" }, message: 'must match format "date-time"' }];
+                              return false;
+                            }
+                          } else {
+                            validate32.errors = [{ instancePath: instancePath + "/requested_at", schemaPath: "#/properties/requested_at/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                            return false;
+                          }
+                        }
+                      }
+                      var valid0 = _errs13 === errors;
+                    } else {
+                      var valid0 = true;
+                    }
+                    if (valid0) {
+                      if (data.pending_expires_at !== void 0) {
+                        let data6 = data.pending_expires_at;
+                        const _errs15 = errors;
+                        if (errors === _errs15) {
+                          if (errors === _errs15) {
+                            if (typeof data6 === "string") {
+                              if (!formats0.validate(data6)) {
+                                validate32.errors = [{ instancePath: instancePath + "/pending_expires_at", schemaPath: "#/properties/pending_expires_at/format", keyword: "format", params: { format: "date-time" }, message: 'must match format "date-time"' }];
+                                return false;
+                              }
+                            } else {
+                              validate32.errors = [{ instancePath: instancePath + "/pending_expires_at", schemaPath: "#/properties/pending_expires_at/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                              return false;
+                            }
+                          }
+                        }
+                        var valid0 = _errs15 === errors;
+                      } else {
+                        var valid0 = true;
+                      }
+                      if (valid0) {
+                        if (data.active_expires_at !== void 0) {
+                          let data7 = data.active_expires_at;
+                          const _errs17 = errors;
+                          if (errors === _errs17) {
+                            if (errors === _errs17) {
+                              if (typeof data7 === "string") {
+                                if (!formats0.validate(data7)) {
+                                  validate32.errors = [{ instancePath: instancePath + "/active_expires_at", schemaPath: "#/properties/active_expires_at/format", keyword: "format", params: { format: "date-time" }, message: 'must match format "date-time"' }];
+                                  return false;
+                                }
+                              } else {
+                                validate32.errors = [{ instancePath: instancePath + "/active_expires_at", schemaPath: "#/properties/active_expires_at/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                return false;
+                              }
+                            }
+                          }
+                          var valid0 = _errs17 === errors;
+                        } else {
+                          var valid0 = true;
+                        }
+                        if (valid0) {
+                          if (data.requested_duration_seconds !== void 0) {
+                            let data8 = data.requested_duration_seconds;
+                            const _errs19 = errors;
+                            if (!(typeof data8 == "number" && (!(data8 % 1) && !isNaN(data8)) && isFinite(data8))) {
+                              validate32.errors = [{ instancePath: instancePath + "/requested_duration_seconds", schemaPath: "#/properties/requested_duration_seconds/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
+                              return false;
+                            }
+                            if (errors === _errs19) {
+                              if (typeof data8 == "number" && isFinite(data8)) {
+                                if (data8 > 9007199254740991 || isNaN(data8)) {
+                                  validate32.errors = [{ instancePath: instancePath + "/requested_duration_seconds", schemaPath: "#/properties/requested_duration_seconds/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
+                                  return false;
+                                } else {
+                                  if (data8 < 1 || isNaN(data8)) {
+                                    validate32.errors = [{ instancePath: instancePath + "/requested_duration_seconds", schemaPath: "#/properties/requested_duration_seconds/minimum", keyword: "minimum", params: { comparison: ">=", limit: 1 }, message: "must be >= 1" }];
+                                    return false;
+                                  }
+                                }
+                              }
+                            }
+                            var valid0 = _errs19 === errors;
+                          } else {
+                            var valid0 = true;
+                          }
+                          if (valid0) {
+                            if (data.requested_max_uses !== void 0) {
+                              let data9 = data.requested_max_uses;
+                              const _errs21 = errors;
+                              if (!(typeof data9 == "number" && (!(data9 % 1) && !isNaN(data9)) && isFinite(data9)) && data9 !== null) {
+                                validate32.errors = [{ instancePath: instancePath + "/requested_max_uses", schemaPath: "#/properties/requested_max_uses/type", keyword: "type", params: { type: schema37.properties.requested_max_uses.type }, message: "must be integer,null" }];
+                                return false;
+                              }
+                              if (errors === _errs21) {
+                                if (typeof data9 == "number" && isFinite(data9)) {
+                                  if (data9 > 9007199254740991 || isNaN(data9)) {
+                                    validate32.errors = [{ instancePath: instancePath + "/requested_max_uses", schemaPath: "#/properties/requested_max_uses/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
+                                    return false;
+                                  } else {
+                                    if (data9 < 1 || isNaN(data9)) {
+                                      validate32.errors = [{ instancePath: instancePath + "/requested_max_uses", schemaPath: "#/properties/requested_max_uses/minimum", keyword: "minimum", params: { comparison: ">=", limit: 1 }, message: "must be >= 1" }];
+                                      return false;
+                                    }
+                                  }
+                                }
+                              }
+                              var valid0 = _errs21 === errors;
+                            } else {
+                              var valid0 = true;
+                            }
+                            if (valid0) {
+                              if (data.granted_max_uses !== void 0) {
+                                let data10 = data.granted_max_uses;
+                                const _errs23 = errors;
+                                if (!(typeof data10 == "number" && (!(data10 % 1) && !isNaN(data10)) && isFinite(data10)) && data10 !== null) {
+                                  validate32.errors = [{ instancePath: instancePath + "/granted_max_uses", schemaPath: "#/properties/granted_max_uses/type", keyword: "type", params: { type: schema37.properties.granted_max_uses.type }, message: "must be integer,null" }];
+                                  return false;
+                                }
+                                if (errors === _errs23) {
+                                  if (typeof data10 == "number" && isFinite(data10)) {
+                                    if (data10 > 9007199254740991 || isNaN(data10)) {
+                                      validate32.errors = [{ instancePath: instancePath + "/granted_max_uses", schemaPath: "#/properties/granted_max_uses/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
+                                      return false;
+                                    } else {
+                                      if (data10 < 1 || isNaN(data10)) {
+                                        validate32.errors = [{ instancePath: instancePath + "/granted_max_uses", schemaPath: "#/properties/granted_max_uses/minimum", keyword: "minimum", params: { comparison: ">=", limit: 1 }, message: "must be >= 1" }];
+                                        return false;
+                                      }
+                                    }
+                                  }
+                                }
+                                var valid0 = _errs23 === errors;
+                              } else {
+                                var valid0 = true;
+                              }
+                              if (valid0) {
+                                if (data.used_count !== void 0) {
+                                  let data11 = data.used_count;
+                                  const _errs25 = errors;
+                                  if (!(typeof data11 == "number" && (!(data11 % 1) && !isNaN(data11)) && isFinite(data11))) {
+                                    validate32.errors = [{ instancePath: instancePath + "/used_count", schemaPath: "#/properties/used_count/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
+                                    return false;
+                                  }
+                                  if (errors === _errs25) {
+                                    if (typeof data11 == "number" && isFinite(data11)) {
+                                      if (data11 > 9007199254740991 || isNaN(data11)) {
+                                        validate32.errors = [{ instancePath: instancePath + "/used_count", schemaPath: "#/properties/used_count/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
+                                        return false;
+                                      } else {
+                                        if (data11 < 0 || isNaN(data11)) {
+                                          validate32.errors = [{ instancePath: instancePath + "/used_count", schemaPath: "#/properties/used_count/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
+                                          return false;
+                                        }
+                                      }
+                                    }
+                                  }
+                                  var valid0 = _errs25 === errors;
+                                } else {
+                                  var valid0 = true;
+                                }
+                                if (valid0) {
+                                  if (data.request_reason !== void 0) {
+                                    let data12 = data.request_reason;
+                                    const _errs27 = errors;
+                                    if (errors === _errs27) {
+                                      if (typeof data12 === "string") {
+                                        if (func1(data12) > 2e3) {
+                                          validate32.errors = [{ instancePath: instancePath + "/request_reason", schemaPath: "#/properties/request_reason/maxLength", keyword: "maxLength", params: { limit: 2e3 }, message: "must NOT have more than 2000 characters" }];
+                                          return false;
+                                        }
+                                      } else {
+                                        validate32.errors = [{ instancePath: instancePath + "/request_reason", schemaPath: "#/properties/request_reason/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                        return false;
+                                      }
+                                    }
+                                    var valid0 = _errs27 === errors;
+                                  } else {
+                                    var valid0 = true;
+                                  }
+                                  if (valid0) {
+                                    if (data.decided_at !== void 0) {
+                                      let data13 = data.decided_at;
+                                      const _errs29 = errors;
+                                      if (errors === _errs29) {
+                                        if (errors === _errs29) {
+                                          if (typeof data13 === "string") {
+                                            if (!formats0.validate(data13)) {
+                                              validate32.errors = [{ instancePath: instancePath + "/decided_at", schemaPath: "#/properties/decided_at/format", keyword: "format", params: { format: "date-time" }, message: 'must match format "date-time"' }];
+                                              return false;
+                                            }
+                                          } else {
+                                            validate32.errors = [{ instancePath: instancePath + "/decided_at", schemaPath: "#/properties/decided_at/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                            return false;
+                                          }
+                                        }
+                                      }
+                                      var valid0 = _errs29 === errors;
+                                    } else {
+                                      var valid0 = true;
+                                    }
+                                    if (valid0) {
+                                      if (data.decided_by !== void 0) {
+                                        let data14 = data.decided_by;
+                                        const _errs31 = errors;
+                                        if (errors === _errs31) {
+                                          if (typeof data14 === "string") {
+                                            if (func1(data14) > 200) {
+                                              validate32.errors = [{ instancePath: instancePath + "/decided_by", schemaPath: "#/properties/decided_by/maxLength", keyword: "maxLength", params: { limit: 200 }, message: "must NOT have more than 200 characters" }];
+                                              return false;
+                                            }
+                                          } else {
+                                            validate32.errors = [{ instancePath: instancePath + "/decided_by", schemaPath: "#/properties/decided_by/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                            return false;
+                                          }
+                                        }
+                                        var valid0 = _errs31 === errors;
+                                      } else {
+                                        var valid0 = true;
+                                      }
+                                      if (valid0) {
+                                        if (data.decided_on_behalf_of !== void 0) {
+                                          let data15 = data.decided_on_behalf_of;
+                                          const _errs33 = errors;
+                                          if (errors === _errs33) {
+                                            if (typeof data15 === "string") {
+                                              if (func1(data15) > 200) {
+                                                validate32.errors = [{ instancePath: instancePath + "/decided_on_behalf_of", schemaPath: "#/properties/decided_on_behalf_of/maxLength", keyword: "maxLength", params: { limit: 200 }, message: "must NOT have more than 200 characters" }];
+                                                return false;
+                                              }
+                                            } else {
+                                              validate32.errors = [{ instancePath: instancePath + "/decided_on_behalf_of", schemaPath: "#/properties/decided_on_behalf_of/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                              return false;
+                                            }
+                                          }
+                                          var valid0 = _errs33 === errors;
+                                        } else {
+                                          var valid0 = true;
+                                        }
+                                        if (valid0) {
+                                          if (data.presentation !== void 0) {
+                                            const _errs35 = errors;
+                                            if (!validate25(data.presentation, { instancePath: instancePath + "/presentation", parentData: data, parentDataProperty: "presentation", rootData, dynamicAnchors })) {
+                                              vErrors = vErrors === null ? validate25.errors : vErrors.concat(validate25.errors);
+                                              errors = vErrors.length;
+                                            }
+                                            var valid0 = _errs35 === errors;
+                                          } else {
+                                            var valid0 = true;
+                                          }
+                                          if (valid0) {
+                                            if (data.presentation_unavailable !== void 0) {
+                                              const _errs36 = errors;
+                                              if (typeof data.presentation_unavailable !== "boolean") {
+                                                validate32.errors = [{ instancePath: instancePath + "/presentation_unavailable", schemaPath: "#/properties/presentation_unavailable/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
+                                                return false;
+                                              }
+                                              var valid0 = _errs36 === errors;
+                                            } else {
+                                              var valid0 = true;
+                                            }
+                                            if (valid0) {
+                                              if (data.allowed_actions !== void 0) {
+                                                let data18 = data.allowed_actions;
+                                                const _errs38 = errors;
+                                                if (errors === _errs38) {
+                                                  if (Array.isArray(data18)) {
+                                                    var valid2 = true;
+                                                    const len0 = data18.length;
+                                                    for (let i0 = 0; i0 < len0; i0++) {
+                                                      let data19 = data18[i0];
+                                                      const _errs40 = errors;
+                                                      if (typeof data19 !== "string") {
+                                                        validate32.errors = [{ instancePath: instancePath + "/allowed_actions/" + i0, schemaPath: "#/$defs/Action/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                                        return false;
+                                                      }
+                                                      if (!(data19 === "approve" || data19 === "deny" || data19 === "revoke")) {
+                                                        validate32.errors = [{ instancePath: instancePath + "/allowed_actions/" + i0, schemaPath: "#/$defs/Action/enum", keyword: "enum", params: { allowedValues: schema44.enum }, message: "must be equal to one of the allowed values" }];
+                                                        return false;
+                                                      }
+                                                      var valid2 = _errs40 === errors;
+                                                      if (!valid2) {
+                                                        break;
+                                                      }
+                                                    }
+                                                    if (valid2) {
+                                                      let i1 = data18.length;
+                                                      let j0;
+                                                      if (i1 > 1) {
+                                                        outer0: for (; i1--; ) {
+                                                          for (j0 = i1; j0--; ) {
+                                                            if (func0(data18[i1], data18[j0])) {
+                                                              validate32.errors = [{ instancePath: instancePath + "/allowed_actions", schemaPath: "#/properties/allowed_actions/uniqueItems", keyword: "uniqueItems", params: { i: i1, j: j0 }, message: "must NOT have duplicate items (items ## " + j0 + " and " + i1 + " are identical)" }];
+                                                              return false;
+                                                              break outer0;
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  } else {
+                                                    validate32.errors = [{ instancePath: instancePath + "/allowed_actions", schemaPath: "#/properties/allowed_actions/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                                                    return false;
+                                                  }
+                                                }
+                                                var valid0 = _errs38 === errors;
+                                              } else {
+                                                var valid0 = true;
+                                              }
+                                              if (valid0) {
+                                                if (data.approval_bounds !== void 0) {
+                                                  let data20 = data.approval_bounds;
+                                                  const _errs43 = errors;
+                                                  const _errs44 = errors;
+                                                  if (errors === _errs44) {
+                                                    if (data20 && typeof data20 == "object" && !Array.isArray(data20)) {
+                                                      let missing1;
+                                                      if (data20.max_duration_seconds === void 0 && (missing1 = "max_duration_seconds") || data20.max_uses === void 0 && (missing1 = "max_uses")) {
+                                                        validate32.errors = [{ instancePath: instancePath + "/approval_bounds", schemaPath: "#/$defs/ApprovalBounds/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
+                                                        return false;
+                                                      } else {
+                                                        const _errs46 = errors;
+                                                        for (const key1 in data20) {
+                                                          if (!(key1 === "max_duration_seconds" || key1 === "max_uses")) {
+                                                            validate32.errors = [{ instancePath: instancePath + "/approval_bounds", schemaPath: "#/$defs/ApprovalBounds/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
+                                                            return false;
+                                                            break;
+                                                          }
+                                                        }
+                                                        if (_errs46 === errors) {
+                                                          if (data20.max_duration_seconds !== void 0) {
+                                                            let data21 = data20.max_duration_seconds;
+                                                            const _errs47 = errors;
+                                                            if (!(typeof data21 == "number" && (!(data21 % 1) && !isNaN(data21)) && isFinite(data21))) {
+                                                              validate32.errors = [{ instancePath: instancePath + "/approval_bounds/max_duration_seconds", schemaPath: "#/$defs/ApprovalBounds/properties/max_duration_seconds/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
+                                                              return false;
+                                                            }
+                                                            if (errors === _errs47) {
+                                                              if (typeof data21 == "number" && isFinite(data21)) {
+                                                                if (data21 > 9007199254740991 || isNaN(data21)) {
+                                                                  validate32.errors = [{ instancePath: instancePath + "/approval_bounds/max_duration_seconds", schemaPath: "#/$defs/ApprovalBounds/properties/max_duration_seconds/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
+                                                                  return false;
+                                                                } else {
+                                                                  if (data21 < 1 || isNaN(data21)) {
+                                                                    validate32.errors = [{ instancePath: instancePath + "/approval_bounds/max_duration_seconds", schemaPath: "#/$defs/ApprovalBounds/properties/max_duration_seconds/minimum", keyword: "minimum", params: { comparison: ">=", limit: 1 }, message: "must be >= 1" }];
+                                                                    return false;
+                                                                  }
+                                                                }
+                                                              }
+                                                            }
+                                                            var valid6 = _errs47 === errors;
+                                                          } else {
+                                                            var valid6 = true;
+                                                          }
+                                                          if (valid6) {
+                                                            if (data20.max_uses !== void 0) {
+                                                              let data22 = data20.max_uses;
+                                                              const _errs49 = errors;
+                                                              if (!(typeof data22 == "number" && (!(data22 % 1) && !isNaN(data22)) && isFinite(data22)) && data22 !== null) {
+                                                                validate32.errors = [{ instancePath: instancePath + "/approval_bounds/max_uses", schemaPath: "#/$defs/ApprovalBounds/properties/max_uses/type", keyword: "type", params: { type: schema45.properties.max_uses.type }, message: "must be integer,null" }];
+                                                                return false;
+                                                              }
+                                                              if (errors === _errs49) {
+                                                                if (typeof data22 == "number" && isFinite(data22)) {
+                                                                  if (data22 > 9007199254740991 || isNaN(data22)) {
+                                                                    validate32.errors = [{ instancePath: instancePath + "/approval_bounds/max_uses", schemaPath: "#/$defs/ApprovalBounds/properties/max_uses/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
+                                                                    return false;
+                                                                  } else {
+                                                                    if (data22 < 1 || isNaN(data22)) {
+                                                                      validate32.errors = [{ instancePath: instancePath + "/approval_bounds/max_uses", schemaPath: "#/$defs/ApprovalBounds/properties/max_uses/minimum", keyword: "minimum", params: { comparison: ">=", limit: 1 }, message: "must be >= 1" }];
+                                                                      return false;
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                              var valid6 = _errs49 === errors;
+                                                            } else {
+                                                              var valid6 = true;
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    } else {
+                                                      validate32.errors = [{ instancePath: instancePath + "/approval_bounds", schemaPath: "#/$defs/ApprovalBounds/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+                                                      return false;
+                                                    }
+                                                  }
+                                                  var valid0 = _errs43 === errors;
+                                                } else {
+                                                  var valid0 = true;
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    } else {
+      validate32.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      return false;
+    }
+  }
+  validate32.errors = vErrors;
+  return errors === 0;
+}
+validate32.evaluated = { "props": true, "dynamicProps": false, "dynamicItems": false };
+function validate31(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  const evaluated0 = validate31.evaluated;
+  if (evaluated0.dynamicProps) {
+    evaluated0.props = void 0;
+  }
+  if (evaluated0.dynamicItems) {
+    evaluated0.items = void 0;
+  }
+  if (errors === 0) {
+    if (data && typeof data == "object" && !Array.isArray(data)) {
+      let missing0;
+      if (data.requests === void 0 && (missing0 = "requests")) {
+        validate31.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        return false;
+      } else {
+        const _errs1 = errors;
+        for (const key0 in data) {
+          if (!(key0 === "requests" || key0 === "next_cursor" || key0 === "event_cursor")) {
+            validate31.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            return false;
+            break;
+          }
+        }
+        if (_errs1 === errors) {
+          if (data.requests !== void 0) {
+            let data0 = data.requests;
+            const _errs2 = errors;
+            if (errors === _errs2) {
+              if (Array.isArray(data0)) {
+                if (data0.length > 100) {
+                  validate31.errors = [{ instancePath: instancePath + "/requests", schemaPath: "#/properties/requests/maxItems", keyword: "maxItems", params: { limit: 100 }, message: "must NOT have more than 100 items" }];
+                  return false;
+                } else {
+                  var valid1 = true;
+                  const len0 = data0.length;
+                  for (let i0 = 0; i0 < len0; i0++) {
+                    const _errs4 = errors;
+                    if (!validate32(data0[i0], { instancePath: instancePath + "/requests/" + i0, parentData: data0, parentDataProperty: i0, rootData, dynamicAnchors })) {
+                      vErrors = vErrors === null ? validate32.errors : vErrors.concat(validate32.errors);
+                      errors = vErrors.length;
+                    }
+                    var valid1 = _errs4 === errors;
+                    if (!valid1) {
+                      break;
+                    }
+                  }
+                }
+              } else {
+                validate31.errors = [{ instancePath: instancePath + "/requests", schemaPath: "#/properties/requests/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                return false;
+              }
+            }
+            var valid0 = _errs2 === errors;
+          } else {
+            var valid0 = true;
+          }
+          if (valid0) {
+            if (data.next_cursor !== void 0) {
+              let data2 = data.next_cursor;
+              const _errs5 = errors;
+              if (errors === _errs5) {
+                if (typeof data2 === "string") {
+                  if (func1(data2) > 1024) {
+                    validate31.errors = [{ instancePath: instancePath + "/next_cursor", schemaPath: "#/properties/next_cursor/maxLength", keyword: "maxLength", params: { limit: 1024 }, message: "must NOT have more than 1024 characters" }];
+                    return false;
+                  }
+                } else {
+                  validate31.errors = [{ instancePath: instancePath + "/next_cursor", schemaPath: "#/properties/next_cursor/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                  return false;
+                }
+              }
+              var valid0 = _errs5 === errors;
+            } else {
+              var valid0 = true;
+            }
+            if (valid0) {
+              if (data.event_cursor !== void 0) {
+                let data3 = data.event_cursor;
+                const _errs7 = errors;
+                if (errors === _errs7) {
+                  if (typeof data3 === "string") {
+                    if (func1(data3) > 1024) {
+                      validate31.errors = [{ instancePath: instancePath + "/event_cursor", schemaPath: "#/properties/event_cursor/maxLength", keyword: "maxLength", params: { limit: 1024 }, message: "must NOT have more than 1024 characters" }];
+                      return false;
+                    }
+                  } else {
+                    validate31.errors = [{ instancePath: instancePath + "/event_cursor", schemaPath: "#/properties/event_cursor/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                    return false;
+                  }
+                }
+                var valid0 = _errs7 === errors;
+              } else {
+                var valid0 = true;
+              }
+            }
+          }
+        }
+      }
+    } else {
+      validate31.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      return false;
+    }
+  }
+  validate31.errors = vErrors;
+  return errors === 0;
+}
+validate31.evaluated = { "props": true, "dynamicProps": false, "dynamicItems": false };
+function validate30(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {
+  ;
+  let vErrors = null;
+  let errors = 0;
+  const evaluated0 = validate30.evaluated;
+  if (evaluated0.dynamicProps) {
+    evaluated0.props = void 0;
+  }
+  if (evaluated0.dynamicItems) {
+    evaluated0.items = void 0;
+  }
+  if (!validate31(data, { instancePath, parentData, parentDataProperty, rootData, dynamicAnchors })) {
+    vErrors = vErrors === null ? validate31.errors : vErrors.concat(validate31.errors);
+    errors = vErrors.length;
+  }
+  validate30.errors = vErrors;
+  return errors === 0;
+}
+validate30.evaluated = { "props": true, "dynamicProps": false, "dynamicItems": false };
+var schema53 = { "type": "object", "additionalProperties": false, "required": ["cursor", "kind", "request_id", "revision", "status", "occurred_at", "used_count"], "properties": { "cursor": { "type": "string", "minLength": 1, "maxLength": 1024 }, "kind": { "type": "string", "enum": ["request.created", "request.approved", "request.denied", "request.canceled", "request.expired", "grant.revoked", "grant.reserved", "grant.consumed", "grant.released", "execution.succeeded", "execution.failed", "execution.ambiguous"] }, "request_id": { "type": "string", "minLength": 1, "maxLength": 128 }, "revision": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }, "status": { "$ref": "#/$defs/Status" }, "occurred_at": { "type": "string", "format": "date-time" }, "used_count": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 } } };
+function validate37(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  const evaluated0 = validate37.evaluated;
+  if (evaluated0.dynamicProps) {
+    evaluated0.props = void 0;
+  }
+  if (evaluated0.dynamicItems) {
+    evaluated0.items = void 0;
+  }
+  if (errors === 0) {
+    if (data && typeof data == "object" && !Array.isArray(data)) {
+      let missing0;
+      if (data.cursor === void 0 && (missing0 = "cursor") || data.kind === void 0 && (missing0 = "kind") || data.request_id === void 0 && (missing0 = "request_id") || data.revision === void 0 && (missing0 = "revision") || data.status === void 0 && (missing0 = "status") || data.occurred_at === void 0 && (missing0 = "occurred_at") || data.used_count === void 0 && (missing0 = "used_count")) {
+        validate37.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        return false;
+      } else {
+        const _errs1 = errors;
+        for (const key0 in data) {
+          if (!(key0 === "cursor" || key0 === "kind" || key0 === "request_id" || key0 === "revision" || key0 === "status" || key0 === "occurred_at" || key0 === "used_count")) {
+            validate37.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            return false;
+            break;
+          }
+        }
+        if (_errs1 === errors) {
+          if (data.cursor !== void 0) {
+            let data0 = data.cursor;
+            const _errs2 = errors;
+            if (errors === _errs2) {
+              if (typeof data0 === "string") {
+                if (func1(data0) > 1024) {
+                  validate37.errors = [{ instancePath: instancePath + "/cursor", schemaPath: "#/properties/cursor/maxLength", keyword: "maxLength", params: { limit: 1024 }, message: "must NOT have more than 1024 characters" }];
+                  return false;
+                } else {
+                  if (func1(data0) < 1) {
+                    validate37.errors = [{ instancePath: instancePath + "/cursor", schemaPath: "#/properties/cursor/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                    return false;
+                  }
+                }
+              } else {
+                validate37.errors = [{ instancePath: instancePath + "/cursor", schemaPath: "#/properties/cursor/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                return false;
+              }
+            }
+            var valid0 = _errs2 === errors;
+          } else {
+            var valid0 = true;
+          }
+          if (valid0) {
+            if (data.kind !== void 0) {
+              let data1 = data.kind;
+              const _errs4 = errors;
+              if (typeof data1 !== "string") {
+                validate37.errors = [{ instancePath: instancePath + "/kind", schemaPath: "#/properties/kind/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                return false;
+              }
+              if (!(data1 === "request.created" || data1 === "request.approved" || data1 === "request.denied" || data1 === "request.canceled" || data1 === "request.expired" || data1 === "grant.revoked" || data1 === "grant.reserved" || data1 === "grant.consumed" || data1 === "grant.released" || data1 === "execution.succeeded" || data1 === "execution.failed" || data1 === "execution.ambiguous")) {
+                validate37.errors = [{ instancePath: instancePath + "/kind", schemaPath: "#/properties/kind/enum", keyword: "enum", params: { allowedValues: schema53.properties.kind.enum }, message: "must be equal to one of the allowed values" }];
+                return false;
+              }
+              var valid0 = _errs4 === errors;
+            } else {
+              var valid0 = true;
+            }
+            if (valid0) {
+              if (data.request_id !== void 0) {
+                let data2 = data.request_id;
+                const _errs6 = errors;
+                if (errors === _errs6) {
+                  if (typeof data2 === "string") {
+                    if (func1(data2) > 128) {
+                      validate37.errors = [{ instancePath: instancePath + "/request_id", schemaPath: "#/properties/request_id/maxLength", keyword: "maxLength", params: { limit: 128 }, message: "must NOT have more than 128 characters" }];
+                      return false;
+                    } else {
+                      if (func1(data2) < 1) {
+                        validate37.errors = [{ instancePath: instancePath + "/request_id", schemaPath: "#/properties/request_id/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                        return false;
+                      }
+                    }
+                  } else {
+                    validate37.errors = [{ instancePath: instancePath + "/request_id", schemaPath: "#/properties/request_id/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                    return false;
+                  }
+                }
+                var valid0 = _errs6 === errors;
+              } else {
+                var valid0 = true;
+              }
+              if (valid0) {
+                if (data.revision !== void 0) {
+                  let data3 = data.revision;
+                  const _errs8 = errors;
+                  if (!(typeof data3 == "number" && (!(data3 % 1) && !isNaN(data3)) && isFinite(data3))) {
+                    validate37.errors = [{ instancePath: instancePath + "/revision", schemaPath: "#/properties/revision/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
+                    return false;
+                  }
+                  if (errors === _errs8) {
+                    if (typeof data3 == "number" && isFinite(data3)) {
+                      if (data3 > 9007199254740991 || isNaN(data3)) {
+                        validate37.errors = [{ instancePath: instancePath + "/revision", schemaPath: "#/properties/revision/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
+                        return false;
+                      } else {
+                        if (data3 < 1 || isNaN(data3)) {
+                          validate37.errors = [{ instancePath: instancePath + "/revision", schemaPath: "#/properties/revision/minimum", keyword: "minimum", params: { comparison: ">=", limit: 1 }, message: "must be >= 1" }];
+                          return false;
+                        }
+                      }
+                    }
+                  }
+                  var valid0 = _errs8 === errors;
+                } else {
+                  var valid0 = true;
+                }
+                if (valid0) {
+                  if (data.status !== void 0) {
+                    let data4 = data.status;
+                    const _errs10 = errors;
+                    if (typeof data4 !== "string") {
+                      validate37.errors = [{ instancePath: instancePath + "/status", schemaPath: "#/$defs/Status/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                      return false;
+                    }
+                    if (!(data4 === "pending" || data4 === "active" || data4 === "denied" || data4 === "canceled" || data4 === "expired" || data4 === "consumed" || data4 === "revoked")) {
+                      validate37.errors = [{ instancePath: instancePath + "/status", schemaPath: "#/$defs/Status/enum", keyword: "enum", params: { allowedValues: schema38.enum }, message: "must be equal to one of the allowed values" }];
+                      return false;
+                    }
+                    var valid0 = _errs10 === errors;
+                  } else {
+                    var valid0 = true;
+                  }
+                  if (valid0) {
+                    if (data.occurred_at !== void 0) {
+                      let data5 = data.occurred_at;
+                      const _errs13 = errors;
+                      if (errors === _errs13) {
+                        if (errors === _errs13) {
+                          if (typeof data5 === "string") {
+                            if (!formats0.validate(data5)) {
+                              validate37.errors = [{ instancePath: instancePath + "/occurred_at", schemaPath: "#/properties/occurred_at/format", keyword: "format", params: { format: "date-time" }, message: 'must match format "date-time"' }];
+                              return false;
+                            }
+                          } else {
+                            validate37.errors = [{ instancePath: instancePath + "/occurred_at", schemaPath: "#/properties/occurred_at/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                            return false;
+                          }
+                        }
+                      }
+                      var valid0 = _errs13 === errors;
+                    } else {
+                      var valid0 = true;
+                    }
+                    if (valid0) {
+                      if (data.used_count !== void 0) {
+                        let data6 = data.used_count;
+                        const _errs15 = errors;
+                        if (!(typeof data6 == "number" && (!(data6 % 1) && !isNaN(data6)) && isFinite(data6))) {
+                          validate37.errors = [{ instancePath: instancePath + "/used_count", schemaPath: "#/properties/used_count/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
+                          return false;
+                        }
+                        if (errors === _errs15) {
+                          if (typeof data6 == "number" && isFinite(data6)) {
+                            if (data6 > 9007199254740991 || isNaN(data6)) {
+                              validate37.errors = [{ instancePath: instancePath + "/used_count", schemaPath: "#/properties/used_count/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
+                              return false;
+                            } else {
+                              if (data6 < 0 || isNaN(data6)) {
+                                validate37.errors = [{ instancePath: instancePath + "/used_count", schemaPath: "#/properties/used_count/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
+                                return false;
+                              }
+                            }
+                          }
+                        }
+                        var valid0 = _errs15 === errors;
+                      } else {
+                        var valid0 = true;
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    } else {
+      validate37.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      return false;
+    }
+  }
+  validate37.errors = vErrors;
+  return errors === 0;
+}
+validate37.evaluated = { "props": true, "dynamicProps": false, "dynamicItems": false };
+function validate36(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {
+  ;
+  let vErrors = null;
+  let errors = 0;
+  const evaluated0 = validate36.evaluated;
+  if (evaluated0.dynamicProps) {
+    evaluated0.props = void 0;
+  }
+  if (evaluated0.dynamicItems) {
+    evaluated0.items = void 0;
+  }
+  if (!validate37(data, { instancePath, parentData, parentDataProperty, rootData, dynamicAnchors })) {
+    vErrors = vErrors === null ? validate37.errors : vErrors.concat(validate37.errors);
+    errors = vErrors.length;
+  }
+  validate36.errors = vErrors;
+  return errors === 0;
+}
+validate36.evaluated = { "props": true, "dynamicProps": false, "dynamicItems": false };
+var validateErrorEnvelope = validate39;
+var schema57 = { "type": "object", "additionalProperties": false, "required": ["code", "message", "correlation_id"], "properties": { "code": { "type": "string", "enum": ["invalid_request", "unauthorized", "forbidden", "not_found", "method_not_allowed", "revision_conflict", "idempotency_conflict", "constraint_exceeded", "invalid_transition", "invalid_decision_token", "cursor_expired", "temporarily_unavailable", "internal_error"] }, "message": { "type": "string", "minLength": 1, "maxLength": 500 }, "correlation_id": { "type": "string", "minLength": 1, "maxLength": 128 }, "current": { "$ref": "#/$defs/BrokerRequest" } } };
+function validate41(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  const evaluated0 = validate41.evaluated;
+  if (evaluated0.dynamicProps) {
+    evaluated0.props = void 0;
+  }
+  if (evaluated0.dynamicItems) {
+    evaluated0.items = void 0;
+  }
+  if (errors === 0) {
+    if (data && typeof data == "object" && !Array.isArray(data)) {
+      let missing0;
+      if (data.code === void 0 && (missing0 = "code") || data.message === void 0 && (missing0 = "message") || data.correlation_id === void 0 && (missing0 = "correlation_id")) {
+        validate41.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        return false;
+      } else {
+        const _errs1 = errors;
+        for (const key0 in data) {
+          if (!(key0 === "code" || key0 === "message" || key0 === "correlation_id" || key0 === "current")) {
+            validate41.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            return false;
+            break;
+          }
+        }
+        if (_errs1 === errors) {
+          if (data.code !== void 0) {
+            let data0 = data.code;
+            const _errs2 = errors;
+            if (typeof data0 !== "string") {
+              validate41.errors = [{ instancePath: instancePath + "/code", schemaPath: "#/properties/code/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+              return false;
+            }
+            if (!(data0 === "invalid_request" || data0 === "unauthorized" || data0 === "forbidden" || data0 === "not_found" || data0 === "method_not_allowed" || data0 === "revision_conflict" || data0 === "idempotency_conflict" || data0 === "constraint_exceeded" || data0 === "invalid_transition" || data0 === "invalid_decision_token" || data0 === "cursor_expired" || data0 === "temporarily_unavailable" || data0 === "internal_error")) {
+              validate41.errors = [{ instancePath: instancePath + "/code", schemaPath: "#/properties/code/enum", keyword: "enum", params: { allowedValues: schema57.properties.code.enum }, message: "must be equal to one of the allowed values" }];
+              return false;
+            }
+            var valid0 = _errs2 === errors;
+          } else {
+            var valid0 = true;
+          }
+          if (valid0) {
+            if (data.message !== void 0) {
+              let data1 = data.message;
+              const _errs4 = errors;
+              if (errors === _errs4) {
+                if (typeof data1 === "string") {
+                  if (func1(data1) > 500) {
+                    validate41.errors = [{ instancePath: instancePath + "/message", schemaPath: "#/properties/message/maxLength", keyword: "maxLength", params: { limit: 500 }, message: "must NOT have more than 500 characters" }];
+                    return false;
+                  } else {
+                    if (func1(data1) < 1) {
+                      validate41.errors = [{ instancePath: instancePath + "/message", schemaPath: "#/properties/message/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                      return false;
+                    }
+                  }
+                } else {
+                  validate41.errors = [{ instancePath: instancePath + "/message", schemaPath: "#/properties/message/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                  return false;
+                }
+              }
+              var valid0 = _errs4 === errors;
+            } else {
+              var valid0 = true;
+            }
+            if (valid0) {
+              if (data.correlation_id !== void 0) {
+                let data2 = data.correlation_id;
+                const _errs6 = errors;
+                if (errors === _errs6) {
+                  if (typeof data2 === "string") {
+                    if (func1(data2) > 128) {
+                      validate41.errors = [{ instancePath: instancePath + "/correlation_id", schemaPath: "#/properties/correlation_id/maxLength", keyword: "maxLength", params: { limit: 128 }, message: "must NOT have more than 128 characters" }];
+                      return false;
+                    } else {
+                      if (func1(data2) < 1) {
+                        validate41.errors = [{ instancePath: instancePath + "/correlation_id", schemaPath: "#/properties/correlation_id/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                        return false;
+                      }
+                    }
+                  } else {
+                    validate41.errors = [{ instancePath: instancePath + "/correlation_id", schemaPath: "#/properties/correlation_id/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                    return false;
+                  }
+                }
+                var valid0 = _errs6 === errors;
+              } else {
+                var valid0 = true;
+              }
+              if (valid0) {
+                if (data.current !== void 0) {
+                  const _errs8 = errors;
+                  if (!validate32(data.current, { instancePath: instancePath + "/current", parentData: data, parentDataProperty: "current", rootData, dynamicAnchors })) {
+                    vErrors = vErrors === null ? validate32.errors : vErrors.concat(validate32.errors);
+                    errors = vErrors.length;
+                  }
+                  var valid0 = _errs8 === errors;
+                } else {
+                  var valid0 = true;
+                }
+              }
+            }
+          }
+        }
+      }
+    } else {
+      validate41.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      return false;
+    }
+  }
+  validate41.errors = vErrors;
+  return errors === 0;
+}
+validate41.evaluated = { "props": true, "dynamicProps": false, "dynamicItems": false };
+function validate40(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  const evaluated0 = validate40.evaluated;
+  if (evaluated0.dynamicProps) {
+    evaluated0.props = void 0;
+  }
+  if (evaluated0.dynamicItems) {
+    evaluated0.items = void 0;
+  }
+  if (errors === 0) {
+    if (data && typeof data == "object" && !Array.isArray(data)) {
+      let missing0;
+      if (data.error === void 0 && (missing0 = "error")) {
+        validate40.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        return false;
+      } else {
+        const _errs1 = errors;
+        for (const key0 in data) {
+          if (!(key0 === "error")) {
+            validate40.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            return false;
+            break;
+          }
+        }
+        if (_errs1 === errors) {
+          if (data.error !== void 0) {
+            if (!validate41(data.error, { instancePath: instancePath + "/error", parentData: data, parentDataProperty: "error", rootData, dynamicAnchors })) {
+              vErrors = vErrors === null ? validate41.errors : vErrors.concat(validate41.errors);
+              errors = vErrors.length;
+            }
+          }
+        }
+      }
+    } else {
+      validate40.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      return false;
+    }
+  }
+  validate40.errors = vErrors;
+  return errors === 0;
+}
+validate40.evaluated = { "props": true, "dynamicProps": false, "dynamicItems": false };
+function validate39(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {
+  ;
+  let vErrors = null;
+  let errors = 0;
+  const evaluated0 = validate39.evaluated;
+  if (evaluated0.dynamicProps) {
+    evaluated0.props = void 0;
+  }
+  if (evaluated0.dynamicItems) {
+    evaluated0.items = void 0;
+  }
+  if (!validate40(data, { instancePath, parentData, parentDataProperty, rootData, dynamicAnchors })) {
+    vErrors = vErrors === null ? validate40.errors : vErrors.concat(validate40.errors);
+    errors = vErrors.length;
+  }
+  validate39.errors = vErrors;
+  return errors === 0;
+}
+validate39.evaluated = { "props": true, "dynamicProps": false, "dynamicItems": false };
+var pattern4 = new RegExp("^[A-Za-z0-9_-]+$", "u");
+function validate47(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  const evaluated0 = validate47.evaluated;
+  if (evaluated0.dynamicProps) {
+    evaluated0.props = void 0;
+  }
+  if (evaluated0.dynamicItems) {
+    evaluated0.items = void 0;
+  }
+  if (errors === 0) {
+    if (data && typeof data == "object" && !Array.isArray(data)) {
+      let missing0;
+      if (data.source_id === void 0 && (missing0 = "source_id") || data.source_label === void 0 && (missing0 = "source_label") || data.handle === void 0 && (missing0 = "handle") || data.request === void 0 && (missing0 = "request")) {
+        validate47.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        return false;
+      } else {
+        const _errs1 = errors;
+        for (const key0 in data) {
+          if (!(key0 === "source_id" || key0 === "source_label" || key0 === "handle" || key0 === "request")) {
+            validate47.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            return false;
+            break;
+          }
+        }
+        if (_errs1 === errors) {
+          if (data.source_id !== void 0) {
+            let data0 = data.source_id;
+            const _errs2 = errors;
+            if (errors === _errs2) {
+              if (typeof data0 === "string") {
+                if (func1(data0) > 128) {
+                  validate47.errors = [{ instancePath: instancePath + "/source_id", schemaPath: "#/properties/source_id/maxLength", keyword: "maxLength", params: { limit: 128 }, message: "must NOT have more than 128 characters" }];
+                  return false;
+                } else {
+                  if (func1(data0) < 1) {
+                    validate47.errors = [{ instancePath: instancePath + "/source_id", schemaPath: "#/properties/source_id/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                    return false;
+                  }
+                }
+              } else {
+                validate47.errors = [{ instancePath: instancePath + "/source_id", schemaPath: "#/properties/source_id/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                return false;
+              }
+            }
+            var valid0 = _errs2 === errors;
+          } else {
+            var valid0 = true;
+          }
+          if (valid0) {
+            if (data.source_label !== void 0) {
+              let data1 = data.source_label;
+              const _errs4 = errors;
+              if (errors === _errs4) {
+                if (typeof data1 === "string") {
+                  if (func1(data1) > 200) {
+                    validate47.errors = [{ instancePath: instancePath + "/source_label", schemaPath: "#/properties/source_label/maxLength", keyword: "maxLength", params: { limit: 200 }, message: "must NOT have more than 200 characters" }];
+                    return false;
+                  } else {
+                    if (func1(data1) < 1) {
+                      validate47.errors = [{ instancePath: instancePath + "/source_label", schemaPath: "#/properties/source_label/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                      return false;
+                    }
+                  }
+                } else {
+                  validate47.errors = [{ instancePath: instancePath + "/source_label", schemaPath: "#/properties/source_label/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                  return false;
+                }
+              }
+              var valid0 = _errs4 === errors;
+            } else {
+              var valid0 = true;
+            }
+            if (valid0) {
+              if (data.handle !== void 0) {
+                let data2 = data.handle;
+                const _errs6 = errors;
+                if (errors === _errs6) {
+                  if (typeof data2 === "string") {
+                    if (func1(data2) > 256) {
+                      validate47.errors = [{ instancePath: instancePath + "/handle", schemaPath: "#/properties/handle/maxLength", keyword: "maxLength", params: { limit: 256 }, message: "must NOT have more than 256 characters" }];
+                      return false;
+                    } else {
+                      if (func1(data2) < 22) {
+                        validate47.errors = [{ instancePath: instancePath + "/handle", schemaPath: "#/properties/handle/minLength", keyword: "minLength", params: { limit: 22 }, message: "must NOT have fewer than 22 characters" }];
+                        return false;
+                      } else {
+                        if (!pattern4.test(data2)) {
+                          validate47.errors = [{ instancePath: instancePath + "/handle", schemaPath: "#/properties/handle/pattern", keyword: "pattern", params: { pattern: "^[A-Za-z0-9_-]+$" }, message: 'must match pattern "^[A-Za-z0-9_-]+$"' }];
+                          return false;
+                        }
+                      }
+                    }
+                  } else {
+                    validate47.errors = [{ instancePath: instancePath + "/handle", schemaPath: "#/properties/handle/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                    return false;
+                  }
+                }
+                var valid0 = _errs6 === errors;
+              } else {
+                var valid0 = true;
+              }
+              if (valid0) {
+                if (data.request !== void 0) {
+                  const _errs8 = errors;
+                  if (!validate32(data.request, { instancePath: instancePath + "/request", parentData: data, parentDataProperty: "request", rootData, dynamicAnchors })) {
+                    vErrors = vErrors === null ? validate32.errors : vErrors.concat(validate32.errors);
+                    errors = vErrors.length;
+                  }
+                  var valid0 = _errs8 === errors;
+                } else {
+                  var valid0 = true;
+                }
+              }
+            }
+          }
+        }
+      }
+    } else {
+      validate47.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      return false;
+    }
+  }
+  validate47.errors = vErrors;
+  return errors === 0;
+}
+validate47.evaluated = { "props": true, "dynamicProps": false, "dynamicItems": false };
+function validate46(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  const evaluated0 = validate46.evaluated;
+  if (evaluated0.dynamicProps) {
+    evaluated0.props = void 0;
+  }
+  if (evaluated0.dynamicItems) {
+    evaluated0.items = void 0;
+  }
+  if (errors === 0) {
+    if (data && typeof data == "object" && !Array.isArray(data)) {
+      let missing0;
+      if (data.api_version === void 0 && (missing0 = "api_version") || data.cursor === void 0 && (missing0 = "cursor") || data.synchronized_at === void 0 && (missing0 = "synchronized_at") || data.sources === void 0 && (missing0 = "sources") || data.requests === void 0 && (missing0 = "requests")) {
+        validate46.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        return false;
+      } else {
+        const _errs1 = errors;
+        for (const key0 in data) {
+          if (!(key0 === "api_version" || key0 === "cursor" || key0 === "synchronized_at" || key0 === "sources" || key0 === "requests" || key0 === "delivery_failures")) {
+            validate46.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            return false;
+            break;
+          }
+        }
+        if (_errs1 === errors) {
+          if (data.api_version !== void 0) {
+            let data0 = data.api_version;
+            const _errs2 = errors;
+            if (typeof data0 !== "string") {
+              validate46.errors = [{ instancePath: instancePath + "/api_version", schemaPath: "#/properties/api_version/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+              return false;
+            }
+            if ("brokerkit.io/operator-ui/v1" !== data0) {
+              validate46.errors = [{ instancePath: instancePath + "/api_version", schemaPath: "#/properties/api_version/const", keyword: "const", params: { allowedValue: "brokerkit.io/operator-ui/v1" }, message: "must be equal to constant" }];
+              return false;
+            }
+            var valid0 = _errs2 === errors;
+          } else {
+            var valid0 = true;
+          }
+          if (valid0) {
+            if (data.cursor !== void 0) {
+              let data1 = data.cursor;
+              const _errs4 = errors;
+              if (errors === _errs4) {
+                if (typeof data1 === "string") {
+                  if (func1(data1) > 128) {
+                    validate46.errors = [{ instancePath: instancePath + "/cursor", schemaPath: "#/properties/cursor/maxLength", keyword: "maxLength", params: { limit: 128 }, message: "must NOT have more than 128 characters" }];
+                    return false;
+                  } else {
+                    if (func1(data1) < 1) {
+                      validate46.errors = [{ instancePath: instancePath + "/cursor", schemaPath: "#/properties/cursor/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                      return false;
+                    }
+                  }
+                } else {
+                  validate46.errors = [{ instancePath: instancePath + "/cursor", schemaPath: "#/properties/cursor/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                  return false;
+                }
+              }
+              var valid0 = _errs4 === errors;
+            } else {
+              var valid0 = true;
+            }
+            if (valid0) {
+              if (data.synchronized_at !== void 0) {
+                let data2 = data.synchronized_at;
+                const _errs6 = errors;
+                if (errors === _errs6) {
+                  if (errors === _errs6) {
+                    if (typeof data2 === "string") {
+                      if (!formats0.validate(data2)) {
+                        validate46.errors = [{ instancePath: instancePath + "/synchronized_at", schemaPath: "#/properties/synchronized_at/format", keyword: "format", params: { format: "date-time" }, message: 'must match format "date-time"' }];
+                        return false;
+                      }
+                    } else {
+                      validate46.errors = [{ instancePath: instancePath + "/synchronized_at", schemaPath: "#/properties/synchronized_at/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                      return false;
+                    }
+                  }
+                }
+                var valid0 = _errs6 === errors;
+              } else {
+                var valid0 = true;
+              }
+              if (valid0) {
+                if (data.sources !== void 0) {
+                  let data3 = data.sources;
+                  const _errs8 = errors;
+                  if (errors === _errs8) {
+                    if (Array.isArray(data3)) {
+                      if (data3.length > 100) {
+                        validate46.errors = [{ instancePath: instancePath + "/sources", schemaPath: "#/properties/sources/maxItems", keyword: "maxItems", params: { limit: 100 }, message: "must NOT have more than 100 items" }];
+                        return false;
+                      } else {
+                        var valid1 = true;
+                        const len0 = data3.length;
+                        for (let i0 = 0; i0 < len0; i0++) {
+                          let data4 = data3[i0];
+                          const _errs10 = errors;
+                          const _errs11 = errors;
+                          if (errors === _errs11) {
+                            if (data4 && typeof data4 == "object" && !Array.isArray(data4)) {
+                              let missing1;
+                              if (data4.id === void 0 && (missing1 = "id") || data4.label === void 0 && (missing1 = "label") || data4.healthy === void 0 && (missing1 = "healthy")) {
+                                validate46.errors = [{ instancePath: instancePath + "/sources/" + i0, schemaPath: "#/$defs/UISourceHealth/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
+                                return false;
+                              } else {
+                                const _errs13 = errors;
+                                for (const key1 in data4) {
+                                  if (!(key1 === "id" || key1 === "label" || key1 === "healthy" || key1 === "last_sync_at" || key1 === "error")) {
+                                    validate46.errors = [{ instancePath: instancePath + "/sources/" + i0, schemaPath: "#/$defs/UISourceHealth/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
+                                    return false;
+                                    break;
+                                  }
+                                }
+                                if (_errs13 === errors) {
+                                  if (data4.id !== void 0) {
+                                    let data5 = data4.id;
+                                    const _errs14 = errors;
+                                    if (errors === _errs14) {
+                                      if (typeof data5 === "string") {
+                                        if (func1(data5) > 128) {
+                                          validate46.errors = [{ instancePath: instancePath + "/sources/" + i0 + "/id", schemaPath: "#/$defs/UISourceHealth/properties/id/maxLength", keyword: "maxLength", params: { limit: 128 }, message: "must NOT have more than 128 characters" }];
+                                          return false;
+                                        } else {
+                                          if (func1(data5) < 1) {
+                                            validate46.errors = [{ instancePath: instancePath + "/sources/" + i0 + "/id", schemaPath: "#/$defs/UISourceHealth/properties/id/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                                            return false;
+                                          }
+                                        }
+                                      } else {
+                                        validate46.errors = [{ instancePath: instancePath + "/sources/" + i0 + "/id", schemaPath: "#/$defs/UISourceHealth/properties/id/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                        return false;
+                                      }
+                                    }
+                                    var valid3 = _errs14 === errors;
+                                  } else {
+                                    var valid3 = true;
+                                  }
+                                  if (valid3) {
+                                    if (data4.label !== void 0) {
+                                      let data6 = data4.label;
+                                      const _errs16 = errors;
+                                      if (errors === _errs16) {
+                                        if (typeof data6 === "string") {
+                                          if (func1(data6) > 200) {
+                                            validate46.errors = [{ instancePath: instancePath + "/sources/" + i0 + "/label", schemaPath: "#/$defs/UISourceHealth/properties/label/maxLength", keyword: "maxLength", params: { limit: 200 }, message: "must NOT have more than 200 characters" }];
+                                            return false;
+                                          } else {
+                                            if (func1(data6) < 1) {
+                                              validate46.errors = [{ instancePath: instancePath + "/sources/" + i0 + "/label", schemaPath: "#/$defs/UISourceHealth/properties/label/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                                              return false;
+                                            }
+                                          }
+                                        } else {
+                                          validate46.errors = [{ instancePath: instancePath + "/sources/" + i0 + "/label", schemaPath: "#/$defs/UISourceHealth/properties/label/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                          return false;
+                                        }
+                                      }
+                                      var valid3 = _errs16 === errors;
+                                    } else {
+                                      var valid3 = true;
+                                    }
+                                    if (valid3) {
+                                      if (data4.healthy !== void 0) {
+                                        const _errs18 = errors;
+                                        if (typeof data4.healthy !== "boolean") {
+                                          validate46.errors = [{ instancePath: instancePath + "/sources/" + i0 + "/healthy", schemaPath: "#/$defs/UISourceHealth/properties/healthy/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
+                                          return false;
+                                        }
+                                        var valid3 = _errs18 === errors;
+                                      } else {
+                                        var valid3 = true;
+                                      }
+                                      if (valid3) {
+                                        if (data4.last_sync_at !== void 0) {
+                                          let data8 = data4.last_sync_at;
+                                          const _errs20 = errors;
+                                          if (errors === _errs20) {
+                                            if (errors === _errs20) {
+                                              if (typeof data8 === "string") {
+                                                if (!formats0.validate(data8)) {
+                                                  validate46.errors = [{ instancePath: instancePath + "/sources/" + i0 + "/last_sync_at", schemaPath: "#/$defs/UISourceHealth/properties/last_sync_at/format", keyword: "format", params: { format: "date-time" }, message: 'must match format "date-time"' }];
+                                                  return false;
+                                                }
+                                              } else {
+                                                validate46.errors = [{ instancePath: instancePath + "/sources/" + i0 + "/last_sync_at", schemaPath: "#/$defs/UISourceHealth/properties/last_sync_at/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                                return false;
+                                              }
+                                            }
+                                          }
+                                          var valid3 = _errs20 === errors;
+                                        } else {
+                                          var valid3 = true;
+                                        }
+                                        if (valid3) {
+                                          if (data4.error !== void 0) {
+                                            let data9 = data4.error;
+                                            const _errs22 = errors;
+                                            if (errors === _errs22) {
+                                              if (typeof data9 === "string") {
+                                                if (func1(data9) > 200) {
+                                                  validate46.errors = [{ instancePath: instancePath + "/sources/" + i0 + "/error", schemaPath: "#/$defs/UISourceHealth/properties/error/maxLength", keyword: "maxLength", params: { limit: 200 }, message: "must NOT have more than 200 characters" }];
+                                                  return false;
+                                                }
+                                              } else {
+                                                validate46.errors = [{ instancePath: instancePath + "/sources/" + i0 + "/error", schemaPath: "#/$defs/UISourceHealth/properties/error/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                                return false;
+                                              }
+                                            }
+                                            var valid3 = _errs22 === errors;
+                                          } else {
+                                            var valid3 = true;
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            } else {
+                              validate46.errors = [{ instancePath: instancePath + "/sources/" + i0, schemaPath: "#/$defs/UISourceHealth/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+                              return false;
+                            }
+                          }
+                          var valid1 = _errs10 === errors;
+                          if (!valid1) {
+                            break;
+                          }
+                        }
+                      }
+                    } else {
+                      validate46.errors = [{ instancePath: instancePath + "/sources", schemaPath: "#/properties/sources/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                      return false;
+                    }
+                  }
+                  var valid0 = _errs8 === errors;
+                } else {
+                  var valid0 = true;
+                }
+                if (valid0) {
+                  if (data.requests !== void 0) {
+                    let data10 = data.requests;
+                    const _errs24 = errors;
+                    if (errors === _errs24) {
+                      if (Array.isArray(data10)) {
+                        if (data10.length > 1e3) {
+                          validate46.errors = [{ instancePath: instancePath + "/requests", schemaPath: "#/properties/requests/maxItems", keyword: "maxItems", params: { limit: 1e3 }, message: "must NOT have more than 1000 items" }];
+                          return false;
+                        } else {
+                          var valid4 = true;
+                          const len1 = data10.length;
+                          for (let i1 = 0; i1 < len1; i1++) {
+                            const _errs26 = errors;
+                            if (!validate47(data10[i1], { instancePath: instancePath + "/requests/" + i1, parentData: data10, parentDataProperty: i1, rootData, dynamicAnchors })) {
+                              vErrors = vErrors === null ? validate47.errors : vErrors.concat(validate47.errors);
+                              errors = vErrors.length;
+                            }
+                            var valid4 = _errs26 === errors;
+                            if (!valid4) {
+                              break;
+                            }
+                          }
+                        }
+                      } else {
+                        validate46.errors = [{ instancePath: instancePath + "/requests", schemaPath: "#/properties/requests/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                        return false;
+                      }
+                    }
+                    var valid0 = _errs24 === errors;
+                  } else {
+                    var valid0 = true;
+                  }
+                  if (valid0) {
+                    if (data.delivery_failures !== void 0) {
+                      let data12 = data.delivery_failures;
+                      const _errs27 = errors;
+                      if (!(typeof data12 == "number" && (!(data12 % 1) && !isNaN(data12)) && isFinite(data12))) {
+                        validate46.errors = [{ instancePath: instancePath + "/delivery_failures", schemaPath: "#/properties/delivery_failures/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
+                        return false;
+                      }
+                      if (errors === _errs27) {
+                        if (typeof data12 == "number" && isFinite(data12)) {
+                          if (data12 > 9007199254740991 || isNaN(data12)) {
+                            validate46.errors = [{ instancePath: instancePath + "/delivery_failures", schemaPath: "#/properties/delivery_failures/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
+                            return false;
+                          } else {
+                            if (data12 < 0 || isNaN(data12)) {
+                              validate46.errors = [{ instancePath: instancePath + "/delivery_failures", schemaPath: "#/properties/delivery_failures/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
+                              return false;
+                            }
+                          }
+                        }
+                      }
+                      var valid0 = _errs27 === errors;
+                    } else {
+                      var valid0 = true;
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    } else {
+      validate46.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      return false;
+    }
+  }
+  validate46.errors = vErrors;
+  return errors === 0;
+}
+validate46.evaluated = { "props": true, "dynamicProps": false, "dynamicItems": false };
+function validate45(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {
+  ;
+  let vErrors = null;
+  let errors = 0;
+  const evaluated0 = validate45.evaluated;
+  if (evaluated0.dynamicProps) {
+    evaluated0.props = void 0;
+  }
+  if (evaluated0.dynamicItems) {
+    evaluated0.items = void 0;
+  }
+  if (!validate46(data, { instancePath, parentData, parentDataProperty, rootData, dynamicAnchors })) {
+    vErrors = vErrors === null ? validate46.errors : vErrors.concat(validate46.errors);
+    errors = vErrors.length;
+  }
+  validate45.errors = vErrors;
+  return errors === 0;
+}
+validate45.evaluated = { "props": true, "dynamicProps": false, "dynamicItems": false };
+function validate51(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {
+  ;
+  let vErrors = null;
+  let errors = 0;
+  const evaluated0 = validate51.evaluated;
+  if (evaluated0.dynamicProps) {
+    evaluated0.props = void 0;
+  }
+  if (evaluated0.dynamicItems) {
+    evaluated0.items = void 0;
+  }
+  const _errs0 = errors;
+  if (errors === _errs0) {
+    if (data && typeof data == "object" && !Array.isArray(data)) {
+      let missing0;
+      if (data.api_version === void 0 && (missing0 = "api_version") || data.cursor === void 0 && (missing0 = "cursor") || data.changed === void 0 && (missing0 = "changed")) {
+        validate51.errors = [{ instancePath, schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/UISnapshotEvent/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        return false;
+      } else {
+        const _errs2 = errors;
+        for (const key0 in data) {
+          if (!(key0 === "api_version" || key0 === "cursor" || key0 === "changed")) {
+            validate51.errors = [{ instancePath, schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/UISnapshotEvent/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            return false;
+            break;
+          }
+        }
+        if (_errs2 === errors) {
+          if (data.api_version !== void 0) {
+            let data0 = data.api_version;
+            const _errs3 = errors;
+            if (typeof data0 !== "string") {
+              validate51.errors = [{ instancePath: instancePath + "/api_version", schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/UISnapshotEvent/properties/api_version/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+              return false;
+            }
+            if ("brokerkit.io/operator-ui/v1" !== data0) {
+              validate51.errors = [{ instancePath: instancePath + "/api_version", schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/UISnapshotEvent/properties/api_version/const", keyword: "const", params: { allowedValue: "brokerkit.io/operator-ui/v1" }, message: "must be equal to constant" }];
+              return false;
+            }
+            var valid1 = _errs3 === errors;
+          } else {
+            var valid1 = true;
+          }
+          if (valid1) {
+            if (data.cursor !== void 0) {
+              let data1 = data.cursor;
+              const _errs5 = errors;
+              if (errors === _errs5) {
+                if (typeof data1 === "string") {
+                  if (func1(data1) > 128) {
+                    validate51.errors = [{ instancePath: instancePath + "/cursor", schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/UISnapshotEvent/properties/cursor/maxLength", keyword: "maxLength", params: { limit: 128 }, message: "must NOT have more than 128 characters" }];
+                    return false;
+                  } else {
+                    if (func1(data1) < 1) {
+                      validate51.errors = [{ instancePath: instancePath + "/cursor", schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/UISnapshotEvent/properties/cursor/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                      return false;
+                    }
+                  }
+                } else {
+                  validate51.errors = [{ instancePath: instancePath + "/cursor", schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/UISnapshotEvent/properties/cursor/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                  return false;
+                }
+              }
+              var valid1 = _errs5 === errors;
+            } else {
+              var valid1 = true;
+            }
+            if (valid1) {
+              if (data.changed !== void 0) {
+                const _errs7 = errors;
+                if (typeof data.changed !== "boolean") {
+                  validate51.errors = [{ instancePath: instancePath + "/changed", schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/UISnapshotEvent/properties/changed/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
+                  return false;
+                }
+                var valid1 = _errs7 === errors;
+              } else {
+                var valid1 = true;
+              }
+            }
+          }
+        }
+      }
+    } else {
+      validate51.errors = [{ instancePath, schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/UISnapshotEvent/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      return false;
+    }
+  }
+  validate51.errors = vErrors;
+  return errors === 0;
+}
+validate51.evaluated = { "props": true, "dynamicProps": false, "dynamicItems": false };
+function validate52(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {
+  ;
+  let vErrors = null;
+  let errors = 0;
+  const evaluated0 = validate52.evaluated;
+  if (evaluated0.dynamicProps) {
+    evaluated0.props = void 0;
+  }
+  if (evaluated0.dynamicItems) {
+    evaluated0.items = void 0;
+  }
+  const _errs0 = errors;
+  if (errors === _errs0) {
+    if (data && typeof data == "object" && !Array.isArray(data)) {
+      let missing0;
+      if (data.api_version === void 0 && (missing0 = "api_version") || data.cursor === void 0 && (missing0 = "cursor") || data.pending === void 0 && (missing0 = "pending") || data.healthy === void 0 && (missing0 = "healthy")) {
+        validate52.errors = [{ instancePath, schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/UISummary/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        return false;
+      } else {
+        const _errs2 = errors;
+        for (const key0 in data) {
+          if (!(key0 === "api_version" || key0 === "cursor" || key0 === "pending" || key0 === "healthy")) {
+            validate52.errors = [{ instancePath, schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/UISummary/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            return false;
+            break;
+          }
+        }
+        if (_errs2 === errors) {
+          if (data.api_version !== void 0) {
+            let data0 = data.api_version;
+            const _errs3 = errors;
+            if (typeof data0 !== "string") {
+              validate52.errors = [{ instancePath: instancePath + "/api_version", schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/UISummary/properties/api_version/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+              return false;
+            }
+            if ("brokerkit.io/operator-ui/v1" !== data0) {
+              validate52.errors = [{ instancePath: instancePath + "/api_version", schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/UISummary/properties/api_version/const", keyword: "const", params: { allowedValue: "brokerkit.io/operator-ui/v1" }, message: "must be equal to constant" }];
+              return false;
+            }
+            var valid1 = _errs3 === errors;
+          } else {
+            var valid1 = true;
+          }
+          if (valid1) {
+            if (data.cursor !== void 0) {
+              let data1 = data.cursor;
+              const _errs5 = errors;
+              if (errors === _errs5) {
+                if (typeof data1 === "string") {
+                  if (func1(data1) > 128) {
+                    validate52.errors = [{ instancePath: instancePath + "/cursor", schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/UISummary/properties/cursor/maxLength", keyword: "maxLength", params: { limit: 128 }, message: "must NOT have more than 128 characters" }];
+                    return false;
+                  } else {
+                    if (func1(data1) < 1) {
+                      validate52.errors = [{ instancePath: instancePath + "/cursor", schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/UISummary/properties/cursor/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                      return false;
+                    }
+                  }
+                } else {
+                  validate52.errors = [{ instancePath: instancePath + "/cursor", schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/UISummary/properties/cursor/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                  return false;
+                }
+              }
+              var valid1 = _errs5 === errors;
+            } else {
+              var valid1 = true;
+            }
+            if (valid1) {
+              if (data.pending !== void 0) {
+                let data2 = data.pending;
+                const _errs7 = errors;
+                if (!(typeof data2 == "number" && (!(data2 % 1) && !isNaN(data2)) && isFinite(data2))) {
+                  validate52.errors = [{ instancePath: instancePath + "/pending", schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/UISummary/properties/pending/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
+                  return false;
+                }
+                if (errors === _errs7) {
+                  if (typeof data2 == "number" && isFinite(data2)) {
+                    if (data2 > 9007199254740991 || isNaN(data2)) {
+                      validate52.errors = [{ instancePath: instancePath + "/pending", schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/UISummary/properties/pending/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
+                      return false;
+                    } else {
+                      if (data2 < 0 || isNaN(data2)) {
+                        validate52.errors = [{ instancePath: instancePath + "/pending", schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/UISummary/properties/pending/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
+                        return false;
+                      }
+                    }
+                  }
+                }
+                var valid1 = _errs7 === errors;
+              } else {
+                var valid1 = true;
+              }
+              if (valid1) {
+                if (data.healthy !== void 0) {
+                  const _errs9 = errors;
+                  if (typeof data.healthy !== "boolean") {
+                    validate52.errors = [{ instancePath: instancePath + "/healthy", schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/UISummary/properties/healthy/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
+                    return false;
+                  }
+                  var valid1 = _errs9 === errors;
+                } else {
+                  var valid1 = true;
+                }
+              }
+            }
+          }
+        }
+      }
+    } else {
+      validate52.errors = [{ instancePath, schemaPath: "https://brokerkit.dev/schema/operator/v1/runtime/components#/$defs/UISummary/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      return false;
+    }
+  }
+  validate52.errors = vErrors;
+  return errors === 0;
+}
+validate52.evaluated = { "props": true, "dynamicProps": false, "dynamicItems": false };
+function validate54(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  const evaluated0 = validate54.evaluated;
+  if (evaluated0.dynamicProps) {
+    evaluated0.props = void 0;
+  }
+  if (evaluated0.dynamicItems) {
+    evaluated0.items = void 0;
+  }
+  if (errors === 0) {
+    if (data && typeof data == "object" && !Array.isArray(data)) {
+      let missing0;
+      if (data.source_id === void 0 && (missing0 = "source_id") || data.source_label === void 0 && (missing0 = "source_label") || data.handle === void 0 && (missing0 = "handle") || data.request === void 0 && (missing0 = "request")) {
+        validate54.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        return false;
+      } else {
+        const _errs1 = errors;
+        for (const key0 in data) {
+          if (!(key0 === "source_id" || key0 === "source_label" || key0 === "handle" || key0 === "request")) {
+            validate54.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            return false;
+            break;
+          }
+        }
+        if (_errs1 === errors) {
+          if (data.source_id !== void 0) {
+            let data0 = data.source_id;
+            const _errs2 = errors;
+            if (errors === _errs2) {
+              if (typeof data0 === "string") {
+                if (func1(data0) > 128) {
+                  validate54.errors = [{ instancePath: instancePath + "/source_id", schemaPath: "#/properties/source_id/maxLength", keyword: "maxLength", params: { limit: 128 }, message: "must NOT have more than 128 characters" }];
+                  return false;
+                } else {
+                  if (func1(data0) < 1) {
+                    validate54.errors = [{ instancePath: instancePath + "/source_id", schemaPath: "#/properties/source_id/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                    return false;
+                  }
+                }
+              } else {
+                validate54.errors = [{ instancePath: instancePath + "/source_id", schemaPath: "#/properties/source_id/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                return false;
+              }
+            }
+            var valid0 = _errs2 === errors;
+          } else {
+            var valid0 = true;
+          }
+          if (valid0) {
+            if (data.source_label !== void 0) {
+              let data1 = data.source_label;
+              const _errs4 = errors;
+              if (errors === _errs4) {
+                if (typeof data1 === "string") {
+                  if (func1(data1) > 200) {
+                    validate54.errors = [{ instancePath: instancePath + "/source_label", schemaPath: "#/properties/source_label/maxLength", keyword: "maxLength", params: { limit: 200 }, message: "must NOT have more than 200 characters" }];
+                    return false;
+                  } else {
+                    if (func1(data1) < 1) {
+                      validate54.errors = [{ instancePath: instancePath + "/source_label", schemaPath: "#/properties/source_label/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                      return false;
+                    }
+                  }
+                } else {
+                  validate54.errors = [{ instancePath: instancePath + "/source_label", schemaPath: "#/properties/source_label/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                  return false;
+                }
+              }
+              var valid0 = _errs4 === errors;
+            } else {
+              var valid0 = true;
+            }
+            if (valid0) {
+              if (data.handle !== void 0) {
+                let data2 = data.handle;
+                const _errs6 = errors;
+                if (errors === _errs6) {
+                  if (typeof data2 === "string") {
+                    if (func1(data2) > 256) {
+                      validate54.errors = [{ instancePath: instancePath + "/handle", schemaPath: "#/properties/handle/maxLength", keyword: "maxLength", params: { limit: 256 }, message: "must NOT have more than 256 characters" }];
+                      return false;
+                    } else {
+                      if (func1(data2) < 22) {
+                        validate54.errors = [{ instancePath: instancePath + "/handle", schemaPath: "#/properties/handle/minLength", keyword: "minLength", params: { limit: 22 }, message: "must NOT have fewer than 22 characters" }];
+                        return false;
+                      } else {
+                        if (!pattern4.test(data2)) {
+                          validate54.errors = [{ instancePath: instancePath + "/handle", schemaPath: "#/properties/handle/pattern", keyword: "pattern", params: { pattern: "^[A-Za-z0-9_-]+$" }, message: 'must match pattern "^[A-Za-z0-9_-]+$"' }];
+                          return false;
+                        }
+                      }
+                    }
+                  } else {
+                    validate54.errors = [{ instancePath: instancePath + "/handle", schemaPath: "#/properties/handle/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                    return false;
+                  }
+                }
+                var valid0 = _errs6 === errors;
+              } else {
+                var valid0 = true;
+              }
+              if (valid0) {
+                if (data.request !== void 0) {
+                  const _errs8 = errors;
+                  if (!validate32(data.request, { instancePath: instancePath + "/request", parentData: data, parentDataProperty: "request", rootData, dynamicAnchors })) {
+                    vErrors = vErrors === null ? validate32.errors : vErrors.concat(validate32.errors);
+                    errors = vErrors.length;
+                  }
+                  var valid0 = _errs8 === errors;
+                } else {
+                  var valid0 = true;
+                }
+              }
+            }
+          }
+        }
+      }
+    } else {
+      validate54.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      return false;
+    }
+  }
+  validate54.errors = vErrors;
+  return errors === 0;
+}
+validate54.evaluated = { "props": true, "dynamicProps": false, "dynamicItems": false };
+function validate53(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {
+  ;
+  let vErrors = null;
+  let errors = 0;
+  const evaluated0 = validate53.evaluated;
+  if (evaluated0.dynamicProps) {
+    evaluated0.props = void 0;
+  }
+  if (evaluated0.dynamicItems) {
+    evaluated0.items = void 0;
+  }
+  if (!validate54(data, { instancePath, parentData, parentDataProperty, rootData, dynamicAnchors })) {
+    vErrors = vErrors === null ? validate54.errors : vErrors.concat(validate54.errors);
+    errors = vErrors.length;
+  }
+  validate53.errors = vErrors;
+  return errors === 0;
+}
+validate53.evaluated = { "props": true, "dynamicProps": false, "dynamicItems": false };
+
+// node_modules/openclaw-brokerkit/dist/src/operator-v1.js
+function parseDescriptor(value) {
+  return validated(validateDescriptor, value);
+}
+function parseRequest(value) {
+  return validated(validateBrokerRequest, value);
+}
+function parseRequestPage(value) {
+  return validated(validateRequestPage, value);
+}
+function parseErrorEnvelope(value) {
+  return validateErrorEnvelope(value) ? value : void 0;
+}
+function validated(validate, value) {
+  if (!validate(value))
+    throw new Error("Operator V1 response is invalid");
+  return value;
+}
+
+// src/mlclaw-space-runtime/operator-brokers.ts
+var MAX_CONFIG_BYTES = 64 * 1024;
+var MAX_TOKEN_BYTES = 4096;
+var MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+var DEFAULT_REQUEST_TIMEOUT_MS = 1e4;
+var BROKER_ID = /^[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
+var BrokerOperatorError = class extends Error {
+  constructor(broker, status, code, message) {
+    super(message);
+    this.broker = broker;
+    this.status = status;
+    this.code = code;
+  }
+};
+function requestDeadline(timeoutMs, signal) {
+  const timeout = new AbortController();
+  const timer = setTimeout(() => timeout.abort(), timeoutMs);
+  timer.unref?.();
+  return {
+    signal: signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal,
+    timedOut: () => timeout.signal.aborted,
+    clear: () => clearTimeout(timer)
+  };
+}
+var BrokerOperatorClient = class {
+  constructor(options) {
+    this.options = options;
+    this.baseUrl = options.baseUrl.replace(/\/+$/, "");
+    this.fetchImpl = options.fetch ?? fetch;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    if (!Number.isSafeInteger(this.requestTimeoutMs) || this.requestTimeoutMs < 1) {
+      throw new Error("operator broker request timeout must be a positive integer");
+    }
+  }
+  fetchImpl;
+  baseUrl;
+  requestTimeoutMs;
+  summary() {
+    return { id: this.options.id, label: this.options.label };
+  }
+  discover(signal) {
+    return this.request(
+      "/.well-known/brokerkit-operator",
+      signal ? { signal } : void 0,
+      parseDescriptor,
+      "discovery"
+    );
+  }
+  list(params = {}, signal) {
+    const query = new URLSearchParams();
+    if (params.status) {
+      query.set("status", params.status);
+    }
+    if (params.cursor) {
+      query.set("cursor", params.cursor);
+    }
+    if (params.limit) {
+      query.set("limit", String(params.limit));
+    }
+    const suffix = query.size > 0 ? `?${query}` : "";
+    return this.request(
+      `/api/operator/v1/requests${suffix}`,
+      signal ? { signal } : void 0,
+      parseRequestPage,
+      "request list"
+    );
+  }
+  get(id) {
+    return this.request(
+      `/api/operator/v1/requests/${approvalId(id)}`,
+      void 0,
+      parseRequest,
+      "request"
+    );
+  }
+  decide(id, action, decision) {
+    return this.request(
+      `/api/operator/v1/requests/${approvalId(id)}/${action}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          expected_revision: decision.expectedRevision,
+          idempotency_key: decision.idempotencyKey,
+          on_behalf_of: decision.onBehalfOf,
+          ...decision.durationSeconds !== void 0 || decision.maxUses !== void 0 ? {
+            constraints: {
+              ...decision.durationSeconds !== void 0 ? { duration_seconds: decision.durationSeconds } : {},
+              ...decision.maxUses !== void 0 ? { max_uses: decision.maxUses } : {}
+            }
+          } : {}
+        })
+      },
+      parseRequest,
+      "request"
+    );
+  }
+  async events(lastEventId, signal) {
+    const headers = {
+      accept: "text/event-stream",
+      authorization: `Bearer ${this.options.token}`
+    };
+    const cursor = lastEventId ? `?cursor=${encodeURIComponent(lastEventId)}` : "";
+    const response = await this.fetchImpl(`${this.baseUrl}/api/operator/v1/events${cursor}`, {
+      headers,
+      redirect: "error",
+      ...signal ? { signal } : {}
+    });
+    if (!response.ok) {
+      throw await this.operatorError(response);
+    }
+    if (!response.headers.get("content-type")?.toLowerCase().startsWith("text/event-stream")) {
+      await response.body?.cancel();
+      throw new BrokerOperatorError(
+        this.summary(),
+        502,
+        "invalid_event_stream",
+        "Broker returned an invalid event stream"
+      );
+    }
+    return response;
+  }
+  async request(pathname, init, parser, label) {
+    const headers = new Headers(init?.headers);
+    headers.set("accept", "application/json");
+    headers.set("authorization", `Bearer ${this.options.token}`);
+    const deadline = requestDeadline(this.requestTimeoutMs, init?.signal ?? void 0);
+    try {
+      const response = await this.fetchImpl(`${this.baseUrl}${pathname}`, {
+        ...init ?? {},
+        headers,
+        redirect: "error",
+        signal: deadline.signal
+      });
+      if (!response.ok) {
+        throw await this.operatorError(response);
+      }
+      return validatedBrokerPayload(await boundedJson(response), parser, label);
+    } catch (err) {
+      if (deadline.timedOut()) {
+        throw new BrokerOperatorError(
+          this.summary(),
+          504,
+          "broker_timeout",
+          `${this.options.label} operator request timed out`
+        );
+      }
+      throw err;
+    } finally {
+      deadline.clear();
+    }
+  }
+  async operatorError(response) {
+    const fallback = `${this.options.label} operator request failed`;
+    try {
+      const value = validatedBrokerPayload(await boundedJson(response), parseErrorEnvelope, "error");
+      const message = value?.error.message.trim() || fallback;
+      const code = value?.error.code.trim();
+      return new BrokerOperatorError(this.summary(), response.status, code, message);
+    } catch {
+      return new BrokerOperatorError(this.summary(), response.status, void 0, fallback);
+    }
+  }
+};
+var OperatorBrokerRegistry = class {
+  clients;
+  constructor(configs, fetchImpl) {
+    this.clients = new Map(
+      configs.map((config2) => [
+        config2.id,
+        new BrokerOperatorClient({ ...config2, ...fetchImpl ? { fetch: fetchImpl } : {} })
+      ])
+    );
+  }
+  list() {
+    return [...this.clients.values()].map((client) => client.summary());
+  }
+  get(id) {
+    return this.clients.get(id);
+  }
+  entries() {
+    return [...this.clients.values()].map((client) => [client.summary(), client]);
+  }
+};
+function loadOperatorBrokers(file) {
+  if (!file) {
+    return [];
+  }
+  if (!isAbsolute(file)) {
+    throw new Error("MLCLAW_OPERATOR_BROKERS_FILE must be absolute");
+  }
+  const raw2 = readBoundedFile(file, MAX_CONFIG_BYTES, "operator broker configuration");
+  let parsed;
+  try {
+    parsed = JSON.parse(raw2);
+  } catch {
+    throw new Error("operator broker configuration must be valid JSON");
+  }
+  const root = strictRecord(parsed, ["version", "brokers"], "operator broker configuration");
+  if (root.version !== 1) {
+    throw new Error("operator broker configuration version must be 1");
+  }
+  if (!Array.isArray(root.brokers) || root.brokers.length > 16) {
+    throw new Error("operator broker configuration must contain at most 16 brokers");
+  }
+  const ids = /* @__PURE__ */ new Set();
+  const urls = /* @__PURE__ */ new Set();
+  return root.brokers.map((value, index) => {
+    const entry = strictRecord(value, ["id", "label", "url", "token_file"], `broker ${index}`);
+    const id = requiredString(entry.id, `broker ${index} id`);
+    if (!BROKER_ID.test(id) || ids.has(id)) {
+      throw new Error(`broker ${index} id is invalid or duplicated`);
+    }
+    ids.add(id);
+    const label = requiredString(entry.label, `broker ${index} label`);
+    if ([...label].length > 80 || new RegExp("\\p{Cc}", "u").test(label)) {
+      throw new Error(`broker ${index} label is invalid`);
+    }
+    const baseUrl = operatorOrigin(requiredString(entry.url, `broker ${index} url`));
+    if (urls.has(baseUrl)) {
+      throw new Error(`broker ${index} URL is duplicated`);
+    }
+    urls.add(baseUrl);
+    const tokenFile = requiredString(entry.token_file, `broker ${index} token_file`);
+    if (!isAbsolute(tokenFile)) {
+      throw new Error(`broker ${index} token_file must be absolute`);
+    }
+    const token = readBoundedFile(tokenFile, MAX_TOKEN_BYTES, `broker ${id} token`).trim();
+    if (!/^[\x21-\x7e]{24,4096}$/u.test(token)) {
+      throw new Error(`broker ${id} token is invalid`);
+    }
+    return { id, label, baseUrl, token };
+  });
+}
+function operatorOrigin(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("broker URL must be an absolute HTTP URL");
+  }
+  const supportedProtocol = (/* @__PURE__ */ new Set(["http:", "https:"])).has(url.protocol);
+  const hasAuthorityOrSuffix = [url.username, url.password, url.search, url.hash].some(Boolean);
+  const hasPath = !["", "/"].includes(url.pathname);
+  if (!supportedProtocol || hasAuthorityOrSuffix || hasPath) {
+    throw new Error("broker URL must be one HTTP origin without credentials, path, query, or fragment");
+  }
+  return url.origin;
+}
+function strictRecord(value, keys, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  const record = value;
+  if (Object.keys(record).some((key) => !keys.includes(key)) || keys.some((key) => !(key in record))) {
+    throw new Error(`${label} has missing or unknown fields`);
+  }
+  return record;
+}
+function requiredString(value, label) {
+  if (typeof value !== "string" || !value || value !== value.trim()) {
+    throw new Error(`${label} must be a non-empty trimmed string`);
+  }
+  return value;
+}
+function readBoundedFile(file, maximum, label) {
+  let value;
+  try {
+    value = readFileSync(file, "utf8");
+  } catch {
+    throw new Error(`${label} could not be read`);
+  }
+  if (Buffer.byteLength(value) > maximum) {
+    throw new Error(`${label} is too large`);
+  }
+  return value;
+}
+function approvalId(id) {
+  return encodeURIComponent(id);
+}
+async function boundedJson(response) {
+  if (!response.body) {
+    throw new Error("broker response body is empty");
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    size += value.byteLength;
+    if (size > MAX_RESPONSE_BYTES) {
+      await reader.cancel();
+      throw new Error("broker response is too large");
+    }
+    chunks.push(value);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+function validatedBrokerPayload(value, parser, label) {
+  try {
+    return parser(value);
+  } catch {
+    throw new Error(`broker ${label} response is invalid`);
+  }
+}
+
+// src/mlclaw-space-runtime/local-access.ts
+import { createHmac, timingSafeEqual } from "node:crypto";
+var LOCAL_ACCESS_CONTEXT = "mlclaw-local-access-v1";
+function deriveLocalAccessToken(sessionSecret) {
+  return createHmac("sha256", sessionSecret).update(LOCAL_ACCESS_CONTEXT).digest("base64url");
+}
+function localAccessTokenMatches(candidate, expected) {
+  const left = Buffer.from(candidate);
+  const right = Buffer.from(expected);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
+// src/mlclaw-space-runtime/config.ts
+function loadConfig(env = process.env) {
+  const port = integer(env.PORT ?? env.MLCLAW_SPACE_PORT, 7860);
+  const openclawPort = integer(env.MLCLAW_OPENCLAW_PORT ?? env.OPENCLAW_GATEWAY_PORT, 7861);
+  const mcpPort = integer(env.MLCLAW_MCP_PORT, 7862);
+  const spaceId = trim(env.SPACE_ID);
+  const canonicalSpaceId = trim(env.MLCLAW_CANONICAL_SPACE_ID) ?? "osolmaz/mlclaw";
+  const canonicalCreatorUserId = trim(env.MLCLAW_CANONICAL_CREATOR_USER_ID);
+  const spaceCreatorUserId = trim(env.SPACE_CREATOR_USER_ID);
+  const mode = resolveMode({
+    env,
+    spaceId,
+    canonicalSpaceId,
+    canonicalCreatorUserId,
+    spaceCreatorUserId
+  });
+  const owner = ownerFromSpaceId(spaceId);
+  const stateBucket = trim(env.OPENCLAW_HF_STATE_BUCKET);
+  const gatewayLocation = trim(env.MLCLAW_GATEWAY_LOCATION);
+  const localAccessUser = gatewayLocation === "local" ? trim(env.MLCLAW_LOCAL_ACCESS_USER) ?? ownerFromRepoId(stateBucket) : void 0;
+  const configuredAllowedUsers = splitUsers(env.MLCLAW_ALLOWED_USERS ?? env.ALLOWED_USERS);
+  const configuredAdmins = splitUsers(env.MLCLAW_ADMINS);
+  const resolvedAdmins = uniqueUsers([
+    ...configuredAdmins.length > 0 ? configuredAdmins : owner ? [owner] : configuredAllowedUsers.slice(0, 1),
+    ...localAccessUser ? [localAccessUser] : []
+  ]);
+  const allowedUsers = uniqueUsers([...configuredAllowedUsers, ...resolvedAdmins, ...owner ? [owner] : []]);
+  const publicUrl = publicUrlFromEnv(env, port);
+  const accessOrigins = accessOriginsFromEnv(env, publicUrl);
+  const sessionSecret = trim(env.MLCLAW_SESSION_SECRET ?? env.SESSION_SECRET) ?? randomBytes(48).toString("base64url");
+  const configuredCredentialKey = trim(env.MLCLAW_CREDENTIAL_KEY);
+  if (mode === "app" && !configuredCredentialKey) {
+    throw new Error("MLCLAW_CREDENTIAL_KEY is required in app mode; run mlclaw doctor --fix");
+  }
+  const credentialKey = configuredCredentialKey ?? randomBytes(32).toString("base64url");
+  const openclawCommand = trim(env.MLCLAW_OPENCLAW_COMMAND) ?? "openclaw";
+  const openclawArgs = splitArgs(env.MLCLAW_OPENCLAW_ARGS) ?? ["gateway"];
+  const runtimeSettingsFile = trim(env.MLCLAW_RUNTIME_SETTINGS_FILE) ?? "/home/node/.local/share/mlclaw/live/.mlclaw/settings.json";
+  const stateMountDir = trim(env.MLCLAW_STATE_MOUNT_DIR);
+  const statePrefix = trim(env.OPENCLAW_HF_STATE_PREFIX);
+  const mcpCredentialFile = trim(env.MLCLAW_MCP_CREDENTIAL_FILE) ?? (stateMountDir ? `${stateMountDir.replace(/\/+$/, "")}/${normalizeBucketPrefix(statePrefix)}/.mlclaw/mcp-oauth.enc` : `${pathDirname(runtimeSettingsFile)}/mcp-oauth.enc`);
+  const openaiCredentialStoreFile = trim(env.MLCLAW_OPENAI_CREDENTIAL_STORE_FILE) ?? (stateMountDir ? `${stateMountDir.replace(/\/+$/, "")}/${normalizeBucketPrefix(statePrefix)}/.mlclaw/openai-api-key.enc` : `${pathDirname(pathDirname(runtimeSettingsFile))}/.mlclaw-protected/control/openai-api-key.enc`);
+  const runtimeSettings2 = readRuntimeSettings(runtimeSettingsFile);
+  const model = runtimeSettings2.model ?? trim(env.OPENCLAW_MODEL) ?? DEFAULT_MODEL;
+  const agentName = trim(env.OPENCLAW_AGENT_NAME);
+  return {
+    port,
+    openclawPort,
+    mcpPort,
+    openclawHost: trim(env.MLCLAW_OPENCLAW_HOST) ?? "127.0.0.1",
+    openclawUid: integer(env.MLCLAW_OPENCLAW_UID, 1e3),
+    openclawGid: integer(env.MLCLAW_OPENCLAW_GID, 1e3),
+    publicUrl,
+    accessOrigins,
+    providerUrl: trim(env.OPENID_PROVIDER_URL) ?? "https://huggingface.co",
+    oauthClientId: trim(env.OAUTH_CLIENT_ID),
+    oauthClientSecret: trim(env.OAUTH_CLIENT_SECRET),
+    sessionSecret,
+    sessionSecretGenerated: !trim(env.MLCLAW_SESSION_SECRET ?? env.SESSION_SECRET),
+    credentialKey,
+    credentialKeyGenerated: !configuredCredentialKey,
+    cookieSecure: env.MLCLAW_COOKIE_SECURE === "0" ? false : !publicUrl.startsWith("http://"),
+    sessionCookieName: gatewayLocation === "local" ? localSessionCookieName(trim(env.MLCLAW_RUNTIME_ID) ?? publicUrl) : SESSION_COOKIE_PREFIX,
+    spaceId,
+    canonicalSpaceId,
+    canonicalCreatorUserId,
+    spaceCreatorUserId,
+    allowedUsers,
+    adminUsers: resolvedAdmins,
+    allowAnySignedIn: env.MLCLAW_ALLOW_ANY_SIGNED_IN === "1" || env.MLCLAW_ALLOW_ANY_SIGNED_IN === "true",
+    localAccessUser,
+    localAccessToken: gatewayLocation === "local" && localAccessUser ? deriveLocalAccessToken(sessionSecret) : void 0,
+    mode,
+    hfToken: readOptionalSecret(trim(env.MLCLAW_TRUSTED_HF_TOKEN_FILE)) ?? trim(env.HF_TOKEN ?? env.HUGGINGFACE_HUB_TOKEN),
+    routerToken: trim(env.MLCLAW_ROUTER_TOKEN ?? env.HF_ROUTER_TOKEN),
+    brokerAgentUrl: trim(env.MLCLAW_HF_BROKER_URL),
+    brokerAgentSecret: readOptionalSecret(trim(env.MLCLAW_HF_BROKER_AGENT_SECRET_FILE)),
+    brokerAgentSecretFile: trim(env.MLCLAW_HF_BROKER_AGENT_SECRET_FILE),
+    operatorBrokers: loadOperatorBrokers(trim(env.MLCLAW_OPERATOR_BROKERS_FILE)),
+    brokerKitPopoverDecisions: env.MLCLAW_BROKERKIT_POPOVER_DECISIONS !== "0" && env.MLCLAW_BROKERKIT_POPOVER_DECISIONS !== "false",
+    hubUrl: trim(env.HF_ENDPOINT) ?? "https://huggingface.co",
+    openaiCredentialFile: trim(env.MLCLAW_OPENAI_CREDENTIAL_FILE) ?? "/tmp/mlclaw-secrets/openai.env",
+    openaiCredentialStoreFile,
+    mcpCredentialFile,
+    hfMcpUrl: trim(env.MLCLAW_HF_MCP_URL) ?? "https://huggingface.co/mcp?bouquet=hf",
+    researchMcpUrl: trim(env.MLCLAW_RESEARCH_MCP_URL) ?? "https://evalstate-research-agent-two.hf.space/mcp",
+    researchTimeoutMs: integer(env.MLCLAW_RESEARCH_TIMEOUT_MS, 30 * 60 * 1e3),
+    researchPollMs: integer(env.MLCLAW_RESEARCH_POLL_MS, 1500),
+    runtimeSettingsFile,
+    openclawConfigPath: trim(env.OPENCLAW_CONFIG_PATH) ?? "/home/node/.local/share/mlclaw/live/.openclaw/openclaw.json",
+    openclawCommand,
+    openclawArgs,
+    brokerKitPluginPath: trim(env.MLCLAW_BROKERKIT_PLUGIN_PATH) ?? "/opt/openclaw-plugins/node_modules/openclaw-brokerkit",
+    agentName,
+    model,
+    modelChoices: runtimeSettings2.modelChoices ?? parseModelChoicesEnv(env.MLCLAW_MODEL_CHOICES, model),
+    routerModelsUrl: trim(env.MLCLAW_ROUTER_MODELS_URL) ?? "https://router.huggingface.co/v1/models",
+    stateBucket,
+    stateMountDir,
+    statePrefix,
+    gatewayLocation,
+    runtimeImage: trim(env.MLCLAW_RUNTIME_IMAGE),
+    runtimeId: trim(env.MLCLAW_RUNTIME_ID),
+    templateRev: trim(env.MLCLAW_TEMPLATE_REV),
+    assetsDir: trim(env.MLCLAW_ASSETS_DIR) ?? "/app/assets",
+    branding: resolveBranding(env, agentName)
+  };
+}
+var SESSION_COOKIE_PREFIX = "mlclaw_session";
+function localSessionCookieName(identity) {
+  return `${SESSION_COOKIE_PREFIX}_${createHash("sha256").update(identity).digest("hex").slice(0, 12)}`;
+}
+function accessOriginsFromEnv(env, publicUrl) {
+  const configured = (env.MLCLAW_ACCESS_ORIGINS ?? "").split(",").map((value) => value.trim()).filter(Boolean);
+  if (configured.length > 8) {
+    throw new Error("MLCLAW_ACCESS_ORIGINS supports at most 8 origins");
+  }
+  const origins = [.../* @__PURE__ */ new Set([publicUrl, ...configured.map(parseAccessOrigin)])];
+  if (origins.length > 8) {
+    throw new Error("MLCLAW_ACCESS_ORIGINS supports at most 8 origins including MLCLAW_PUBLIC_URL");
+  }
+  return origins;
+}
+function parseAccessOrigin(value) {
+  const url = new URL(value);
+  if (url.protocol !== "http:" && url.protocol !== "https:" || url.username || url.password || url.hostname.includes("*") || url.pathname !== "/" || url.search || url.hash) {
+    throw new Error(
+      "MLCLAW_ACCESS_ORIGINS entries must be HTTP origins without credentials, wildcard hosts, paths, queries, or fragments"
+    );
+  }
+  return url.origin;
+}
+function readOptionalSecret(file) {
+  if (!file) {
+    return void 0;
+  }
+  try {
+    return trim(readFileSync2(file, "utf8"));
+  } catch {
+    return void 0;
+  }
+}
+function integrationCredentialSlot(config2) {
+  return config2.adminUsers[0];
+}
+function pathDirname(file) {
+  const slash = file.lastIndexOf("/");
+  return slash > 0 ? file.slice(0, slash) : ".";
+}
+function resolveMode(params) {
+  if (params.env.MLCLAW_FORCE_TEMPLATE === "1") {
+    return "template";
+  }
+  if (params.env.MLCLAW_FORCE_APP === "1") {
+    return "app";
+  }
+  const isCanonicalSpace = Boolean(params.spaceId && params.spaceId === params.canonicalSpaceId);
+  if (!isCanonicalSpace) {
+    return "app";
+  }
+  if (!params.canonicalCreatorUserId || !params.spaceCreatorUserId) {
+    return "template";
+  }
+  return params.canonicalCreatorUserId === params.spaceCreatorUserId ? "template" : "app";
+}
+function publicUrlFromEnv(env, port) {
+  const explicit = trim(env.MLCLAW_PUBLIC_URL);
+  if (explicit) {
+    const url = new URL(explicit);
+    if (url.protocol !== "http:" && url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+      throw new Error("MLCLAW_PUBLIC_URL must be one HTTP origin without credentials, path, query, or fragment");
+    }
+    return url.origin;
+  }
+  const host = trim(env.SPACE_HOST);
+  if (host) {
+    return host.startsWith("http") ? host.replace(/\/+$/, "") : `https://${host.replace(/\/+$/, "")}`;
+  }
+  return `http://127.0.0.1:${port}`;
+}
+function ownerFromSpaceId(spaceId) {
+  return ownerFromRepoId(spaceId);
+}
+function ownerFromRepoId(repoId) {
+  const owner = repoId?.split("/")[0]?.trim();
+  return owner || void 0;
+}
+function integer(value, fallback) {
+  if (!value) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+function splitUsers(value) {
+  return (value ?? "").split(",").map((item) => item.trim()).filter(Boolean);
+}
+function uniqueUsers(users) {
+  return [...new Set(users)];
+}
+function splitArgs(value) {
+  const trimmed = trim(value);
+  return trimmed ? trimmed.split(/\s+/).filter(Boolean) : void 0;
+}
+function trim(value) {
+  const trimmed = value?.trim();
+  return trimmed || void 0;
+}
+function readRuntimeSettings(file) {
+  try {
+    const parsed = JSON.parse(readFileSync2(file, "utf8"));
+    const model = typeof parsed.model === "string" ? parsed.model.trim() : void 0;
+    if (!model) {
+      return {};
+    }
+    const modelChoices = normalizeModelChoices(parsed.modelChoices, model);
+    return {
+      model,
+      ...modelChoices ? { modelChoices } : {}
+    };
+  } catch {
+    return {};
+  }
+}
+
+// src/mlclaw-space-runtime/server.ts
+import { spawn } from "node:child_process";
+import http3 from "node:http";
+import { Readable as Readable2 } from "node:stream";
+
+// src/mlclaw-space-runtime/app.ts
+import fs3 from "node:fs/promises";
+import path3 from "node:path";
+
+// node_modules/hono/dist/compose.js
+var compose = (middleware, onError, onNotFound) => {
+  return (context, next) => {
+    let index = -1;
+    return dispatch(0);
+    async function dispatch(i) {
+      if (i <= index) {
+        throw new Error("next() called multiple times");
+      }
+      index = i;
+      let res;
+      let isError = false;
+      let handler;
+      if (middleware[i]) {
+        handler = middleware[i][0][0];
+        context.req.routeIndex = i;
+      } else {
+        handler = i === middleware.length && next || void 0;
+      }
+      if (handler) {
+        try {
+          res = await handler(context, () => dispatch(i + 1));
+        } catch (err) {
+          if (err instanceof Error && onError) {
+            context.error = err;
+            res = await onError(err, context);
+            isError = true;
+          } else {
+            throw err;
+          }
+        }
+      } else {
+        if (context.finalized === false && onNotFound) {
+          res = await onNotFound(context);
+        }
+      }
+      if (res && (context.finalized === false || isError)) {
+        context.res = res;
+      }
+      return context;
+    }
+  };
+};
+
+// node_modules/hono/dist/request/constants.js
+var GET_MATCH_RESULT = /* @__PURE__ */ Symbol();
+
+// node_modules/hono/dist/utils/buffer.js
+var bufferToFormData = (arrayBuffer, contentType2) => {
+  const response = new Response(arrayBuffer, {
+    headers: {
+      // Normalize the media type (case-insensitive) while keeping parameters like the boundary
+      "Content-Type": contentType2.replace(/^[^;]+/, (mediaType) => mediaType.toLowerCase())
+    }
+  });
+  return response.formData();
+};
+
+// node_modules/hono/dist/utils/body.js
+var isRawRequest = (request) => "headers" in request;
+var parseBody = async (request, options = /* @__PURE__ */ Object.create(null)) => {
+  const { all = false, dot = false } = options;
+  const headers = isRawRequest(request) ? request.headers : request.raw.headers;
+  const contentType2 = headers.get("Content-Type");
+  const mediaType = contentType2?.split(";")[0].trim().toLowerCase();
+  if (mediaType === "multipart/form-data" || mediaType === "application/x-www-form-urlencoded") {
+    return parseFormData(request, { all, dot });
+  }
+  return {};
+};
+async function parseFormData(request, options) {
+  const headers = isRawRequest(request) ? request.headers : request.raw.headers;
+  const arrayBuffer = await request.arrayBuffer();
+  const formDataPromise = bufferToFormData(arrayBuffer, headers.get("Content-Type") || "");
+  if (!isRawRequest(request)) {
+    request.bodyCache.formData = formDataPromise;
+  }
+  const formData = await formDataPromise;
+  if (formData) {
+    return convertFormDataToBodyData(formData, options);
+  }
+  return {};
+}
+function convertFormDataToBodyData(formData, options) {
+  const form = /* @__PURE__ */ Object.create(null);
+  formData.forEach((value, key) => {
+    const shouldParseAllValues = options.all || key.endsWith("[]");
+    if (!shouldParseAllValues) {
+      form[key] = value;
+    } else {
+      handleParsingAllValues(form, key, value);
+    }
+  });
+  if (options.dot) {
+    Object.entries(form).forEach(([key, value]) => {
+      const shouldParseDotValues = key.includes(".");
+      if (shouldParseDotValues) {
+        handleParsingNestedValues(form, key, value);
+        delete form[key];
+      }
+    });
+  }
+  return form;
+}
+var handleParsingAllValues = (form, key, value) => {
+  if (form[key] !== void 0) {
+    if (Array.isArray(form[key])) {
+      ;
+      form[key].push(value);
+    } else {
+      form[key] = [form[key], value];
+    }
+  } else {
+    if (!key.endsWith("[]")) {
+      form[key] = value;
+    } else {
+      form[key] = [value];
+    }
+  }
+};
+var handleParsingNestedValues = (form, key, value) => {
+  if (/(?:^|\.)__proto__\./.test(key)) {
+    return;
+  }
+  let nestedForm = form;
+  const keys = key.split(".");
+  keys.forEach((key2, index) => {
+    if (index === keys.length - 1) {
+      nestedForm[key2] = value;
+    } else {
+      if (!nestedForm[key2] || typeof nestedForm[key2] !== "object" || Array.isArray(nestedForm[key2]) || nestedForm[key2] instanceof File) {
+        nestedForm[key2] = /* @__PURE__ */ Object.create(null);
+      }
+      nestedForm = nestedForm[key2];
+    }
+  });
+};
+
+// node_modules/hono/dist/utils/url.js
+var splitPath = (path5) => {
+  const paths = path5.split("/");
+  if (paths[0] === "") {
+    paths.shift();
+  }
+  return paths;
+};
+var splitRoutingPath = (routePath) => {
+  const { groups, path: path5 } = extractGroupsFromPath(routePath);
+  const paths = splitPath(path5);
+  return replaceGroupMarks(paths, groups);
+};
+var extractGroupsFromPath = (path5) => {
+  const groups = [];
+  path5 = path5.replace(/\{[^}]+\}/g, (match2, index) => {
+    const mark = `@${index}`;
+    groups.push([mark, match2]);
+    return mark;
+  });
+  return { groups, path: path5 };
+};
+var replaceGroupMarks = (paths, groups) => {
+  for (let i = groups.length - 1; i >= 0; i--) {
+    const [mark] = groups[i];
+    for (let j = paths.length - 1; j >= 0; j--) {
+      if (paths[j].includes(mark)) {
+        paths[j] = paths[j].replace(mark, groups[i][1]);
+        break;
+      }
+    }
+  }
+  return paths;
+};
+var patternCache = {};
+var getPattern = (label, next) => {
+  if (label === "*") {
+    return "*";
+  }
+  const match2 = label.match(/^\:([^\{\}]+)(?:\{(.+)\})?$/);
+  if (match2) {
+    const cacheKey = `${label}#${next}`;
+    if (!patternCache[cacheKey]) {
+      if (match2[2]) {
+        patternCache[cacheKey] = next && next[0] !== ":" && next[0] !== "*" ? [cacheKey, match2[1], new RegExp(`^${match2[2]}(?=/${next})`)] : [label, match2[1], new RegExp(`^${match2[2]}$`)];
+      } else {
+        patternCache[cacheKey] = [label, match2[1], true];
+      }
+    }
+    return patternCache[cacheKey];
+  }
+  return null;
+};
+var tryDecode = (str, decoder) => {
+  try {
+    return decoder(str);
+  } catch {
+    return str.replace(/(?:%[0-9A-Fa-f]{2})+/g, (match2) => {
+      try {
+        return decoder(match2);
+      } catch {
+        return match2;
+      }
+    });
+  }
+};
+var tryDecodeURI = (str) => tryDecode(str, decodeURI);
+var getPath = (request) => {
+  const url = request.url;
+  const start = url.indexOf("/", url.indexOf(":") + 4);
+  let i = start;
+  for (; i < url.length; i++) {
+    const charCode = url.charCodeAt(i);
+    if (charCode === 37) {
+      const queryIndex = url.indexOf("?", i);
+      const hashIndex = url.indexOf("#", i);
+      const end = queryIndex === -1 ? hashIndex === -1 ? void 0 : hashIndex : hashIndex === -1 ? queryIndex : Math.min(queryIndex, hashIndex);
+      const path5 = url.slice(start, end);
+      return tryDecodeURI(path5.includes("%25") ? path5.replace(/%25/g, "%2525") : path5);
+    } else if (charCode === 63 || charCode === 35) {
+      break;
+    }
+  }
+  return url.slice(start, i);
+};
+var getPathNoStrict = (request) => {
+  const result = getPath(request);
+  return result.length > 1 && result.at(-1) === "/" ? result.slice(0, -1) : result;
+};
+var mergePath = (base, sub, ...rest) => {
+  if (rest.length) {
+    sub = mergePath(sub, ...rest);
+  }
+  return `${base?.[0] === "/" ? "" : "/"}${base}${sub === "/" ? "" : `${base?.at(-1) === "/" ? "" : "/"}${sub?.[0] === "/" ? sub.slice(1) : sub}`}`;
+};
+var checkOptionalParameter = (path5) => {
+  if (path5.charCodeAt(path5.length - 1) !== 63 || !path5.includes(":")) {
+    return null;
+  }
+  const segments = path5.split("/");
+  const results = [];
+  let basePath = "";
+  segments.forEach((segment) => {
+    if (segment !== "" && !/\:/.test(segment)) {
+      basePath += "/" + segment;
+    } else if (/\:/.test(segment)) {
+      if (/\?/.test(segment)) {
+        if (results.length === 0 && basePath === "") {
+          results.push("/");
+        } else {
+          results.push(basePath);
+        }
+        const optionalSegment = segment.replace("?", "");
+        basePath += "/" + optionalSegment;
+        results.push(basePath);
+      } else {
+        basePath += "/" + segment;
+      }
+    }
+  });
+  return results.filter((v, i, a) => a.indexOf(v) === i);
+};
+var _decodeURI = (value) => {
+  if (!/[%+]/.test(value)) {
+    return value;
+  }
+  if (value.indexOf("+") !== -1) {
+    value = value.replace(/\+/g, " ");
+  }
+  return value.indexOf("%") !== -1 ? tryDecode(value, decodeURIComponent_) : value;
+};
+var _getQueryParam = (url, key, multiple) => {
+  let encoded;
+  if (!multiple && key && !/[%+]/.test(key)) {
+    let keyIndex2 = url.indexOf("?", 8);
+    if (keyIndex2 === -1) {
+      return void 0;
+    }
+    if (!url.startsWith(key, keyIndex2 + 1)) {
+      keyIndex2 = url.indexOf(`&${key}`, keyIndex2 + 1);
+    }
+    while (keyIndex2 !== -1) {
+      const trailingKeyCode = url.charCodeAt(keyIndex2 + key.length + 1);
+      if (trailingKeyCode === 61) {
+        const valueIndex = keyIndex2 + key.length + 2;
+        const endIndex = url.indexOf("&", valueIndex);
+        return _decodeURI(url.slice(valueIndex, endIndex === -1 ? void 0 : endIndex));
+      } else if (trailingKeyCode == 38 || isNaN(trailingKeyCode)) {
+        return "";
+      }
+      keyIndex2 = url.indexOf(`&${key}`, keyIndex2 + 1);
+    }
+    encoded = /[%+]/.test(url);
+    if (!encoded) {
+      return void 0;
+    }
+  }
+  const results = {};
+  encoded ??= /[%+]/.test(url);
+  let keyIndex = url.indexOf("?", 8);
+  while (keyIndex !== -1) {
+    const nextKeyIndex = url.indexOf("&", keyIndex + 1);
+    let valueIndex = url.indexOf("=", keyIndex);
+    if (valueIndex > nextKeyIndex && nextKeyIndex !== -1) {
+      valueIndex = -1;
+    }
+    let name = url.slice(
+      keyIndex + 1,
+      valueIndex === -1 ? nextKeyIndex === -1 ? void 0 : nextKeyIndex : valueIndex
+    );
+    if (encoded) {
+      name = _decodeURI(name);
+    }
+    keyIndex = nextKeyIndex;
+    if (name === "") {
+      continue;
+    }
+    let value;
+    if (valueIndex === -1) {
+      value = "";
+    } else {
+      value = url.slice(valueIndex + 1, nextKeyIndex === -1 ? void 0 : nextKeyIndex);
+      if (encoded) {
+        value = _decodeURI(value);
+      }
+    }
+    if (multiple) {
+      if (!(results[name] && Array.isArray(results[name]))) {
+        results[name] = [];
+      }
+      ;
+      results[name].push(value);
+    } else {
+      results[name] ??= value;
+    }
+  }
+  return key ? results[key] : results;
+};
+var getQueryParam = _getQueryParam;
+var getQueryParams = (url, key) => {
+  return _getQueryParam(url, key, true);
+};
+var decodeURIComponent_ = decodeURIComponent;
+
+// node_modules/hono/dist/request.js
+var tryDecodeURIComponent = (str) => tryDecode(str, decodeURIComponent_);
+var HonoRequest = class {
+  /**
+   * `.raw` can get the raw Request object.
+   *
+   * @see {@link https://hono.dev/docs/api/request#raw}
+   *
+   * @example
+   * ```ts
+   * // For Cloudflare Workers
+   * app.post('/', async (c) => {
+   *   const metadata = c.req.raw.cf?.hostMetadata?
+   *   ...
+   * })
+   * ```
+   */
+  raw;
+  #validatedData;
+  // Short name of validatedData
+  #matchResult;
+  routeIndex = 0;
+  /**
+   * `.path` can get the pathname of the request.
+   *
+   * @see {@link https://hono.dev/docs/api/request#path}
+   *
+   * @example
+   * ```ts
+   * app.get('/about/me', (c) => {
+   *   const pathname = c.req.path // `/about/me`
+   * })
+   * ```
+   */
+  path;
+  bodyCache = {};
+  constructor(request, path5 = "/", matchResult = [[]]) {
+    this.raw = request;
+    this.path = path5;
+    this.#matchResult = matchResult;
+    this.#validatedData = {};
+  }
+  param(key) {
+    return key ? this.#getDecodedParam(key) : this.#getAllDecodedParams();
+  }
+  #getDecodedParam(key) {
+    const paramKey = this.#matchResult[0][this.routeIndex][1][key];
+    const param = this.#getParamValue(paramKey);
+    return param && /\%/.test(param) ? tryDecodeURIComponent(param) : param;
+  }
+  #getAllDecodedParams() {
+    const decoded = {};
+    const keys = Object.keys(this.#matchResult[0][this.routeIndex][1]);
+    for (const key of keys) {
+      const value = this.#getParamValue(this.#matchResult[0][this.routeIndex][1][key]);
+      if (value !== void 0) {
+        decoded[key] = /\%/.test(value) ? tryDecodeURIComponent(value) : value;
+      }
+    }
+    return decoded;
+  }
+  #getParamValue(paramKey) {
+    return this.#matchResult[1] ? this.#matchResult[1][paramKey] : paramKey;
+  }
+  query(key) {
+    return getQueryParam(this.url, key);
+  }
+  queries(key) {
+    return getQueryParams(this.url, key);
+  }
+  header(name) {
+    if (name) {
+      return this.raw.headers.get(name) ?? void 0;
+    }
+    const headerData = {};
+    this.raw.headers.forEach((value, key) => {
+      headerData[key] = value;
+    });
+    return headerData;
+  }
+  async parseBody(options) {
+    return parseBody(this, options);
+  }
+  #cachedBody = (key) => {
+    const { bodyCache, raw: raw2 } = this;
+    const cachedBody = bodyCache[key];
+    if (cachedBody) {
+      return cachedBody;
+    }
+    const anyCachedKey = Object.keys(bodyCache)[0];
+    if (anyCachedKey) {
+      return bodyCache[anyCachedKey].then((body) => {
+        if (anyCachedKey === "json") {
+          body = JSON.stringify(body);
+        }
+        return new Response(body)[key]();
+      });
+    }
+    return bodyCache[key] = raw2[key]();
+  };
+  /**
+   * `.json()` can parse Request body of type `application/json`
+   *
+   * @see {@link https://hono.dev/docs/api/request#json}
+   *
+   * @example
+   * ```ts
+   * app.post('/entry', async (c) => {
+   *   const body = await c.req.json()
+   * })
+   * ```
+   */
+  json() {
+    return this.#cachedBody("text").then((text) => JSON.parse(text));
+  }
+  /**
+   * `.text()` can parse Request body of type `text/plain`
+   *
+   * @see {@link https://hono.dev/docs/api/request#text}
+   *
+   * @example
+   * ```ts
+   * app.post('/entry', async (c) => {
+   *   const body = await c.req.text()
+   * })
+   * ```
+   */
+  text() {
+    return this.#cachedBody("text");
+  }
+  /**
+   * `.arrayBuffer()` parse Request body as an `ArrayBuffer`
+   *
+   * @see {@link https://hono.dev/docs/api/request#arraybuffer}
+   *
+   * @example
+   * ```ts
+   * app.post('/entry', async (c) => {
+   *   const body = await c.req.arrayBuffer()
+   * })
+   * ```
+   */
+  arrayBuffer() {
+    return this.#cachedBody("arrayBuffer");
+  }
+  /**
+   * `.bytes()` parses the request body as a `Uint8Array`.
+   *
+   * @see {@link https://hono.dev/docs/api/request#bytes}
+   *
+   * @example
+   * ```ts
+   * app.post('/entry', async (c) => {
+   *   const body = await c.req.bytes()
+   * })
+   * ```
+   */
+  bytes() {
+    return this.#cachedBody("arrayBuffer").then((buffer) => new Uint8Array(buffer));
+  }
+  /**
+   * Parses the request body as a `Blob`.
+   * @example
+   * ```ts
+   * app.post('/entry', async (c) => {
+   *   const body = await c.req.blob();
+   * });
+   * ```
+   * @see https://hono.dev/docs/api/request#blob
+   */
+  blob() {
+    return this.#cachedBody("blob");
+  }
+  /**
+   * Parses the request body as `FormData`.
+   * @example
+   * ```ts
+   * app.post('/entry', async (c) => {
+   *   const body = await c.req.formData();
+   * });
+   * ```
+   * @see https://hono.dev/docs/api/request#formdata
+   */
+  formData() {
+    return this.#cachedBody("formData");
+  }
+  /**
+   * Adds validated data to the request.
+   *
+   * @param target - The target of the validation.
+   * @param data - The validated data to add.
+   */
+  addValidatedData(target, data) {
+    this.#validatedData[target] = data;
+  }
+  valid(target) {
+    return this.#validatedData[target];
+  }
+  /**
+   * `.url()` can get the request url strings.
+   *
+   * @see {@link https://hono.dev/docs/api/request#url}
+   *
+   * @example
+   * ```ts
+   * app.get('/about/me', (c) => {
+   *   const url = c.req.url // `http://localhost:8787/about/me`
+   *   ...
+   * })
+   * ```
+   */
+  get url() {
+    return this.raw.url;
+  }
+  /**
+   * `.method()` can get the method name of the request.
+   *
+   * @see {@link https://hono.dev/docs/api/request#method}
+   *
+   * @example
+   * ```ts
+   * app.get('/about/me', (c) => {
+   *   const method = c.req.method // `GET`
+   * })
+   * ```
+   */
+  get method() {
+    return this.raw.method;
+  }
+  get [GET_MATCH_RESULT]() {
+    return this.#matchResult;
+  }
+  /**
+   * `.matchedRoutes()` can return a matched route in the handler
+   *
+   * @deprecated
+   *
+   * Use matchedRoutes helper defined in "hono/route" instead.
+   *
+   * @see {@link https://hono.dev/docs/api/request#matchedroutes}
+   *
+   * @example
+   * ```ts
+   * app.use('*', async function logger(c, next) {
+   *   await next()
+   *   c.req.matchedRoutes.forEach(({ handler, method, path }, i) => {
+   *     const name = handler.name || (handler.length < 2 ? '[handler]' : '[middleware]')
+   *     console.log(
+   *       method,
+   *       ' ',
+   *       path,
+   *       ' '.repeat(Math.max(10 - path.length, 0)),
+   *       name,
+   *       i === c.req.routeIndex ? '<- respond from here' : ''
+   *     )
+   *   })
+   * })
+   * ```
+   */
+  get matchedRoutes() {
+    return this.#matchResult[0].map(([[, route]]) => route);
+  }
+  /**
+   * `routePath()` can retrieve the path registered within the handler
+   *
+   * @deprecated
+   *
+   * Use routePath helper defined in "hono/route" instead.
+   *
+   * @see {@link https://hono.dev/docs/api/request#routepath}
+   *
+   * @example
+   * ```ts
+   * app.get('/posts/:id', (c) => {
+   *   return c.json({ path: c.req.routePath })
+   * })
+   * ```
+   */
+  get routePath() {
+    return this.#matchResult[0].map(([[, route]]) => route)[this.routeIndex].path;
+  }
+};
+
+// node_modules/hono/dist/utils/html.js
+var HtmlEscapedCallbackPhase = {
+  Stringify: 1,
+  BeforeStream: 2,
+  Stream: 3
+};
+var raw = (value, callbacks) => {
+  const escapedString = new String(value);
+  escapedString.isEscaped = true;
+  escapedString.callbacks = callbacks;
+  return escapedString;
+};
+var resolveCallback = async (str, phase, preserveCallbacks, context, buffer) => {
+  if (typeof str === "object" && !(str instanceof String)) {
+    if (!(str instanceof Promise)) {
+      str = str.toString();
+    }
+    if (str instanceof Promise) {
+      str = await str;
+    }
+  }
+  const callbacks = str.callbacks;
+  if (!callbacks?.length) {
+    return Promise.resolve(str);
+  }
+  if (buffer) {
+    buffer[0] += str;
+  } else {
+    buffer = [str];
+  }
+  const resStr = Promise.all(callbacks.map((c) => c({ phase, buffer, context }))).then(
+    (res) => Promise.all(
+      res.filter(Boolean).map((str2) => resolveCallback(str2, phase, false, context, buffer))
+    ).then(() => buffer[0])
+  );
+  if (preserveCallbacks) {
+    return raw(await resStr, callbacks);
+  } else {
+    return resStr;
+  }
+};
+
+// node_modules/hono/dist/context.js
+var TEXT_PLAIN = "text/plain; charset=UTF-8";
+var setDefaultContentType = (contentType2, headers) => {
+  return {
+    "Content-Type": contentType2,
+    ...headers
+  };
+};
+var createResponseInstance = (body, init) => new Response(body, init);
+var Context = class {
+  #rawRequest;
+  #req;
+  /**
+   * `.env` can get bindings (environment variables, secrets, KV namespaces, D1 database, R2 bucket etc.) in Cloudflare Workers.
+   *
+   * @see {@link https://hono.dev/docs/api/context#env}
+   *
+   * @example
+   * ```ts
+   * // Environment object for Cloudflare Workers
+   * app.get('*', async c => {
+   *   const counter = c.env.COUNTER
+   * })
+   * ```
+   */
+  env = {};
+  #var;
+  finalized = false;
+  /**
+   * `.error` can get the error object from the middleware if the Handler throws an error.
+   *
+   * @see {@link https://hono.dev/docs/api/context#error}
+   *
+   * @example
+   * ```ts
+   * app.use('*', async (c, next) => {
+   *   await next()
+   *   if (c.error) {
+   *     // do something...
+   *   }
+   * })
+   * ```
+   */
+  error;
+  #status;
+  #executionCtx;
+  #res;
+  #layout;
+  #renderer;
+  #notFoundHandler;
+  #preparedHeaders;
+  #matchResult;
+  #path;
+  /**
+   * Creates an instance of the Context class.
+   *
+   * @param req - The Request object.
+   * @param options - Optional configuration options for the context.
+   */
+  constructor(req, options) {
+    this.#rawRequest = req;
+    if (options) {
+      this.#executionCtx = options.executionCtx;
+      this.env = options.env;
+      this.#notFoundHandler = options.notFoundHandler;
+      this.#path = options.path;
+      this.#matchResult = options.matchResult;
+    }
+  }
+  /**
+   * `.req` is the instance of {@link HonoRequest}.
+   */
+  get req() {
+    this.#req ??= new HonoRequest(this.#rawRequest, this.#path, this.#matchResult);
+    return this.#req;
+  }
+  /**
+   * @see {@link https://hono.dev/docs/api/context#event}
+   * The FetchEvent associated with the current request.
+   *
+   * @throws Will throw an error if the context does not have a FetchEvent.
+   */
+  get event() {
+    if (this.#executionCtx && "respondWith" in this.#executionCtx) {
+      return this.#executionCtx;
+    } else {
+      throw Error("This context has no FetchEvent");
+    }
+  }
+  /**
+   * @see {@link https://hono.dev/docs/api/context#executionctx}
+   * The ExecutionContext associated with the current request.
+   *
+   * @throws Will throw an error if the context does not have an ExecutionContext.
+   */
+  get executionCtx() {
+    if (this.#executionCtx) {
+      return this.#executionCtx;
+    } else {
+      throw Error("This context has no ExecutionContext");
+    }
+  }
+  /**
+   * @see {@link https://hono.dev/docs/api/context#res}
+   * The Response object for the current request.
+   */
+  get res() {
+    return this.#res ||= createResponseInstance(null, {
+      headers: this.#preparedHeaders ??= new Headers()
+    });
+  }
+  /**
+   * Sets the Response object for the current request.
+   *
+   * @param _res - The Response object to set.
+   */
+  set res(_res) {
+    if (this.#res && _res) {
+      _res = createResponseInstance(_res.body, _res);
+      for (const [k, v] of this.#res.headers.entries()) {
+        if (k === "content-type") {
+          continue;
+        }
+        if (k === "set-cookie") {
+          const cookies = this.#res.headers.getSetCookie();
+          _res.headers.delete("set-cookie");
+          for (const cookie of cookies) {
+            _res.headers.append("set-cookie", cookie);
+          }
+        } else {
+          _res.headers.set(k, v);
+        }
+      }
+    }
+    this.#res = _res;
+    this.finalized = true;
+  }
+  /**
+   * `.render()` can create a response within a layout.
+   *
+   * @see {@link https://hono.dev/docs/api/context#render-setrenderer}
+   *
+   * @example
+   * ```ts
+   * app.get('/', (c) => {
+   *   return c.render('Hello!')
+   * })
+   * ```
+   */
+  render = (...args) => {
+    this.#renderer ??= (content) => this.html(content);
+    return this.#renderer(...args);
+  };
+  /**
+   * Sets the layout for the response.
+   *
+   * @param layout - The layout to set.
+   * @returns The layout function.
+   */
+  setLayout = (layout) => this.#layout = layout;
+  /**
+   * Gets the current layout for the response.
+   *
+   * @returns The current layout function.
+   */
+  getLayout = () => this.#layout;
+  /**
+   * `.setRenderer()` can set the layout in the custom middleware.
+   *
+   * @see {@link https://hono.dev/docs/api/context#render-setrenderer}
+   *
+   * @example
+   * ```tsx
+   * app.use('*', async (c, next) => {
+   *   c.setRenderer((content) => {
+   *     return c.html(
+   *       <html>
+   *         <body>
+   *           <p>{content}</p>
+   *         </body>
+   *       </html>
+   *     )
+   *   })
+   *   await next()
+   * })
+   * ```
+   */
+  setRenderer = (renderer) => {
+    this.#renderer = renderer;
+  };
+  /**
+   * `.header()` can set headers.
+   *
+   * @see {@link https://hono.dev/docs/api/context#header}
+   *
+   * @example
+   * ```ts
+   * app.get('/welcome', (c) => {
+   *   // Set headers
+   *   c.header('X-Message', 'Hello!')
+   *   c.header('Content-Type', 'text/plain')
+   *
+   *   return c.body('Thank you for coming')
+   * })
+   * ```
+   */
+  header = (name, value, options) => {
+    if (this.finalized) {
+      this.#res = createResponseInstance(this.#res.body, this.#res);
+    }
+    const headers = this.#res ? this.#res.headers : this.#preparedHeaders ??= new Headers();
+    if (value === void 0) {
+      headers.delete(name);
+    } else if (options?.append) {
+      headers.append(name, value);
+    } else {
+      headers.set(name, value);
+    }
+  };
+  status = (status) => {
+    this.#status = status;
+  };
+  /**
+   * `.set()` can set the value specified by the key.
+   *
+   * @see {@link https://hono.dev/docs/api/context#set-get}
+   *
+   * @example
+   * ```ts
+   * app.use('*', async (c, next) => {
+   *   c.set('message', 'Hono is hot!!')
+   *   await next()
+   * })
+   * ```
+   */
+  set = (key, value) => {
+    this.#var ??= /* @__PURE__ */ new Map();
+    this.#var.set(key, value);
+  };
+  /**
+   * `.get()` can use the value specified by the key.
+   *
+   * @see {@link https://hono.dev/docs/api/context#set-get}
+   *
+   * @example
+   * ```ts
+   * app.get('/', (c) => {
+   *   const message = c.get('message')
+   *   return c.text(`The message is "${message}"`)
+   * })
+   * ```
+   */
+  get = (key) => {
+    return this.#var ? this.#var.get(key) : void 0;
+  };
+  /**
+   * `.var` can access the value of a variable.
+   *
+   * @see {@link https://hono.dev/docs/api/context#var}
+   *
+   * @example
+   * ```ts
+   * const result = c.var.client.oneMethod()
+   * ```
+   */
+  // c.var.propName is a read-only
+  get var() {
+    if (!this.#var) {
+      return {};
+    }
+    return Object.fromEntries(this.#var);
+  }
+  #newResponse(data, arg, headers) {
+    const responseHeaders2 = this.#res ? new Headers(this.#res.headers) : this.#preparedHeaders ?? new Headers();
+    if (typeof arg === "object" && "headers" in arg) {
+      const argHeaders = arg.headers instanceof Headers ? arg.headers : new Headers(arg.headers);
+      for (const [key, value] of argHeaders) {
+        if (key.toLowerCase() === "set-cookie") {
+          responseHeaders2.append(key, value);
+        } else {
+          responseHeaders2.set(key, value);
+        }
+      }
+    }
+    if (headers) {
+      for (const [k, v] of Object.entries(headers)) {
+        if (typeof v === "string") {
+          responseHeaders2.set(k, v);
+        } else {
+          responseHeaders2.delete(k);
+          for (const v2 of v) {
+            responseHeaders2.append(k, v2);
+          }
+        }
+      }
+    }
+    const status = typeof arg === "number" ? arg : arg?.status ?? this.#status;
+    return createResponseInstance(data, { status, headers: responseHeaders2 });
+  }
+  newResponse = (...args) => this.#newResponse(...args);
+  /**
+   * `.body()` can return the HTTP response.
+   * You can set headers with `.header()` and set HTTP status code with `.status`.
+   * This can also be set in `.text()`, `.json()` and so on.
+   *
+   * @see {@link https://hono.dev/docs/api/context#body}
+   *
+   * @example
+   * ```ts
+   * app.get('/welcome', (c) => {
+   *   // Set headers
+   *   c.header('X-Message', 'Hello!')
+   *   c.header('Content-Type', 'text/plain')
+   *   // Set HTTP status code
+   *   c.status(201)
+   *
+   *   // Return the response body
+   *   return c.body('Thank you for coming')
+   * })
+   * ```
+   */
+  body = (data, arg, headers) => this.#newResponse(data, arg, headers);
+  /**
+   * `.text()` can render text as `Content-Type:text/plain`.
+   *
+   * @see {@link https://hono.dev/docs/api/context#text}
+   *
+   * @example
+   * ```ts
+   * app.get('/say', (c) => {
+   *   return c.text('Hello!')
+   * })
+   * ```
+   */
+  text = (text, arg, headers) => {
+    return !this.#preparedHeaders && !this.#status && !arg && !headers && !this.finalized ? new Response(text) : this.#newResponse(
+      text,
+      arg,
+      setDefaultContentType(TEXT_PLAIN, headers)
+    );
+  };
+  /**
+   * `.json()` can render JSON as `Content-Type:application/json`.
+   *
+   * @see {@link https://hono.dev/docs/api/context#json}
+   *
+   * @example
+   * ```ts
+   * app.get('/api', (c) => {
+   *   return c.json({ message: 'Hello!' })
+   * })
+   * ```
+   */
+  json = (object2, arg, headers) => {
+    return this.#newResponse(
+      JSON.stringify(object2),
+      arg,
+      setDefaultContentType("application/json", headers)
+    );
+  };
+  html = (html, arg, headers) => {
+    const res = (html2) => this.#newResponse(html2, arg, setDefaultContentType("text/html; charset=UTF-8", headers));
+    return typeof html === "object" ? resolveCallback(html, HtmlEscapedCallbackPhase.Stringify, false, {}).then(res) : res(html);
+  };
+  /**
+   * `.redirect()` can Redirect, default status code is 302.
+   *
+   * @see {@link https://hono.dev/docs/api/context#redirect}
+   *
+   * @example
+   * ```ts
+   * app.get('/redirect', (c) => {
+   *   return c.redirect('/')
+   * })
+   * app.get('/redirect-permanently', (c) => {
+   *   return c.redirect('/', 301)
+   * })
+   * ```
+   */
+  redirect = (location, status) => {
+    const locationString = String(location);
+    this.header(
+      "Location",
+      // Multibyes should be encoded
+      // eslint-disable-next-line no-control-regex
+      !/[^\x00-\xFF]/.test(locationString) ? locationString : encodeURI(locationString)
+    );
+    return this.newResponse(null, status ?? 302);
+  };
+  /**
+   * `.notFound()` can return the Not Found Response.
+   *
+   * @see {@link https://hono.dev/docs/api/context#notfound}
+   *
+   * @example
+   * ```ts
+   * app.get('/notfound', (c) => {
+   *   return c.notFound()
+   * })
+   * ```
+   */
+  notFound = () => {
+    this.#notFoundHandler ??= () => createResponseInstance();
+    return this.#notFoundHandler(this);
+  };
+};
+
+// node_modules/hono/dist/router.js
+var METHOD_NAME_ALL = "ALL";
+var METHOD_NAME_ALL_LOWERCASE = "all";
+var METHODS = ["get", "post", "put", "delete", "options", "patch"];
+var MESSAGE_MATCHER_IS_ALREADY_BUILT = "Can not add a route since the matcher is already built.";
+var UnsupportedPathError = class extends Error {
+};
+
+// node_modules/hono/dist/utils/constants.js
+var COMPOSED_HANDLER = "__COMPOSED_HANDLER";
+
+// node_modules/hono/dist/hono-base.js
+var notFoundHandler = (c) => {
+  return c.text("404 Not Found", 404);
+};
+var errorHandler = (err, c) => {
+  if ("getResponse" in err) {
+    const res = err.getResponse();
+    return c.newResponse(res.body, res);
+  }
+  console.error(err);
+  return c.text("Internal Server Error", 500);
+};
+var Hono = class _Hono {
+  get;
+  post;
+  put;
+  delete;
+  options;
+  patch;
+  all;
+  on;
+  use;
+  /*
+    This class is like an abstract class and does not have a router.
+    To use it, inherit the class and implement router in the constructor.
+  */
+  router;
+  getPath;
+  // Cannot use `#` because it requires visibility at JavaScript runtime.
+  _basePath = "/";
+  #path = "/";
+  routes = [];
+  constructor(options = {}) {
+    const allMethods = [...METHODS, METHOD_NAME_ALL_LOWERCASE];
+    allMethods.forEach((method) => {
+      this[method] = (args1, ...args) => {
+        if (typeof args1 === "string") {
+          this.#path = args1;
+        } else {
+          this.#addRoute(method, this.#path, args1);
+        }
+        args.forEach((handler) => {
+          this.#addRoute(method, this.#path, handler);
+        });
+        return this;
+      };
+    });
+    this.on = (method, path5, ...handlers) => {
+      for (const p of [path5].flat()) {
+        this.#path = p;
+        for (const m of [method].flat()) {
+          handlers.map((handler) => {
+            this.#addRoute(m.toUpperCase(), this.#path, handler);
+          });
+        }
+      }
+      return this;
+    };
+    this.use = (arg1, ...handlers) => {
+      if (typeof arg1 === "string") {
+        this.#path = arg1;
+      } else {
+        this.#path = "*";
+        handlers.unshift(arg1);
+      }
+      handlers.forEach((handler) => {
+        this.#addRoute(METHOD_NAME_ALL, this.#path, handler);
+      });
+      return this;
+    };
+    const { strict, ...optionsWithoutStrict } = options;
+    Object.assign(this, optionsWithoutStrict);
+    this.getPath = strict ?? true ? options.getPath ?? getPath : getPathNoStrict;
+  }
+  #clone() {
+    const clone = new _Hono({
+      router: this.router,
+      getPath: this.getPath
+    });
+    clone.errorHandler = this.errorHandler;
+    clone.#notFoundHandler = this.#notFoundHandler;
+    clone.routes = this.routes;
+    return clone;
+  }
+  #notFoundHandler = notFoundHandler;
+  // Cannot use `#` because it requires visibility at JavaScript runtime.
+  errorHandler = errorHandler;
+  /**
+   * `.route()` allows grouping other Hono instance in routes.
+   *
+   * @see {@link https://hono.dev/docs/api/routing#grouping}
+   *
+   * @param {string} path - base Path
+   * @param {Hono} app - other Hono instance
+   * @returns {Hono} routed Hono instance
+   *
+   * @example
+   * ```ts
+   * const app = new Hono()
+   * const app2 = new Hono()
+   *
+   * app2.get("/user", (c) => c.text("user"))
+   * app.route("/api", app2) // GET /api/user
+   * ```
+   */
+  route(path5, app) {
+    const subApp = this.basePath(path5);
+    app.routes.map((r) => {
+      let handler;
+      if (app.errorHandler === errorHandler) {
+        handler = r.handler;
+      } else {
+        handler = async (c, next) => (await compose([], app.errorHandler)(c, () => r.handler(c, next))).res;
+        handler[COMPOSED_HANDLER] = r.handler;
+      }
+      subApp.#addRoute(r.method, r.path, handler, r.basePath);
+    });
+    return this;
+  }
+  /**
+   * `.basePath()` allows base paths to be specified.
+   *
+   * @see {@link https://hono.dev/docs/api/routing#base-path}
+   *
+   * @param {string} path - base Path
+   * @returns {Hono} changed Hono instance
+   *
+   * @example
+   * ```ts
+   * const api = new Hono().basePath('/api')
+   * ```
+   */
+  basePath(path5) {
+    const subApp = this.#clone();
+    subApp._basePath = mergePath(this._basePath, path5);
+    return subApp;
+  }
+  /**
+   * `.onError()` handles an error and returns a customized Response.
+   *
+   * @see {@link https://hono.dev/docs/api/hono#error-handling}
+   *
+   * @param {ErrorHandler} handler - request Handler for error
+   * @returns {Hono} changed Hono instance
+   *
+   * @example
+   * ```ts
+   * app.onError((err, c) => {
+   *   console.error(`${err}`)
+   *   return c.text('Custom Error Message', 500)
+   * })
+   * ```
+   */
+  onError = (handler) => {
+    this.errorHandler = handler;
+    return this;
+  };
+  /**
+   * `.notFound()` allows you to customize a Not Found Response.
+   *
+   * @see {@link https://hono.dev/docs/api/hono#not-found}
+   *
+   * @param {NotFoundHandler} handler - request handler for not-found
+   * @returns {Hono} changed Hono instance
+   *
+   * @example
+   * ```ts
+   * app.notFound((c) => {
+   *   return c.text('Custom 404 Message', 404)
+   * })
+   * ```
+   */
+  notFound = (handler) => {
+    this.#notFoundHandler = handler;
+    return this;
+  };
+  /**
+   * `.mount()` allows you to mount applications built with other frameworks into your Hono application.
+   *
+   * @see {@link https://hono.dev/docs/api/hono#mount}
+   *
+   * @param {string} path - base Path
+   * @param {Function} applicationHandler - other Request Handler
+   * @param {MountOptions} [options] - options of `.mount()`
+   * @returns {Hono} mounted Hono instance
+   *
+   * @example
+   * ```ts
+   * import { Router as IttyRouter } from 'itty-router'
+   * import { Hono } from 'hono'
+   * // Create itty-router application
+   * const ittyRouter = IttyRouter()
+   * // GET /itty-router/hello
+   * ittyRouter.get('/hello', () => new Response('Hello from itty-router'))
+   *
+   * const app = new Hono()
+   * app.mount('/itty-router', ittyRouter.handle)
+   * ```
+   *
+   * @example
+   * ```ts
+   * const app = new Hono()
+   * // Send the request to another application without modification.
+   * app.mount('/app', anotherApp, {
+   *   replaceRequest: (req) => req,
+   * })
+   * ```
+   */
+  mount(path5, applicationHandler, options) {
+    let replaceRequest;
+    let optionHandler;
+    if (options) {
+      if (typeof options === "function") {
+        optionHandler = options;
+      } else {
+        optionHandler = options.optionHandler;
+        if (options.replaceRequest === false) {
+          replaceRequest = (request) => request;
+        } else {
+          replaceRequest = options.replaceRequest;
+        }
+      }
+    }
+    const getOptions = optionHandler ? (c) => {
+      const options2 = optionHandler(c);
+      return Array.isArray(options2) ? options2 : [options2];
+    } : (c) => {
+      let executionContext = void 0;
+      try {
+        executionContext = c.executionCtx;
+      } catch {
+      }
+      return [c.env, executionContext];
+    };
+    replaceRequest ||= (() => {
+      const mergedPath = mergePath(this._basePath, path5);
+      const pathPrefixLength = mergedPath === "/" ? 0 : mergedPath.length;
+      return (request) => {
+        const url = new URL(request.url);
+        url.pathname = this.getPath(request).slice(pathPrefixLength) || "/";
+        return new Request(url, request);
+      };
+    })();
+    const handler = async (c, next) => {
+      const res = await applicationHandler(replaceRequest(c.req.raw), ...getOptions(c));
+      if (res) {
+        return res;
+      }
+      await next();
+    };
+    this.#addRoute(METHOD_NAME_ALL, mergePath(path5, "*"), handler);
+    return this;
+  }
+  #addRoute(method, path5, handler, baseRoutePath) {
+    method = method.toUpperCase();
+    path5 = mergePath(this._basePath, path5);
+    const r = {
+      basePath: baseRoutePath !== void 0 ? mergePath(this._basePath, baseRoutePath) : this._basePath,
+      path: path5,
+      method,
+      handler
+    };
+    this.router.add(method, path5, [handler, r]);
+    this.routes.push(r);
+  }
+  #handleError(err, c) {
+    if (err instanceof Error) {
+      return this.errorHandler(err, c);
+    }
+    throw err;
+  }
+  #dispatch(request, executionCtx, env, method) {
+    if (method === "HEAD") {
+      return (async () => new Response(null, await this.#dispatch(request, executionCtx, env, "GET")))();
+    }
+    const path5 = this.getPath(request, { env });
+    const matchResult = this.router.match(method, path5);
+    const c = new Context(request, {
+      path: path5,
+      matchResult,
+      env,
+      executionCtx,
+      notFoundHandler: this.#notFoundHandler
+    });
+    if (matchResult[0].length === 1) {
+      let res;
+      try {
+        res = matchResult[0][0][0][0](c, async () => {
+          c.res = await this.#notFoundHandler(c);
+        });
+      } catch (err) {
+        return this.#handleError(err, c);
+      }
+      return res instanceof Promise ? res.then(
+        (resolved) => resolved || (c.finalized ? c.res : this.#notFoundHandler(c))
+      ).catch((err) => this.#handleError(err, c)) : res ?? this.#notFoundHandler(c);
+    }
+    const composed = compose(matchResult[0], this.errorHandler, this.#notFoundHandler);
+    return (async () => {
+      try {
+        const context = await composed(c);
+        if (!context.finalized) {
+          throw new Error(
+            "Context is not finalized. Did you forget to return a Response object or `await next()`?"
+          );
+        }
+        return context.res;
+      } catch (err) {
+        return this.#handleError(err, c);
+      }
+    })();
+  }
+  /**
+   * `.fetch()` will be entry point of your app.
+   *
+   * @see {@link https://hono.dev/docs/api/hono#fetch}
+   *
+   * @param {Request} request - request Object of request
+   * @param {Env} Env - env Object
+   * @param {ExecutionContext} - context of execution
+   * @returns {Response | Promise<Response>} response of request
+   *
+   */
+  fetch = (request, ...rest) => {
+    return this.#dispatch(request, rest[1], rest[0], request.method);
+  };
+  /**
+   * `.request()` is a useful method for testing.
+   * You can pass a URL or pathname to send a GET request.
+   * app will return a Response object.
+   * ```ts
+   * test('GET /hello is ok', async () => {
+   *   const res = await app.request('/hello')
+   *   expect(res.status).toBe(200)
+   * })
+   * ```
+   * @see https://hono.dev/docs/api/hono#request
+   */
+  request = (input, requestInit, Env, executionCtx) => {
+    if (input instanceof Request) {
+      return this.fetch(requestInit ? new Request(input, requestInit) : input, Env, executionCtx);
+    }
+    input = input.toString();
+    return this.fetch(
+      new Request(
+        /^https?:\/\//.test(input) ? input : `http://localhost${mergePath("/", input)}`,
+        requestInit
+      ),
+      Env,
+      executionCtx
+    );
+  };
+  /**
+   * `.fire()` automatically adds a global fetch event listener.
+   * This can be useful for environments that adhere to the Service Worker API, such as non-ES module Cloudflare Workers.
+   * @deprecated
+   * Use `fire` from `hono/service-worker` instead.
+   * ```ts
+   * import { Hono } from 'hono'
+   * import { fire } from 'hono/service-worker'
+   *
+   * const app = new Hono()
+   * // ...
+   * fire(app)
+   * ```
+   * @see https://hono.dev/docs/api/hono#fire
+   * @see https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API
+   * @see https://developers.cloudflare.com/workers/reference/migrate-to-module-workers/
+   */
+  fire = () => {
+    addEventListener("fetch", (event) => {
+      event.respondWith(this.#dispatch(event.request, event, void 0, event.request.method));
+    });
+  };
+};
+
+// node_modules/hono/dist/router/reg-exp-router/matcher.js
+var emptyParam = [];
+function match(method, path5) {
+  const matchers = this.buildAllMatchers();
+  const match2 = ((method2, path22) => {
+    const matcher = matchers[method2] || matchers[METHOD_NAME_ALL];
+    const staticMatch = matcher[2][path22];
+    if (staticMatch) {
+      return staticMatch;
+    }
+    const match3 = path22.match(matcher[0]);
+    if (!match3) {
+      return [[], emptyParam];
+    }
+    const index = match3.indexOf("", 1);
+    return [matcher[1][index], match3];
+  });
+  this.match = match2;
+  return match2(method, path5);
+}
+
+// node_modules/hono/dist/router/reg-exp-router/node.js
+var LABEL_REG_EXP_STR = "[^/]+";
+var ONLY_WILDCARD_REG_EXP_STR = ".*";
+var TAIL_WILDCARD_REG_EXP_STR = "(?:|/.*)";
+var PATH_ERROR = /* @__PURE__ */ Symbol();
+var regExpMetaChars = new Set(".\\+*[^]$()");
+function compareKey(a, b) {
+  if (a.length === 1) {
+    return b.length === 1 ? a < b ? -1 : 1 : -1;
+  }
+  if (b.length === 1) {
+    return 1;
+  }
+  if (a === ONLY_WILDCARD_REG_EXP_STR || a === TAIL_WILDCARD_REG_EXP_STR) {
+    return 1;
+  } else if (b === ONLY_WILDCARD_REG_EXP_STR || b === TAIL_WILDCARD_REG_EXP_STR) {
+    return -1;
+  }
+  if (a === LABEL_REG_EXP_STR) {
+    return 1;
+  } else if (b === LABEL_REG_EXP_STR) {
+    return -1;
+  }
+  return a.length === b.length ? a < b ? -1 : 1 : b.length - a.length;
+}
+var Node = class _Node {
+  #index;
+  #varIndex;
+  #children = /* @__PURE__ */ Object.create(null);
+  insert(tokens, index, paramMap, context, pathErrorCheckOnly) {
+    if (tokens.length === 0) {
+      if (this.#index !== void 0) {
+        throw PATH_ERROR;
+      }
+      if (pathErrorCheckOnly) {
+        return;
+      }
+      this.#index = index;
+      return;
+    }
+    const [token, ...restTokens] = tokens;
+    const pattern = token === "*" ? restTokens.length === 0 ? ["", "", ONLY_WILDCARD_REG_EXP_STR] : ["", "", LABEL_REG_EXP_STR] : token === "/*" ? ["", "", TAIL_WILDCARD_REG_EXP_STR] : token.match(/^\:([^\{\}]+)(?:\{(.+)\})?$/);
+    let node;
+    if (pattern) {
+      const name = pattern[1];
+      let regexpStr = pattern[2] || LABEL_REG_EXP_STR;
+      if (name && pattern[2]) {
+        if (regexpStr === ".*") {
+          throw PATH_ERROR;
+        }
+        regexpStr = regexpStr.replace(/^\((?!\?:)(?=[^)]+\)$)/, "(?:");
+        if (/\((?!\?:)/.test(regexpStr)) {
+          throw PATH_ERROR;
+        }
+      }
+      node = this.#children[regexpStr];
+      if (!node) {
+        if (Object.keys(this.#children).some(
+          (k) => k !== ONLY_WILDCARD_REG_EXP_STR && k !== TAIL_WILDCARD_REG_EXP_STR
+        )) {
+          throw PATH_ERROR;
+        }
+        if (pathErrorCheckOnly) {
+          return;
+        }
+        node = this.#children[regexpStr] = new _Node();
+        if (name !== "") {
+          node.#varIndex = context.varIndex++;
+        }
+      }
+      if (!pathErrorCheckOnly && name !== "") {
+        paramMap.push([name, node.#varIndex]);
+      }
+    } else {
+      node = this.#children[token];
+      if (!node) {
+        if (Object.keys(this.#children).some(
+          (k) => k.length > 1 && k !== ONLY_WILDCARD_REG_EXP_STR && k !== TAIL_WILDCARD_REG_EXP_STR
+        )) {
+          throw PATH_ERROR;
+        }
+        if (pathErrorCheckOnly) {
+          return;
+        }
+        node = this.#children[token] = new _Node();
+      }
+    }
+    node.insert(restTokens, index, paramMap, context, pathErrorCheckOnly);
+  }
+  buildRegExpStr() {
+    const childKeys = Object.keys(this.#children).sort(compareKey);
+    const strList = childKeys.map((k) => {
+      const c = this.#children[k];
+      return (typeof c.#varIndex === "number" ? `(${k})@${c.#varIndex}` : regExpMetaChars.has(k) ? `\\${k}` : k) + c.buildRegExpStr();
+    });
+    if (typeof this.#index === "number") {
+      strList.unshift(`#${this.#index}`);
+    }
+    if (strList.length === 0) {
+      return "";
+    }
+    if (strList.length === 1) {
+      return strList[0];
+    }
+    return "(?:" + strList.join("|") + ")";
+  }
+};
+
+// node_modules/hono/dist/router/reg-exp-router/trie.js
+var Trie = class {
+  #context = { varIndex: 0 };
+  #root = new Node();
+  insert(path5, index, pathErrorCheckOnly) {
+    const paramAssoc = [];
+    const groups = [];
+    for (let i = 0; ; ) {
+      let replaced = false;
+      path5 = path5.replace(/\{[^}]+\}/g, (m) => {
+        const mark = `@\\${i}`;
+        groups[i] = [mark, m];
+        i++;
+        replaced = true;
+        return mark;
+      });
+      if (!replaced) {
+        break;
+      }
+    }
+    const tokens = path5.match(/(?::[^\/]+)|(?:\/\*$)|./g) || [];
+    for (let i = groups.length - 1; i >= 0; i--) {
+      const [mark] = groups[i];
+      for (let j = tokens.length - 1; j >= 0; j--) {
+        if (tokens[j].indexOf(mark) !== -1) {
+          tokens[j] = tokens[j].replace(mark, groups[i][1]);
+          break;
+        }
+      }
+    }
+    this.#root.insert(tokens, index, paramAssoc, this.#context, pathErrorCheckOnly);
+    return paramAssoc;
+  }
+  buildRegExp() {
+    let regexp = this.#root.buildRegExpStr();
+    if (regexp === "") {
+      return [/^$/, [], []];
+    }
+    let captureIndex = 0;
+    const indexReplacementMap = [];
+    const paramReplacementMap = [];
+    regexp = regexp.replace(/#(\d+)|@(\d+)|\.\*\$/g, (_, handlerIndex, paramIndex) => {
+      if (handlerIndex !== void 0) {
+        indexReplacementMap[++captureIndex] = Number(handlerIndex);
+        return "$()";
+      }
+      if (paramIndex !== void 0) {
+        paramReplacementMap[Number(paramIndex)] = ++captureIndex;
+        return "";
+      }
+      return "";
+    });
+    return [new RegExp(`^${regexp}`), indexReplacementMap, paramReplacementMap];
+  }
+};
+
+// node_modules/hono/dist/router/reg-exp-router/router.js
+var nullMatcher = [/^$/, [], /* @__PURE__ */ Object.create(null)];
+var wildcardRegExpCache = /* @__PURE__ */ Object.create(null);
+function buildWildcardRegExp(path5) {
+  return wildcardRegExpCache[path5] ??= new RegExp(
+    path5 === "*" ? "" : `^${path5.replace(
+      /\/\*$|([.\\+*[^\]$()])/g,
+      (_, metaChar) => metaChar ? `\\${metaChar}` : "(?:|/.*)"
+    )}$`
+  );
+}
+function clearWildcardRegExpCache() {
+  wildcardRegExpCache = /* @__PURE__ */ Object.create(null);
+}
+function buildMatcherFromPreprocessedRoutes(routes) {
+  const trie = new Trie();
+  const handlerData = [];
+  if (routes.length === 0) {
+    return nullMatcher;
+  }
+  const routesWithStaticPathFlag = routes.map(
+    (route) => [!/\*|\/:/.test(route[0]), ...route]
+  ).sort(
+    ([isStaticA, pathA], [isStaticB, pathB]) => isStaticA ? 1 : isStaticB ? -1 : pathA.length - pathB.length
+  );
+  const staticMap = /* @__PURE__ */ Object.create(null);
+  for (let i = 0, j = -1, len = routesWithStaticPathFlag.length; i < len; i++) {
+    const [pathErrorCheckOnly, path5, handlers] = routesWithStaticPathFlag[i];
+    if (pathErrorCheckOnly) {
+      staticMap[path5] = [handlers.map(([h]) => [h, /* @__PURE__ */ Object.create(null)]), emptyParam];
+    } else {
+      j++;
+    }
+    let paramAssoc;
+    try {
+      paramAssoc = trie.insert(path5, j, pathErrorCheckOnly);
+    } catch (e) {
+      throw e === PATH_ERROR ? new UnsupportedPathError(path5) : e;
+    }
+    if (pathErrorCheckOnly) {
+      continue;
+    }
+    handlerData[j] = handlers.map(([h, paramCount]) => {
+      const paramIndexMap = /* @__PURE__ */ Object.create(null);
+      paramCount -= 1;
+      for (; paramCount >= 0; paramCount--) {
+        const [key, value] = paramAssoc[paramCount];
+        paramIndexMap[key] = value;
+      }
+      return [h, paramIndexMap];
+    });
+  }
+  const [regexp, indexReplacementMap, paramReplacementMap] = trie.buildRegExp();
+  for (let i = 0, len = handlerData.length; i < len; i++) {
+    for (let j = 0, len2 = handlerData[i].length; j < len2; j++) {
+      const map = handlerData[i][j]?.[1];
+      if (!map) {
+        continue;
+      }
+      const keys = Object.keys(map);
+      for (let k = 0, len3 = keys.length; k < len3; k++) {
+        map[keys[k]] = paramReplacementMap[map[keys[k]]];
+      }
+    }
+  }
+  const handlerMap = [];
+  for (const i in indexReplacementMap) {
+    handlerMap[i] = handlerData[indexReplacementMap[i]];
+  }
+  return [regexp, handlerMap, staticMap];
+}
+function findMiddleware(middleware, path5) {
+  if (!middleware) {
+    return void 0;
+  }
+  for (const k of Object.keys(middleware).sort((a, b) => b.length - a.length)) {
+    if (buildWildcardRegExp(k).test(path5)) {
+      return [...middleware[k]];
+    }
+  }
+  return void 0;
+}
+var RegExpRouter = class {
+  name = "RegExpRouter";
+  #middleware;
+  #routes;
+  constructor() {
+    this.#middleware = { [METHOD_NAME_ALL]: /* @__PURE__ */ Object.create(null) };
+    this.#routes = { [METHOD_NAME_ALL]: /* @__PURE__ */ Object.create(null) };
+  }
+  add(method, path5, handler) {
+    const middleware = this.#middleware;
+    const routes = this.#routes;
+    if (!middleware || !routes) {
+      throw new Error(MESSAGE_MATCHER_IS_ALREADY_BUILT);
+    }
+    if (!middleware[method]) {
+      ;
+      [middleware, routes].forEach((handlerMap) => {
+        handlerMap[method] = /* @__PURE__ */ Object.create(null);
+        Object.keys(handlerMap[METHOD_NAME_ALL]).forEach((p) => {
+          handlerMap[method][p] = [...handlerMap[METHOD_NAME_ALL][p]];
+        });
+      });
+    }
+    if (path5 === "/*") {
+      path5 = "*";
+    }
+    const paramCount = (path5.match(/\/:/g) || []).length;
+    if (/\*$/.test(path5)) {
+      const re = buildWildcardRegExp(path5);
+      if (method === METHOD_NAME_ALL) {
+        Object.keys(middleware).forEach((m) => {
+          middleware[m][path5] ||= findMiddleware(middleware[m], path5) || findMiddleware(middleware[METHOD_NAME_ALL], path5) || [];
+        });
+      } else {
+        middleware[method][path5] ||= findMiddleware(middleware[method], path5) || findMiddleware(middleware[METHOD_NAME_ALL], path5) || [];
+      }
+      Object.keys(middleware).forEach((m) => {
+        if (method === METHOD_NAME_ALL || method === m) {
+          Object.keys(middleware[m]).forEach((p) => {
+            re.test(p) && middleware[m][p].push([handler, paramCount]);
+          });
+        }
+      });
+      Object.keys(routes).forEach((m) => {
+        if (method === METHOD_NAME_ALL || method === m) {
+          Object.keys(routes[m]).forEach(
+            (p) => re.test(p) && routes[m][p].push([handler, paramCount])
+          );
+        }
+      });
+      return;
+    }
+    const paths = checkOptionalParameter(path5) || [path5];
+    for (let i = 0, len = paths.length; i < len; i++) {
+      const path22 = paths[i];
+      Object.keys(routes).forEach((m) => {
+        if (method === METHOD_NAME_ALL || method === m) {
+          routes[m][path22] ||= [
+            ...findMiddleware(middleware[m], path22) || findMiddleware(middleware[METHOD_NAME_ALL], path22) || []
+          ];
+          routes[m][path22].push([handler, paramCount - len + i + 1]);
+        }
+      });
+    }
+  }
+  match = match;
+  buildAllMatchers() {
+    const matchers = /* @__PURE__ */ Object.create(null);
+    Object.keys(this.#routes).concat(Object.keys(this.#middleware)).forEach((method) => {
+      matchers[method] ||= this.#buildMatcher(method);
+    });
+    this.#middleware = this.#routes = void 0;
+    clearWildcardRegExpCache();
+    return matchers;
+  }
+  #buildMatcher(method) {
+    const routes = [];
+    let hasOwnRoute = method === METHOD_NAME_ALL;
+    [this.#middleware, this.#routes].forEach((r) => {
+      const ownRoute = r[method] ? Object.keys(r[method]).map((path5) => [path5, r[method][path5]]) : [];
+      if (ownRoute.length !== 0) {
+        hasOwnRoute ||= true;
+        routes.push(...ownRoute);
+      } else if (method !== METHOD_NAME_ALL) {
+        routes.push(
+          ...Object.keys(r[METHOD_NAME_ALL]).map((path5) => [path5, r[METHOD_NAME_ALL][path5]])
+        );
+      }
+    });
+    if (!hasOwnRoute) {
+      return null;
+    } else {
+      return buildMatcherFromPreprocessedRoutes(routes);
+    }
+  }
+};
+
+// node_modules/hono/dist/router/smart-router/router.js
+var SmartRouter = class {
+  name = "SmartRouter";
+  #routers = [];
+  #routes = [];
+  constructor(init) {
+    this.#routers = init.routers;
+  }
+  add(method, path5, handler) {
+    if (!this.#routes) {
+      throw new Error(MESSAGE_MATCHER_IS_ALREADY_BUILT);
+    }
+    this.#routes.push([method, path5, handler]);
+  }
+  match(method, path5) {
+    if (!this.#routes) {
+      throw new Error("Fatal error");
+    }
+    const routers = this.#routers;
+    const routes = this.#routes;
+    const len = routers.length;
+    let i = 0;
+    let res;
+    for (; i < len; i++) {
+      const router = routers[i];
+      try {
+        for (let i2 = 0, len2 = routes.length; i2 < len2; i2++) {
+          router.add(...routes[i2]);
+        }
+        res = router.match(method, path5);
+      } catch (e) {
+        if (e instanceof UnsupportedPathError) {
+          continue;
+        }
+        throw e;
+      }
+      this.match = router.match.bind(router);
+      this.#routers = [router];
+      this.#routes = void 0;
+      break;
+    }
+    if (i === len) {
+      throw new Error("Fatal error");
+    }
+    this.name = `SmartRouter + ${this.activeRouter.name}`;
+    return res;
+  }
+  get activeRouter() {
+    if (this.#routes || this.#routers.length !== 1) {
+      throw new Error("No active router has been determined yet.");
+    }
+    return this.#routers[0];
+  }
+};
+
+// node_modules/hono/dist/router/trie-router/node.js
+var emptyParams = /* @__PURE__ */ Object.create(null);
+var hasChildren = (children) => {
+  for (const _ in children) {
+    return true;
+  }
+  return false;
+};
+var Node2 = class _Node2 {
+  #methods;
+  #children;
+  #patterns;
+  #order = 0;
+  #params = emptyParams;
+  constructor(method, handler, children) {
+    this.#children = children || /* @__PURE__ */ Object.create(null);
+    this.#methods = [];
+    if (method && handler) {
+      const m = /* @__PURE__ */ Object.create(null);
+      m[method] = { handler, possibleKeys: [], score: 0 };
+      this.#methods = [m];
+    }
+    this.#patterns = [];
+  }
+  insert(method, path5, handler) {
+    this.#order = ++this.#order;
+    let curNode = this;
+    const parts = splitRoutingPath(path5);
+    const possibleKeys = [];
+    for (let i = 0, len = parts.length; i < len; i++) {
+      const p = parts[i];
+      const nextP = parts[i + 1];
+      const pattern = getPattern(p, nextP);
+      const key = Array.isArray(pattern) ? pattern[0] : p;
+      if (key in curNode.#children) {
+        curNode = curNode.#children[key];
+        if (pattern) {
+          possibleKeys.push(pattern[1]);
+        }
+        continue;
+      }
+      curNode.#children[key] = new _Node2();
+      if (pattern) {
+        curNode.#patterns.push(pattern);
+        possibleKeys.push(pattern[1]);
+      }
+      curNode = curNode.#children[key];
+    }
+    curNode.#methods.push({
+      [method]: {
+        handler,
+        possibleKeys: possibleKeys.filter((v, i, a) => a.indexOf(v) === i),
+        score: this.#order
+      }
+    });
+    return curNode;
+  }
+  #pushHandlerSets(handlerSets, node, method, nodeParams, params) {
+    for (let i = 0, len = node.#methods.length; i < len; i++) {
+      const m = node.#methods[i];
+      const handlerSet = m[method] || m[METHOD_NAME_ALL];
+      const processedSet = {};
+      if (handlerSet !== void 0) {
+        handlerSet.params = /* @__PURE__ */ Object.create(null);
+        handlerSets.push(handlerSet);
+        if (nodeParams !== emptyParams || params && params !== emptyParams) {
+          for (let i2 = 0, len2 = handlerSet.possibleKeys.length; i2 < len2; i2++) {
+            const key = handlerSet.possibleKeys[i2];
+            const processed = processedSet[handlerSet.score];
+            handlerSet.params[key] = params?.[key] && !processed ? params[key] : nodeParams[key] ?? params?.[key];
+            processedSet[handlerSet.score] = true;
+          }
+        }
+      }
+    }
+  }
+  search(method, path5) {
+    const handlerSets = [];
+    this.#params = emptyParams;
+    const curNode = this;
+    let curNodes = [curNode];
+    const parts = splitPath(path5);
+    const curNodesQueue = [];
+    const len = parts.length;
+    let partOffsets = null;
+    for (let i = 0; i < len; i++) {
+      const part = parts[i];
+      const isLast = i === len - 1;
+      const tempNodes = [];
+      for (let j = 0, len2 = curNodes.length; j < len2; j++) {
+        const node = curNodes[j];
+        const nextNode = node.#children[part];
+        if (nextNode) {
+          nextNode.#params = node.#params;
+          if (isLast) {
+            if (nextNode.#children["*"]) {
+              this.#pushHandlerSets(handlerSets, nextNode.#children["*"], method, node.#params);
+            }
+            this.#pushHandlerSets(handlerSets, nextNode, method, node.#params);
+          } else {
+            tempNodes.push(nextNode);
+          }
+        }
+        for (let k = 0, len3 = node.#patterns.length; k < len3; k++) {
+          const pattern = node.#patterns[k];
+          const params = node.#params === emptyParams ? {} : { ...node.#params };
+          if (pattern === "*") {
+            const astNode = node.#children["*"];
+            if (astNode) {
+              this.#pushHandlerSets(handlerSets, astNode, method, node.#params);
+              astNode.#params = params;
+              tempNodes.push(astNode);
+            }
+            continue;
+          }
+          const [key, name, matcher] = pattern;
+          if (!part && !(matcher instanceof RegExp)) {
+            continue;
+          }
+          const child = node.#children[key];
+          if (matcher instanceof RegExp) {
+            if (partOffsets === null) {
+              partOffsets = new Array(len);
+              let offset = path5[0] === "/" ? 1 : 0;
+              for (let p = 0; p < len; p++) {
+                partOffsets[p] = offset;
+                offset += parts[p].length + 1;
+              }
+            }
+            const restPathString = path5.substring(partOffsets[i]);
+            const m = matcher.exec(restPathString);
+            if (m) {
+              params[name] = m[0];
+              this.#pushHandlerSets(handlerSets, child, method, node.#params, params);
+              if (hasChildren(child.#children)) {
+                child.#params = params;
+                const componentCount = m[0].match(/\//)?.length ?? 0;
+                const targetCurNodes = curNodesQueue[componentCount] ||= [];
+                targetCurNodes.push(child);
+              }
+              continue;
+            }
+          }
+          if (matcher === true || matcher.test(part)) {
+            params[name] = part;
+            if (isLast) {
+              this.#pushHandlerSets(handlerSets, child, method, params, node.#params);
+              if (child.#children["*"]) {
+                this.#pushHandlerSets(
+                  handlerSets,
+                  child.#children["*"],
+                  method,
+                  params,
+                  node.#params
+                );
+              }
+            } else {
+              child.#params = params;
+              tempNodes.push(child);
+            }
+          }
+        }
+      }
+      const shifted = curNodesQueue.shift();
+      curNodes = shifted ? tempNodes.concat(shifted) : tempNodes;
+    }
+    if (handlerSets.length > 1) {
+      handlerSets.sort((a, b) => {
+        return a.score - b.score;
+      });
+    }
+    return [handlerSets.map(({ handler, params }) => [handler, params])];
+  }
+};
+
+// node_modules/hono/dist/router/trie-router/router.js
+var TrieRouter = class {
+  name = "TrieRouter";
+  #node;
+  constructor() {
+    this.#node = new Node2();
+  }
+  add(method, path5, handler) {
+    const results = checkOptionalParameter(path5);
+    if (results) {
+      for (let i = 0, len = results.length; i < len; i++) {
+        this.#node.insert(method, results[i], handler);
+      }
+      return;
+    }
+    this.#node.insert(method, path5, handler);
+  }
+  match(method, path5) {
+    return this.#node.search(method, path5);
+  }
+};
+
+// node_modules/hono/dist/hono.js
+var Hono2 = class extends Hono {
+  /**
+   * Creates an instance of the Hono class.
+   *
+   * @param options - Optional configuration options for the Hono instance.
+   */
+  constructor(options = {}) {
+    super(options);
+    this.router = options.router ?? new SmartRouter({
+      routers: [new RegExpRouter(), new TrieRouter()]
+    });
+  }
+};
+
+// src/mlclaw-space-runtime/csrf.ts
+import { createHmac as createHmac2, randomBytes as randomBytes2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+var CSRF_TTL_SECONDS = 60 * 60;
+function createCsrfToken(params) {
+  const now = params.now ?? Date.now();
+  const body = Buffer.from(JSON.stringify({
+    username: params.username,
+    nonce: randomBytes2(24).toString("base64url"),
+    exp: Math.floor(now / 1e3) + CSRF_TTL_SECONDS
+  })).toString("base64url");
+  return `${body}.${sign(body, params.sessionSecret)}`;
+}
+function verifyCsrfToken(params) {
+  if (!params.token) {
+    return false;
+  }
+  const [body, signature] = params.token.split(".");
+  if (!body || !signature || !signatureMatches(signature, sign(body, params.sessionSecret))) {
+    return false;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+  } catch {
+    return false;
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return false;
+  }
+  const payload = parsed;
+  const now = Math.floor((params.now ?? Date.now()) / 1e3);
+  return payload.username === params.username && typeof payload.exp === "number" && payload.exp > now && typeof payload.nonce === "string" && payload.nonce.length > 0;
+}
+function sign(value, secret) {
+  return createHmac2("sha256", secret).update(value).digest("base64url");
+}
+function signatureMatches(a, b) {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && timingSafeEqual2(left, right);
+}
+
+// src/mlclaw-space-runtime/delegated-brokerkit.ts
+import { createHash as createHash2, createHmac as createHmac3, randomBytes as randomBytes4, timingSafeEqual as timingSafeEqual3 } from "node:crypto";
+
+// src/mlclaw-space-runtime/delegated-revisions.ts
+import { randomBytes as randomBytes3 } from "node:crypto";
+var DelegatedRevisions = class {
+  epoch = randomBytes3(16).toString("base64url");
+  revision = 0;
+  material = "";
+  current;
+  waiters = /* @__PURE__ */ new Set();
+  publish(material, value) {
+    if (this.current && material === this.material) return this.current;
+    this.material = material;
+    this.revision += 1;
+    this.current = value(this.cursor());
+    for (const waiter of [...this.waiters])
+      this.finish(waiter, { api_version: "brokerkit.io/operator-ui/v1", cursor: this.cursor(), changed: true });
+    return this.current;
+  }
+  wait(cursor, waitSeconds, signal) {
+    const observed = this.parse(cursor);
+    if (observed === void 0) return Promise.reject(revisionError("cursor_expired"));
+    if (observed !== this.revision) {
+      return Promise.resolve({ api_version: "brokerkit.io/operator-ui/v1", cursor: this.cursor(), changed: true });
+    }
+    if (this.waiters.size >= 256) return Promise.reject(revisionError("source_unavailable"));
+    if (signal?.aborted) return Promise.reject(abortError());
+    return new Promise((resolve, reject) => {
+      const waiter = {
+        resolve,
+        reject,
+        timer: setTimeout(() => {
+          this.finish(waiter, { api_version: "brokerkit.io/operator-ui/v1", cursor: this.cursor(), changed: false });
+        }, waitSeconds * 1e3),
+        ...signal ? { signal } : {}
+      };
+      waiter.timer.unref();
+      if (signal) {
+        waiter.abort = () => this.fail(waiter, abortError());
+        signal.addEventListener("abort", waiter.abort, { once: true });
+      }
+      this.waiters.add(waiter);
+    });
+  }
+  cursor() {
+    return `${this.epoch}.${this.revision.toString(36)}`;
+  }
+  parse(value) {
+    const match2 = /^([A-Za-z0-9_-]{22})\.([0-9a-z]{1,13})$/u.exec(value);
+    if (!match2 || match2[1] !== this.epoch) return void 0;
+    const revision = Number.parseInt(match2[2] ?? "", 36);
+    return Number.isSafeInteger(revision) && revision <= this.revision ? revision : void 0;
+  }
+  finish(waiter, value) {
+    this.cleanup(waiter);
+    waiter.resolve(value);
+  }
+  fail(waiter, error) {
+    this.cleanup(waiter);
+    waiter.reject(error);
+  }
+  cleanup(waiter) {
+    if (!this.waiters.delete(waiter)) return;
+    clearTimeout(waiter.timer);
+    if (waiter.signal && waiter.abort) waiter.signal.removeEventListener("abort", waiter.abort);
+  }
+};
+function revisionError(code) {
+  return Object.assign(new Error(code), { code });
+}
+function abortError() {
+  return new DOMException("The operation was aborted", "AbortError");
+}
+
+// src/mlclaw-space-runtime/delegated-brokerkit.ts
+var API_VERSION = "brokerkit.io/delegated-web/v1";
+var TOKEN_LIFETIME_SECONDS = 4 * 60;
+var MAX_PAGES_PER_SOURCE = 32;
+var MAX_HANDLES = 4096;
+var SOURCE_DEADLINE_MS = 15e3;
+var DelegatedBrokerKit = class {
+  constructor(registry, sessionSecret, now = () => /* @__PURE__ */ new Date(), sourceDeadlineMs = SOURCE_DEADLINE_MS) {
+    this.registry = registry;
+    this.now = now;
+    this.sourceDeadlineMs = sourceDeadlineMs;
+    this.key = createHmac3("sha256", sessionSecret).update("mlclaw/brokerkit-delegated-web/v1", "utf8").digest();
+  }
+  key;
+  handles = /* @__PURE__ */ new Map();
+  handlesByIdentity = /* @__PURE__ */ new Map();
+  snapshotInFlight;
+  revisions = new DelegatedRevisions();
+  issueSession(actor, access) {
+    const issuedAt = Math.floor(this.now().getTime() / 1e3);
+    const expiresAt = issuedAt + TOKEN_LIFETIME_SECONDS;
+    const payload = {
+      version: 1,
+      audience: "brokerkit-delegated-web",
+      subject: actor,
+      issuedAt,
+      expiresAt,
+      nonce: randomBytes4(16).toString("base64url"),
+      access
+    };
+    const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+    const signature = this.sign(encoded);
+    return {
+      api_version: API_VERSION,
+      token: `${encoded}.${signature}`,
+      expires_at: new Date(expiresAt * 1e3).toISOString(),
+      access,
+      renewal_transport: "direct"
+    };
+  }
+  authorize(token) {
+    return this.authorizeSession(token)?.actor;
+  }
+  authorizeSession(token) {
+    const encoded = authenticatedTokenPayload(token, (value) => this.sign(value));
+    if (!encoded) return void 0;
+    const payload = parseTokenPayload(encoded);
+    return payload && tokenIsCurrent(payload, this.now()) ? { actor: payload.subject, sessionId: payload.nonce, access: payload.access } : void 0;
+  }
+  async snapshot() {
+    if (this.snapshotInFlight) return this.snapshotInFlight;
+    const pending = this.buildSnapshot();
+    this.snapshotInFlight = pending;
+    try {
+      return await pending;
+    } finally {
+      if (this.snapshotInFlight === pending) this.snapshotInFlight = void 0;
+    }
+  }
+  async buildSnapshot() {
+    this.pruneHandles();
+    const synchronizedAt = this.now().toISOString();
+    const results = await Promise.all(
+      this.registry.entries().map(async ([summary, client]) => this.sourceSnapshot(summary, client, synchronizedAt))
+    );
+    const selected = selectSnapshotRequests(results, MAX_HANDLES);
+    const reservedHandles = this.selectedExistingHandles(selected);
+    const sources = results.map((result) => result.source);
+    const requests = selected.map(
+      ({ source, request }) => project(source, request, this.handle(source.id, request, reservedHandles))
+    );
+    const material = JSON.stringify({
+      sources: sources.map((source) => ({
+        id: source.id,
+        label: source.label,
+        healthy: source.healthy,
+        ...source.error ? { error: source.error } : {}
+      })),
+      requests
+    });
+    return this.revisions.publish(material, (cursor) => ({
+      api_version: "brokerkit.io/operator-ui/v1",
+      cursor,
+      sources,
+      requests,
+      synchronized_at: synchronizedAt
+    }));
+  }
+  async events(cursor, waitSeconds, signal) {
+    await this.snapshot();
+    const waiting = this.revisions.wait(cursor, waitSeconds, signal);
+    const refresh = setInterval(() => void this.snapshot().catch(() => void 0), 1e3);
+    refresh.unref();
+    try {
+      return await waiting;
+    } catch (error) {
+      if (error instanceof Error && "code" in error && (error.code === "cursor_expired" || error.code === "source_unavailable")) {
+        throw delegatedError(error.code);
+      }
+      throw error;
+    } finally {
+      clearInterval(refresh);
+    }
+  }
+  async summary() {
+    const snapshot = await this.snapshot();
+    return {
+      api_version: snapshot.api_version,
+      cursor: snapshot.cursor,
+      pending: snapshot.requests.filter((value) => value.request.status === "pending").length,
+      healthy: snapshot.sources.every((source) => source.healthy)
+    };
+  }
+  async detail(handle) {
+    const record = this.resolveHandle(handle);
+    const source = this.registry.get(record.sourceId);
+    if (!source) throw delegatedError("source_unavailable");
+    const request = await source.get(record.requestId);
+    if (request.revision !== record.revision) throw delegatedError("revision_stale");
+    return project(source.summary(), request, handle);
+  }
+  async decide(handle, action, expectedRevision, actor, options = {}) {
+    const record = this.resolveHandle(handle);
+    const source = this.registry.get(record.sourceId);
+    if (!source) throw delegatedError("source_unavailable");
+    const current = await source.get(record.requestId);
+    assertDecisionAllowed(current, record, action, expectedRevision, options);
+    const decision = decisionOptions(record, action, expectedRevision, actor, options);
+    const updated = await decideWithRecovery(source, record.requestId, action, decision);
+    if (updated.status === "pending" || updated.status === "active") {
+      this.removeHandle(handle, record);
+      return project(source.summary(), updated, this.handle(record.sourceId, updated));
+    }
+    this.removeHandle(handle, record);
+    return project(source.summary(), updated, handle);
+  }
+  async sourceSnapshot(summary, client, synchronizedAt) {
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(), this.sourceDeadlineMs);
+    timer.unref?.();
+    try {
+      await client.discover(deadline.signal);
+      const pages = await Promise.all([
+        this.sourceRequests(client, "pending", deadline.signal),
+        this.sourceRequests(client, "active", deadline.signal)
+      ]);
+      const requests = reconcileRequests(pages.map((page2) => page2.requests));
+      return {
+        source: deadline.signal.aborted ? { ...summary, healthy: false, error: "broker_timeout" } : pages.some((page2) => page2.truncated) ? { ...summary, healthy: false, error: "source_truncated" } : { ...summary, healthy: true, last_sync_at: synchronizedAt },
+        requests
+      };
+    } catch (error) {
+      return {
+        source: { ...summary, healthy: false, error: safeSourceError(error) },
+        requests: []
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  async sourceRequests(client, status, signal) {
+    const requests = [];
+    let cursor;
+    try {
+      for (let pageNumber = 0; pageNumber < MAX_PAGES_PER_SOURCE; pageNumber += 1) {
+        const page2 = await client.list({ status, ...cursor ? { cursor } : {}, limit: 100 }, signal);
+        requests.push(...page2.requests);
+        cursor = page2.next_cursor;
+        if (!cursor) return { requests, truncated: false };
+      }
+    } catch (error) {
+      if (!signal.aborted) throw error;
+    }
+    return { requests, truncated: Boolean(cursor) };
+  }
+  selectedExistingHandles(selected) {
+    const handles = /* @__PURE__ */ new Set();
+    for (const { source, request } of selected) {
+      const handle = this.handlesByIdentity.get(requestIdentity(source.id, request.id, request.revision));
+      if (handle && this.handles.has(handle)) handles.add(handle);
+    }
+    return handles;
+  }
+  handle(sourceId, request, reservedHandles = /* @__PURE__ */ new Set()) {
+    const identity = requestIdentity(sourceId, request.id, request.revision);
+    const existing = this.handlesByIdentity.get(identity);
+    if (existing && this.handles.has(existing)) {
+      reservedHandles.add(existing);
+      return existing;
+    }
+    if (this.handles.size >= MAX_HANDLES && !this.pruneOldestHandle(reservedHandles)) {
+      throw delegatedError("source_unavailable");
+    }
+    const handle = randomBytes4(18).toString("base64url");
+    const requestExpiry = Date.parse(handleExpiry(request));
+    const expiresAtMs = Number.isFinite(requestExpiry) ? Math.min(requestExpiry, this.now().getTime() + 24 * 60 * 6e4) : this.now().getTime() + 5 * 6e4;
+    this.handles.set(handle, { sourceId, requestId: request.id, revision: request.revision, expiresAtMs });
+    this.handlesByIdentity.set(identity, handle);
+    reservedHandles.add(handle);
+    return handle;
+  }
+  resolveHandle(handle) {
+    if (!/^[A-Za-z0-9_-]{24}$/u.test(handle)) throw delegatedError("request_not_found");
+    const record = this.handles.get(handle);
+    if (!record || record.expiresAtMs <= this.now().getTime()) {
+      if (record) this.removeHandle(handle, record);
+      throw delegatedError("request_not_found");
+    }
+    return record;
+  }
+  pruneHandles() {
+    for (const [handle, record] of this.handles) {
+      if (record.expiresAtMs <= this.now().getTime()) this.removeHandle(handle, record);
+    }
+  }
+  pruneOldestHandle(reservedHandles) {
+    for (const [handle, record] of this.handles) {
+      if (reservedHandles.has(handle)) continue;
+      this.removeHandle(handle, record);
+      return true;
+    }
+    return false;
+  }
+  removeHandle(handle, record) {
+    this.handles.delete(handle);
+    this.handlesByIdentity.delete(requestIdentity(record.sourceId, record.requestId, record.revision));
+  }
+  sign(encoded) {
+    return createHmac3("sha256", this.key).update(encoded, "utf8").digest("base64url");
+  }
+};
+async function decideWithRecovery(source, requestId, action, decision) {
+  try {
+    return await source.decide(requestId, action, decision);
+  } catch (error) {
+    if (error instanceof BrokerOperatorError) throw error;
+    try {
+      await source.get(requestId);
+    } catch {
+      throw delegatedError("source_unavailable");
+    }
+    try {
+      return await source.decide(requestId, action, decision);
+    } catch (retryError) {
+      if (retryError instanceof BrokerOperatorError) throw retryError;
+      throw delegatedError("source_unavailable");
+    }
+  }
+}
+function selectSnapshotRequests(results, limit) {
+  const buckets = results.flatMap(
+    (result) => ["pending", "active"].map((status) => ({
+      source: result.source,
+      requests: result.requests.filter((request) => request.status === status),
+      index: 0
+    }))
+  );
+  const selected = [];
+  while (selected.length < limit) {
+    let added = false;
+    for (const bucket of buckets) {
+      const request = bucket.requests[bucket.index];
+      if (!request) continue;
+      selected.push({ source: bucket.source, request });
+      bucket.index += 1;
+      added = true;
+      if (selected.length === limit) break;
+    }
+    if (!added) break;
+  }
+  return selected;
+}
+function reconcileRequests(pages) {
+  const requests = /* @__PURE__ */ new Map();
+  for (const request of pages.flat()) {
+    const current = requests.get(request.id);
+    if (!current || request.revision > current.revision || request.revision === current.revision && request.status === "active" && current.status !== "active") {
+      requests.set(request.id, request);
+    }
+  }
+  return [...requests.values()];
+}
+var DelegatedBrokerKitError = class extends Error {
+  constructor(code) {
+    super(code);
+    this.code = code;
+  }
+};
+function delegatedError(code) {
+  return new DelegatedBrokerKitError(code);
+}
+function project(source, request, handle) {
+  return { source_id: source.id, source_label: source.label, handle, request };
+}
+function requestIdentity(sourceId, requestId, revision) {
+  return `${sourceId}\0${requestId}\0${revision}`;
+}
+function handleExpiry(request) {
+  if (request.status === "active") return request.active_expires_at ?? "";
+  return request.pending_expires_at ?? request.active_expires_at ?? "";
+}
+function decisionKey(record, action, actor) {
+  return createHash2("sha256").update(
+    ["mlclaw-brokerkit-decision-v1", record.sourceId, record.requestId, String(record.revision), action, actor].join(
+      "\0"
+    ),
+    "utf8"
+  ).digest("base64url");
+}
+function decisionOptions(record, action, expectedRevision, actor, options) {
+  return {
+    expectedRevision,
+    idempotencyKey: decisionKey(record, action, actor),
+    onBehalfOf: `mlclaw:${actor}`,
+    ...options.durationSeconds ? { durationSeconds: options.durationSeconds } : {},
+    ...options.maxUses !== void 0 ? { maxUses: options.maxUses } : {}
+  };
+}
+function decisionWithinBounds(action, request, options) {
+  if (options.durationSeconds === void 0 && options.maxUses === void 0) return true;
+  const bounds = request.approval_bounds;
+  return Boolean(
+    action === "approve" && bounds && options.durationSeconds !== void 0 && options.durationSeconds <= bounds.max_duration_seconds && useLimitWithinBounds(options.maxUses, bounds.max_uses)
+  );
+}
+function useLimitWithinBounds(requested, maximum) {
+  if (requested === void 0) return false;
+  if (requested === null) return maximum === null;
+  return maximum === null || requested <= maximum;
+}
+function assertDecisionAllowed(request, record, action, expectedRevision, options) {
+  if (request.revision !== record.revision || request.revision !== expectedRevision) {
+    throw delegatedError("revision_stale");
+  }
+  if (!request.allowed_actions.includes(action) || !decisionWithinBounds(action, request, options)) {
+    throw delegatedError("action_not_allowed");
+  }
+}
+function authenticatedTokenPayload(token, sign3) {
+  if (!token || token.length > 4096 || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u.test(token)) return void 0;
+  const [encoded, signature, extra] = token.split(".");
+  return encoded && signature && extra === void 0 && safeEqual(signature, sign3(encoded)) ? encoded : void 0;
+}
+function parseTokenPayload(encoded) {
+  try {
+    const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+    return validTokenPayload(payload) ? payload : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function tokenIsCurrent(payload, now) {
+  const current = Math.floor(now.getTime() / 1e3);
+  return payload.issuedAt <= current + 5 && payload.expiresAt > current && payload.expiresAt - payload.issuedAt <= TOKEN_LIFETIME_SECONDS;
+}
+function validTokenPayload(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value;
+  return hasExactTokenFields(record) && validTokenIdentity(record) && validTokenTimes(record) && validTokenNonce(record);
+}
+function hasExactTokenFields(record) {
+  return Object.keys(record).sort().join(",") === "access,audience,expiresAt,issuedAt,nonce,subject,version";
+}
+function validTokenIdentity(record) {
+  return record.version === 1 && record.audience === "brokerkit-delegated-web" && (record.access === "read" || record.access === "decide") && typeof record.subject === "string" && record.subject.length >= 1 && record.subject.length <= 200;
+}
+function validTokenTimes(record) {
+  return typeof record.issuedAt === "number" && Number.isSafeInteger(record.issuedAt) && typeof record.expiresAt === "number" && Number.isSafeInteger(record.expiresAt);
+}
+function validTokenNonce(record) {
+  return typeof record.nonce === "string" && /^[A-Za-z0-9_-]{22}$/u.test(record.nonce);
+}
+function safeEqual(left, right) {
+  const a = Buffer.from(left, "utf8");
+  const b = Buffer.from(right, "utf8");
+  return a.length === b.length && timingSafeEqual3(a, b);
+}
+function safeSourceError(error) {
+  const code = error instanceof BrokerOperatorError ? error.code : error instanceof DelegatedBrokerKitError ? error.code : void 0;
+  if (code === "broker_timeout" || code === "unavailable" || code === "source_unavailable") return code;
+  return "source_unavailable";
+}
+
+// src/mlclaw-space-runtime/hub-settings.ts
+function runtimeSettings(config2) {
+  return {
+    agentName: config2.agentName ?? null,
+    model: config2.model,
+    stateBucket: config2.stateBucket ?? null,
+    stateMountDir: config2.stateMountDir ?? null,
+    statePrefix: config2.statePrefix ?? null,
+    gatewayLocation: config2.gatewayLocation ?? null,
+    runtimeImage: config2.runtimeImage ?? null,
+    runtimeId: config2.runtimeId ?? null,
+    templateRev: config2.templateRev ?? null,
+    allowedUsers: config2.allowedUsers,
+    adminUsers: config2.adminUsers,
+    modelChoices: config2.modelChoices,
+    presetModels: PRESET_MODEL_CHOICES,
+    branding: publicBranding(config2.branding)
+  };
+}
+function normalizeModel(value) {
+  return normalizeModelRef(value);
+}
+async function setCurrentSpaceVariable(config2, key, value) {
+  if (!config2.spaceId || !config2.hfToken) {
+    throw new Error("Space mutation requires SPACE_ID and HF_TOKEN");
+  }
+  await hubRequest(config2, `/api/spaces/${config2.spaceId}/variables`, {
+    method: "POST",
+    body: JSON.stringify({ key, value }),
+    headers: { "content-type": "application/json" }
+  });
+}
+async function setCurrentSpaceSecret(config2, key, value) {
+  if (!config2.spaceId || !config2.hfToken) {
+    throw new Error("Space mutation requires SPACE_ID and HF_TOKEN");
+  }
+  await hubRequest(config2, `/api/spaces/${config2.spaceId}/secrets`, {
+    method: "POST",
+    body: JSON.stringify({ key, value }),
+    headers: { "content-type": "application/json" }
+  });
+}
+async function restartCurrentSpace(config2) {
+  if (!config2.spaceId || !config2.hfToken) {
+    return false;
+  }
+  await hubRequest(config2, `/api/spaces/${config2.spaceId}/restart`, {
+    method: "POST",
+    body: JSON.stringify({ factoryReboot: false }),
+    headers: { "content-type": "application/json" }
+  });
+  return true;
+}
+async function hubRequest(config2, path5, init) {
+  const response = await fetch(`${config2.hubUrl.replace(/\/+$/, "")}${path5}`, {
+    ...init,
+    headers: {
+      authorization: `Bearer ${config2.hfToken}`,
+      ...init.headers
+    }
+  });
+  if (!response.ok) {
+    throw new Error(`Hub request failed: ${response.status} ${await response.text()}`);
+  }
+  return response;
+}
 
 // node_modules/zod/v3/external.js
 var external_exports = {};
@@ -4680,3269 +11174,6 @@ var coerce = {
   date: ((arg) => ZodDate.create({ ...arg, coerce: true }))
 };
 var NEVER = INVALID;
-
-// src/mlclaw-space-runtime/operator-brokers.ts
-var MAX_CONFIG_BYTES = 64 * 1024;
-var MAX_TOKEN_BYTES = 4096;
-var MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
-var DEFAULT_REQUEST_TIMEOUT_MS = 1e4;
-var BROKER_ID = /^[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
-var displayFieldSchema = external_exports.object({
-  label: external_exports.string().min(1).max(80),
-  value: external_exports.string().min(1).max(500)
-}).strict();
-var approvalSchema = external_exports.object({
-  id: external_exports.string().min(1).max(128),
-  revision: external_exports.number().int().positive().safe(),
-  requester: external_exports.string().min(1).max(80),
-  operation: external_exports.string().min(1).max(500),
-  status: external_exports.enum(["pending", "active", "denied", "canceled", "expired", "consumed", "revoked"]),
-  requested_at: external_exports.string().datetime({ offset: true }),
-  pending_expires_at: external_exports.string().datetime({ offset: true }).optional(),
-  active_expires_at: external_exports.string().datetime({ offset: true }).optional(),
-  requested_duration_seconds: external_exports.number().int().positive().safe(),
-  requested_max_uses: external_exports.number().int().positive().safe().nullable(),
-  granted_max_uses: external_exports.number().int().positive().safe().nullable(),
-  used_count: external_exports.number().int().nonnegative().safe(),
-  request_reason: external_exports.string().max(2e3).optional(),
-  decided_at: external_exports.string().datetime({ offset: true }).optional(),
-  decided_by: external_exports.string().max(200).optional(),
-  decided_on_behalf_of: external_exports.string().max(200).optional(),
-  presentation: external_exports.object({
-    risk: external_exports.enum(["unknown", "low", "medium", "high", "critical"]),
-    title: external_exports.string().min(1).max(200),
-    summary: external_exports.string().max(2e3).optional(),
-    facts: external_exports.array(displayFieldSchema).max(20).optional()
-  }).strict(),
-  presentation_unavailable: external_exports.boolean().optional(),
-  allowed_actions: external_exports.array(external_exports.enum(["approve", "deny", "revoke"])).max(3),
-  approval_bounds: external_exports.object({
-    max_duration_seconds: external_exports.number().int().positive().safe(),
-    max_uses: external_exports.number().int().positive().safe().nullable()
-  }).strict().optional()
-}).strict();
-var approvalPageSchema = external_exports.object({
-  requests: external_exports.array(approvalSchema).max(100),
-  next_cursor: external_exports.string().min(1).max(1024).optional(),
-  event_cursor: external_exports.string().min(1).max(1024).optional()
-}).strict();
-var operatorErrorSchema = external_exports.object({
-  error: external_exports.object({
-    code: external_exports.string().min(1).max(200).optional(),
-    message: external_exports.string().min(1).max(2e3).optional()
-  }).optional()
-}).passthrough();
-var BrokerOperatorError = class extends Error {
-  constructor(broker, status, code, message) {
-    super(message);
-    this.broker = broker;
-    this.status = status;
-    this.code = code;
-  }
-};
-function requestDeadline(timeoutMs, signal) {
-  const timeout = new AbortController();
-  const timer = setTimeout(() => timeout.abort(), timeoutMs);
-  timer.unref?.();
-  return {
-    signal: signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal,
-    timedOut: () => timeout.signal.aborted,
-    clear: () => clearTimeout(timer)
-  };
-}
-var BrokerOperatorClient = class {
-  constructor(options) {
-    this.options = options;
-    this.baseUrl = options.baseUrl.replace(/\/+$/, "");
-    this.fetchImpl = options.fetch ?? fetch;
-    this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-    if (!Number.isSafeInteger(this.requestTimeoutMs) || this.requestTimeoutMs < 1) {
-      throw new Error("operator broker request timeout must be a positive integer");
-    }
-  }
-  fetchImpl;
-  baseUrl;
-  requestTimeoutMs;
-  summary() {
-    return { id: this.options.id, label: this.options.label };
-  }
-  discover(signal) {
-    return this.request(
-      "/.well-known/brokerkit-operator",
-      signal ? { signal } : void 0,
-      external_exports.object({ api_version: external_exports.literal("brokerkit.io/operator/v1") }).passthrough(),
-      "discovery"
-    );
-  }
-  list(params = {}, signal) {
-    const query = new URLSearchParams();
-    if (params.status) {
-      query.set("status", params.status);
-    }
-    if (params.cursor) {
-      query.set("cursor", params.cursor);
-    }
-    if (params.limit) {
-      query.set("limit", String(params.limit));
-    }
-    const suffix = query.size > 0 ? `?${query}` : "";
-    return this.request(
-      `/api/operator/v1/requests${suffix}`,
-      signal ? { signal } : void 0,
-      approvalPageSchema,
-      "request list"
-    );
-  }
-  get(id) {
-    return this.request(
-      `/api/operator/v1/requests/${approvalId(id)}`,
-      void 0,
-      approvalSchema,
-      "request"
-    );
-  }
-  decide(id, action, decision) {
-    return this.request(
-      `/api/operator/v1/requests/${approvalId(id)}/${action}`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          expected_revision: decision.expectedRevision,
-          idempotency_key: decision.idempotencyKey,
-          on_behalf_of: decision.onBehalfOf,
-          ...decision.durationSeconds !== void 0 || decision.maxUses !== void 0 ? {
-            constraints: {
-              ...decision.durationSeconds !== void 0 ? { duration_seconds: decision.durationSeconds } : {},
-              ...decision.maxUses !== void 0 ? { max_uses: decision.maxUses } : {}
-            }
-          } : {}
-        })
-      },
-      approvalSchema,
-      "request"
-    );
-  }
-  async events(lastEventId, signal) {
-    const headers = {
-      accept: "text/event-stream",
-      authorization: `Bearer ${this.options.token}`
-    };
-    const cursor = lastEventId ? `?cursor=${encodeURIComponent(lastEventId)}` : "";
-    const response = await this.fetchImpl(`${this.baseUrl}/api/operator/v1/events${cursor}`, {
-      headers,
-      redirect: "error",
-      ...signal ? { signal } : {}
-    });
-    if (!response.ok) {
-      throw await this.operatorError(response);
-    }
-    if (!response.headers.get("content-type")?.toLowerCase().startsWith("text/event-stream")) {
-      await response.body?.cancel();
-      throw new BrokerOperatorError(
-        this.summary(),
-        502,
-        "invalid_event_stream",
-        "Broker returned an invalid event stream"
-      );
-    }
-    return response;
-  }
-  async request(pathname, init, schema, label) {
-    const headers = new Headers(init?.headers);
-    headers.set("accept", "application/json");
-    headers.set("authorization", `Bearer ${this.options.token}`);
-    const deadline = requestDeadline(this.requestTimeoutMs, init?.signal ?? void 0);
-    try {
-      const response = await this.fetchImpl(`${this.baseUrl}${pathname}`, {
-        ...init ?? {},
-        headers,
-        redirect: "error",
-        signal: deadline.signal
-      });
-      if (!response.ok) {
-        throw await this.operatorError(response);
-      }
-      return validatedBrokerPayload(await boundedJson(response), schema, label);
-    } catch (err) {
-      if (deadline.timedOut()) {
-        throw new BrokerOperatorError(
-          this.summary(),
-          504,
-          "broker_timeout",
-          `${this.options.label} operator request timed out`
-        );
-      }
-      throw err;
-    } finally {
-      deadline.clear();
-    }
-  }
-  async operatorError(response) {
-    const fallback = `${this.options.label} operator request failed`;
-    try {
-      const value = validatedBrokerPayload(
-        await boundedJson(response),
-        operatorErrorSchema,
-        "error"
-      );
-      const message = value.error?.message?.trim() || fallback;
-      const code = value.error?.code?.trim();
-      return new BrokerOperatorError(this.summary(), response.status, code, message);
-    } catch {
-      return new BrokerOperatorError(this.summary(), response.status, void 0, fallback);
-    }
-  }
-};
-var OperatorBrokerRegistry = class {
-  clients;
-  constructor(configs, fetchImpl) {
-    this.clients = new Map(
-      configs.map((config2) => [
-        config2.id,
-        new BrokerOperatorClient({ ...config2, ...fetchImpl ? { fetch: fetchImpl } : {} })
-      ])
-    );
-  }
-  list() {
-    return [...this.clients.values()].map((client) => client.summary());
-  }
-  get(id) {
-    return this.clients.get(id);
-  }
-  entries() {
-    return [...this.clients.values()].map((client) => [client.summary(), client]);
-  }
-};
-function loadOperatorBrokers(file) {
-  if (!file) {
-    return [];
-  }
-  if (!isAbsolute(file)) {
-    throw new Error("MLCLAW_OPERATOR_BROKERS_FILE must be absolute");
-  }
-  const raw2 = readBoundedFile(file, MAX_CONFIG_BYTES, "operator broker configuration");
-  let parsed;
-  try {
-    parsed = JSON.parse(raw2);
-  } catch {
-    throw new Error("operator broker configuration must be valid JSON");
-  }
-  const root = strictRecord(parsed, ["version", "brokers"], "operator broker configuration");
-  if (root.version !== 1) {
-    throw new Error("operator broker configuration version must be 1");
-  }
-  if (!Array.isArray(root.brokers) || root.brokers.length > 16) {
-    throw new Error("operator broker configuration must contain at most 16 brokers");
-  }
-  const ids = /* @__PURE__ */ new Set();
-  const urls = /* @__PURE__ */ new Set();
-  return root.brokers.map((value, index) => {
-    const entry = strictRecord(value, ["id", "label", "url", "token_file"], `broker ${index}`);
-    const id = requiredString(entry.id, `broker ${index} id`);
-    if (!BROKER_ID.test(id) || ids.has(id)) {
-      throw new Error(`broker ${index} id is invalid or duplicated`);
-    }
-    ids.add(id);
-    const label = requiredString(entry.label, `broker ${index} label`);
-    if ([...label].length > 80 || new RegExp("\\p{Cc}", "u").test(label)) {
-      throw new Error(`broker ${index} label is invalid`);
-    }
-    const baseUrl = operatorOrigin(requiredString(entry.url, `broker ${index} url`));
-    if (urls.has(baseUrl)) {
-      throw new Error(`broker ${index} URL is duplicated`);
-    }
-    urls.add(baseUrl);
-    const tokenFile = requiredString(entry.token_file, `broker ${index} token_file`);
-    if (!isAbsolute(tokenFile)) {
-      throw new Error(`broker ${index} token_file must be absolute`);
-    }
-    const token = readBoundedFile(tokenFile, MAX_TOKEN_BYTES, `broker ${id} token`).trim();
-    if (!/^[\x21-\x7e]{24,4096}$/u.test(token)) {
-      throw new Error(`broker ${id} token is invalid`);
-    }
-    return { id, label, baseUrl, token };
-  });
-}
-function operatorOrigin(value) {
-  let url;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new Error("broker URL must be an absolute HTTP URL");
-  }
-  const supportedProtocol = (/* @__PURE__ */ new Set(["http:", "https:"])).has(url.protocol);
-  const hasAuthorityOrSuffix = [url.username, url.password, url.search, url.hash].some(Boolean);
-  const hasPath = !["", "/"].includes(url.pathname);
-  if (!supportedProtocol || hasAuthorityOrSuffix || hasPath) {
-    throw new Error("broker URL must be one HTTP origin without credentials, path, query, or fragment");
-  }
-  return url.origin;
-}
-function strictRecord(value, keys, label) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`${label} must be an object`);
-  }
-  const record = value;
-  if (Object.keys(record).some((key) => !keys.includes(key)) || keys.some((key) => !(key in record))) {
-    throw new Error(`${label} has missing or unknown fields`);
-  }
-  return record;
-}
-function requiredString(value, label) {
-  if (typeof value !== "string" || !value || value !== value.trim()) {
-    throw new Error(`${label} must be a non-empty trimmed string`);
-  }
-  return value;
-}
-function readBoundedFile(file, maximum, label) {
-  let value;
-  try {
-    value = readFileSync(file, "utf8");
-  } catch {
-    throw new Error(`${label} could not be read`);
-  }
-  if (Buffer.byteLength(value) > maximum) {
-    throw new Error(`${label} is too large`);
-  }
-  return value;
-}
-function approvalId(id) {
-  return encodeURIComponent(id);
-}
-async function boundedJson(response) {
-  if (!response.body) {
-    throw new Error("broker response body is empty");
-  }
-  const reader = response.body.getReader();
-  const chunks = [];
-  let size = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-    size += value.byteLength;
-    if (size > MAX_RESPONSE_BYTES) {
-      await reader.cancel();
-      throw new Error("broker response is too large");
-    }
-    chunks.push(value);
-  }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-}
-function validatedBrokerPayload(value, schema, label) {
-  const parsed = schema.safeParse(value);
-  if (!parsed.success) {
-    throw new Error(`broker ${label} response is invalid`);
-  }
-  return parsed.data;
-}
-
-// src/mlclaw-space-runtime/local-access.ts
-import { createHmac, timingSafeEqual } from "node:crypto";
-var LOCAL_ACCESS_CONTEXT = "mlclaw-local-access-v1";
-function deriveLocalAccessToken(sessionSecret) {
-  return createHmac("sha256", sessionSecret).update(LOCAL_ACCESS_CONTEXT).digest("base64url");
-}
-function localAccessTokenMatches(candidate, expected) {
-  const left = Buffer.from(candidate);
-  const right = Buffer.from(expected);
-  return left.length === right.length && timingSafeEqual(left, right);
-}
-
-// src/mlclaw-space-runtime/config.ts
-function loadConfig(env = process.env) {
-  const port = integer(env.PORT ?? env.MLCLAW_SPACE_PORT, 7860);
-  const openclawPort = integer(env.MLCLAW_OPENCLAW_PORT ?? env.OPENCLAW_GATEWAY_PORT, 7861);
-  const mcpPort = integer(env.MLCLAW_MCP_PORT, 7862);
-  const spaceId = trim(env.SPACE_ID);
-  const canonicalSpaceId = trim(env.MLCLAW_CANONICAL_SPACE_ID) ?? "osolmaz/mlclaw";
-  const canonicalCreatorUserId = trim(env.MLCLAW_CANONICAL_CREATOR_USER_ID);
-  const spaceCreatorUserId = trim(env.SPACE_CREATOR_USER_ID);
-  const mode = resolveMode({
-    env,
-    spaceId,
-    canonicalSpaceId,
-    canonicalCreatorUserId,
-    spaceCreatorUserId
-  });
-  const owner = ownerFromSpaceId(spaceId);
-  const stateBucket = trim(env.OPENCLAW_HF_STATE_BUCKET);
-  const gatewayLocation = trim(env.MLCLAW_GATEWAY_LOCATION);
-  const localAccessUser = gatewayLocation === "local" ? trim(env.MLCLAW_LOCAL_ACCESS_USER) ?? ownerFromRepoId(stateBucket) : void 0;
-  const configuredAllowedUsers = splitUsers(env.MLCLAW_ALLOWED_USERS ?? env.ALLOWED_USERS);
-  const configuredAdmins = splitUsers(env.MLCLAW_ADMINS);
-  const resolvedAdmins = uniqueUsers([
-    ...configuredAdmins.length > 0 ? configuredAdmins : owner ? [owner] : configuredAllowedUsers.slice(0, 1),
-    ...localAccessUser ? [localAccessUser] : []
-  ]);
-  const allowedUsers = uniqueUsers([...configuredAllowedUsers, ...resolvedAdmins, ...owner ? [owner] : []]);
-  const publicUrl = publicUrlFromEnv(env, port);
-  const accessOrigins = accessOriginsFromEnv(env, publicUrl);
-  const sessionSecret = trim(env.MLCLAW_SESSION_SECRET ?? env.SESSION_SECRET) ?? randomBytes(48).toString("base64url");
-  const configuredCredentialKey = trim(env.MLCLAW_CREDENTIAL_KEY);
-  if (mode === "app" && !configuredCredentialKey) {
-    throw new Error("MLCLAW_CREDENTIAL_KEY is required in app mode; run mlclaw doctor --fix");
-  }
-  const credentialKey = configuredCredentialKey ?? randomBytes(32).toString("base64url");
-  const openclawCommand = trim(env.MLCLAW_OPENCLAW_COMMAND) ?? "openclaw";
-  const openclawArgs = splitArgs(env.MLCLAW_OPENCLAW_ARGS) ?? ["gateway"];
-  const runtimeSettingsFile = trim(env.MLCLAW_RUNTIME_SETTINGS_FILE) ?? "/home/node/.local/share/mlclaw/live/.mlclaw/settings.json";
-  const stateMountDir = trim(env.MLCLAW_STATE_MOUNT_DIR);
-  const statePrefix = trim(env.OPENCLAW_HF_STATE_PREFIX);
-  const mcpCredentialFile = trim(env.MLCLAW_MCP_CREDENTIAL_FILE) ?? (stateMountDir ? `${stateMountDir.replace(/\/+$/, "")}/${normalizeBucketPrefix(statePrefix)}/.mlclaw/mcp-oauth.enc` : `${pathDirname(runtimeSettingsFile)}/mcp-oauth.enc`);
-  const openaiCredentialStoreFile = trim(env.MLCLAW_OPENAI_CREDENTIAL_STORE_FILE) ?? (stateMountDir ? `${stateMountDir.replace(/\/+$/, "")}/${normalizeBucketPrefix(statePrefix)}/.mlclaw/openai-api-key.enc` : `${pathDirname(pathDirname(runtimeSettingsFile))}/.mlclaw-protected/control/openai-api-key.enc`);
-  const runtimeSettings2 = readRuntimeSettings(runtimeSettingsFile);
-  const model = runtimeSettings2.model ?? trim(env.OPENCLAW_MODEL) ?? DEFAULT_MODEL;
-  const agentName = trim(env.OPENCLAW_AGENT_NAME);
-  return {
-    port,
-    openclawPort,
-    mcpPort,
-    openclawHost: trim(env.MLCLAW_OPENCLAW_HOST) ?? "127.0.0.1",
-    openclawUid: integer(env.MLCLAW_OPENCLAW_UID, 1e3),
-    openclawGid: integer(env.MLCLAW_OPENCLAW_GID, 1e3),
-    publicUrl,
-    accessOrigins,
-    providerUrl: trim(env.OPENID_PROVIDER_URL) ?? "https://huggingface.co",
-    oauthClientId: trim(env.OAUTH_CLIENT_ID),
-    oauthClientSecret: trim(env.OAUTH_CLIENT_SECRET),
-    sessionSecret,
-    sessionSecretGenerated: !trim(env.MLCLAW_SESSION_SECRET ?? env.SESSION_SECRET),
-    credentialKey,
-    credentialKeyGenerated: !configuredCredentialKey,
-    cookieSecure: env.MLCLAW_COOKIE_SECURE === "0" ? false : !publicUrl.startsWith("http://"),
-    sessionCookieName: gatewayLocation === "local" ? localSessionCookieName(trim(env.MLCLAW_RUNTIME_ID) ?? publicUrl) : SESSION_COOKIE_PREFIX,
-    spaceId,
-    canonicalSpaceId,
-    canonicalCreatorUserId,
-    spaceCreatorUserId,
-    allowedUsers,
-    adminUsers: resolvedAdmins,
-    allowAnySignedIn: env.MLCLAW_ALLOW_ANY_SIGNED_IN === "1" || env.MLCLAW_ALLOW_ANY_SIGNED_IN === "true",
-    localAccessUser,
-    localAccessToken: gatewayLocation === "local" && localAccessUser ? deriveLocalAccessToken(sessionSecret) : void 0,
-    mode,
-    hfToken: readOptionalSecret(trim(env.MLCLAW_TRUSTED_HF_TOKEN_FILE)) ?? trim(env.HF_TOKEN ?? env.HUGGINGFACE_HUB_TOKEN),
-    routerToken: trim(env.MLCLAW_ROUTER_TOKEN ?? env.HF_ROUTER_TOKEN),
-    brokerAgentUrl: trim(env.MLCLAW_HF_BROKER_URL),
-    brokerAgentSecret: readOptionalSecret(trim(env.MLCLAW_HF_BROKER_AGENT_SECRET_FILE)),
-    brokerAgentSecretFile: trim(env.MLCLAW_HF_BROKER_AGENT_SECRET_FILE),
-    operatorBrokers: loadOperatorBrokers(trim(env.MLCLAW_OPERATOR_BROKERS_FILE)),
-    brokerKitPopoverDecisions: env.MLCLAW_BROKERKIT_POPOVER_DECISIONS !== "0" && env.MLCLAW_BROKERKIT_POPOVER_DECISIONS !== "false",
-    hubUrl: trim(env.HF_ENDPOINT) ?? "https://huggingface.co",
-    openaiCredentialFile: trim(env.MLCLAW_OPENAI_CREDENTIAL_FILE) ?? "/tmp/mlclaw-secrets/openai.env",
-    openaiCredentialStoreFile,
-    mcpCredentialFile,
-    hfMcpUrl: trim(env.MLCLAW_HF_MCP_URL) ?? "https://huggingface.co/mcp?bouquet=hf",
-    researchMcpUrl: trim(env.MLCLAW_RESEARCH_MCP_URL) ?? "https://evalstate-research-agent-two.hf.space/mcp",
-    researchTimeoutMs: integer(env.MLCLAW_RESEARCH_TIMEOUT_MS, 30 * 60 * 1e3),
-    researchPollMs: integer(env.MLCLAW_RESEARCH_POLL_MS, 1500),
-    runtimeSettingsFile,
-    openclawConfigPath: trim(env.OPENCLAW_CONFIG_PATH) ?? "/home/node/.local/share/mlclaw/live/.openclaw/openclaw.json",
-    openclawCommand,
-    openclawArgs,
-    brokerKitPluginPath: trim(env.MLCLAW_BROKERKIT_PLUGIN_PATH) ?? "/opt/openclaw-plugins/node_modules/openclaw-brokerkit",
-    agentName,
-    model,
-    modelChoices: runtimeSettings2.modelChoices ?? parseModelChoicesEnv(env.MLCLAW_MODEL_CHOICES, model),
-    routerModelsUrl: trim(env.MLCLAW_ROUTER_MODELS_URL) ?? "https://router.huggingface.co/v1/models",
-    stateBucket,
-    stateMountDir,
-    statePrefix,
-    gatewayLocation,
-    runtimeImage: trim(env.MLCLAW_RUNTIME_IMAGE),
-    runtimeId: trim(env.MLCLAW_RUNTIME_ID),
-    templateRev: trim(env.MLCLAW_TEMPLATE_REV),
-    assetsDir: trim(env.MLCLAW_ASSETS_DIR) ?? "/app/assets",
-    branding: resolveBranding(env, agentName)
-  };
-}
-var SESSION_COOKIE_PREFIX = "mlclaw_session";
-function localSessionCookieName(identity) {
-  return `${SESSION_COOKIE_PREFIX}_${createHash("sha256").update(identity).digest("hex").slice(0, 12)}`;
-}
-function accessOriginsFromEnv(env, publicUrl) {
-  const configured = (env.MLCLAW_ACCESS_ORIGINS ?? "").split(",").map((value) => value.trim()).filter(Boolean);
-  if (configured.length > 8) {
-    throw new Error("MLCLAW_ACCESS_ORIGINS supports at most 8 origins");
-  }
-  const origins = [.../* @__PURE__ */ new Set([publicUrl, ...configured.map(parseAccessOrigin)])];
-  if (origins.length > 8) {
-    throw new Error("MLCLAW_ACCESS_ORIGINS supports at most 8 origins including MLCLAW_PUBLIC_URL");
-  }
-  return origins;
-}
-function parseAccessOrigin(value) {
-  const url = new URL(value);
-  if (url.protocol !== "http:" && url.protocol !== "https:" || url.username || url.password || url.hostname.includes("*") || url.pathname !== "/" || url.search || url.hash) {
-    throw new Error(
-      "MLCLAW_ACCESS_ORIGINS entries must be HTTP origins without credentials, wildcard hosts, paths, queries, or fragments"
-    );
-  }
-  return url.origin;
-}
-function readOptionalSecret(file) {
-  if (!file) {
-    return void 0;
-  }
-  try {
-    return trim(readFileSync2(file, "utf8"));
-  } catch {
-    return void 0;
-  }
-}
-function integrationCredentialSlot(config2) {
-  return config2.adminUsers[0];
-}
-function pathDirname(file) {
-  const slash = file.lastIndexOf("/");
-  return slash > 0 ? file.slice(0, slash) : ".";
-}
-function resolveMode(params) {
-  if (params.env.MLCLAW_FORCE_TEMPLATE === "1") {
-    return "template";
-  }
-  if (params.env.MLCLAW_FORCE_APP === "1") {
-    return "app";
-  }
-  const isCanonicalSpace = Boolean(params.spaceId && params.spaceId === params.canonicalSpaceId);
-  if (!isCanonicalSpace) {
-    return "app";
-  }
-  if (!params.canonicalCreatorUserId || !params.spaceCreatorUserId) {
-    return "template";
-  }
-  return params.canonicalCreatorUserId === params.spaceCreatorUserId ? "template" : "app";
-}
-function publicUrlFromEnv(env, port) {
-  const explicit = trim(env.MLCLAW_PUBLIC_URL);
-  if (explicit) {
-    const url = new URL(explicit);
-    if (url.protocol !== "http:" && url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
-      throw new Error("MLCLAW_PUBLIC_URL must be one HTTP origin without credentials, path, query, or fragment");
-    }
-    return url.origin;
-  }
-  const host = trim(env.SPACE_HOST);
-  if (host) {
-    return host.startsWith("http") ? host.replace(/\/+$/, "") : `https://${host.replace(/\/+$/, "")}`;
-  }
-  return `http://127.0.0.1:${port}`;
-}
-function ownerFromSpaceId(spaceId) {
-  return ownerFromRepoId(spaceId);
-}
-function ownerFromRepoId(repoId) {
-  const owner = repoId?.split("/")[0]?.trim();
-  return owner || void 0;
-}
-function integer(value, fallback) {
-  if (!value) {
-    return fallback;
-  }
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-function splitUsers(value) {
-  return (value ?? "").split(",").map((item) => item.trim()).filter(Boolean);
-}
-function uniqueUsers(users) {
-  return [...new Set(users)];
-}
-function splitArgs(value) {
-  const trimmed = trim(value);
-  return trimmed ? trimmed.split(/\s+/).filter(Boolean) : void 0;
-}
-function trim(value) {
-  const trimmed = value?.trim();
-  return trimmed || void 0;
-}
-function readRuntimeSettings(file) {
-  try {
-    const parsed = JSON.parse(readFileSync2(file, "utf8"));
-    const model = typeof parsed.model === "string" ? parsed.model.trim() : void 0;
-    if (!model) {
-      return {};
-    }
-    const modelChoices = normalizeModelChoices(parsed.modelChoices, model);
-    return {
-      model,
-      ...modelChoices ? { modelChoices } : {}
-    };
-  } catch {
-    return {};
-  }
-}
-
-// src/mlclaw-space-runtime/server.ts
-import { spawn } from "node:child_process";
-import http3 from "node:http";
-import { Readable as Readable2 } from "node:stream";
-
-// src/mlclaw-space-runtime/app.ts
-import fs3 from "node:fs/promises";
-import path3 from "node:path";
-
-// node_modules/hono/dist/compose.js
-var compose = (middleware, onError, onNotFound) => {
-  return (context, next) => {
-    let index = -1;
-    return dispatch(0);
-    async function dispatch(i) {
-      if (i <= index) {
-        throw new Error("next() called multiple times");
-      }
-      index = i;
-      let res;
-      let isError = false;
-      let handler;
-      if (middleware[i]) {
-        handler = middleware[i][0][0];
-        context.req.routeIndex = i;
-      } else {
-        handler = i === middleware.length && next || void 0;
-      }
-      if (handler) {
-        try {
-          res = await handler(context, () => dispatch(i + 1));
-        } catch (err) {
-          if (err instanceof Error && onError) {
-            context.error = err;
-            res = await onError(err, context);
-            isError = true;
-          } else {
-            throw err;
-          }
-        }
-      } else {
-        if (context.finalized === false && onNotFound) {
-          res = await onNotFound(context);
-        }
-      }
-      if (res && (context.finalized === false || isError)) {
-        context.res = res;
-      }
-      return context;
-    }
-  };
-};
-
-// node_modules/hono/dist/request/constants.js
-var GET_MATCH_RESULT = /* @__PURE__ */ Symbol();
-
-// node_modules/hono/dist/utils/buffer.js
-var bufferToFormData = (arrayBuffer, contentType2) => {
-  const response = new Response(arrayBuffer, {
-    headers: {
-      // Normalize the media type (case-insensitive) while keeping parameters like the boundary
-      "Content-Type": contentType2.replace(/^[^;]+/, (mediaType) => mediaType.toLowerCase())
-    }
-  });
-  return response.formData();
-};
-
-// node_modules/hono/dist/utils/body.js
-var isRawRequest = (request) => "headers" in request;
-var parseBody = async (request, options = /* @__PURE__ */ Object.create(null)) => {
-  const { all = false, dot = false } = options;
-  const headers = isRawRequest(request) ? request.headers : request.raw.headers;
-  const contentType2 = headers.get("Content-Type");
-  const mediaType = contentType2?.split(";")[0].trim().toLowerCase();
-  if (mediaType === "multipart/form-data" || mediaType === "application/x-www-form-urlencoded") {
-    return parseFormData(request, { all, dot });
-  }
-  return {};
-};
-async function parseFormData(request, options) {
-  const headers = isRawRequest(request) ? request.headers : request.raw.headers;
-  const arrayBuffer = await request.arrayBuffer();
-  const formDataPromise = bufferToFormData(arrayBuffer, headers.get("Content-Type") || "");
-  if (!isRawRequest(request)) {
-    request.bodyCache.formData = formDataPromise;
-  }
-  const formData = await formDataPromise;
-  if (formData) {
-    return convertFormDataToBodyData(formData, options);
-  }
-  return {};
-}
-function convertFormDataToBodyData(formData, options) {
-  const form = /* @__PURE__ */ Object.create(null);
-  formData.forEach((value, key) => {
-    const shouldParseAllValues = options.all || key.endsWith("[]");
-    if (!shouldParseAllValues) {
-      form[key] = value;
-    } else {
-      handleParsingAllValues(form, key, value);
-    }
-  });
-  if (options.dot) {
-    Object.entries(form).forEach(([key, value]) => {
-      const shouldParseDotValues = key.includes(".");
-      if (shouldParseDotValues) {
-        handleParsingNestedValues(form, key, value);
-        delete form[key];
-      }
-    });
-  }
-  return form;
-}
-var handleParsingAllValues = (form, key, value) => {
-  if (form[key] !== void 0) {
-    if (Array.isArray(form[key])) {
-      ;
-      form[key].push(value);
-    } else {
-      form[key] = [form[key], value];
-    }
-  } else {
-    if (!key.endsWith("[]")) {
-      form[key] = value;
-    } else {
-      form[key] = [value];
-    }
-  }
-};
-var handleParsingNestedValues = (form, key, value) => {
-  if (/(?:^|\.)__proto__\./.test(key)) {
-    return;
-  }
-  let nestedForm = form;
-  const keys = key.split(".");
-  keys.forEach((key2, index) => {
-    if (index === keys.length - 1) {
-      nestedForm[key2] = value;
-    } else {
-      if (!nestedForm[key2] || typeof nestedForm[key2] !== "object" || Array.isArray(nestedForm[key2]) || nestedForm[key2] instanceof File) {
-        nestedForm[key2] = /* @__PURE__ */ Object.create(null);
-      }
-      nestedForm = nestedForm[key2];
-    }
-  });
-};
-
-// node_modules/hono/dist/utils/url.js
-var splitPath = (path5) => {
-  const paths = path5.split("/");
-  if (paths[0] === "") {
-    paths.shift();
-  }
-  return paths;
-};
-var splitRoutingPath = (routePath) => {
-  const { groups, path: path5 } = extractGroupsFromPath(routePath);
-  const paths = splitPath(path5);
-  return replaceGroupMarks(paths, groups);
-};
-var extractGroupsFromPath = (path5) => {
-  const groups = [];
-  path5 = path5.replace(/\{[^}]+\}/g, (match2, index) => {
-    const mark = `@${index}`;
-    groups.push([mark, match2]);
-    return mark;
-  });
-  return { groups, path: path5 };
-};
-var replaceGroupMarks = (paths, groups) => {
-  for (let i = groups.length - 1; i >= 0; i--) {
-    const [mark] = groups[i];
-    for (let j = paths.length - 1; j >= 0; j--) {
-      if (paths[j].includes(mark)) {
-        paths[j] = paths[j].replace(mark, groups[i][1]);
-        break;
-      }
-    }
-  }
-  return paths;
-};
-var patternCache = {};
-var getPattern = (label, next) => {
-  if (label === "*") {
-    return "*";
-  }
-  const match2 = label.match(/^\:([^\{\}]+)(?:\{(.+)\})?$/);
-  if (match2) {
-    const cacheKey = `${label}#${next}`;
-    if (!patternCache[cacheKey]) {
-      if (match2[2]) {
-        patternCache[cacheKey] = next && next[0] !== ":" && next[0] !== "*" ? [cacheKey, match2[1], new RegExp(`^${match2[2]}(?=/${next})`)] : [label, match2[1], new RegExp(`^${match2[2]}$`)];
-      } else {
-        patternCache[cacheKey] = [label, match2[1], true];
-      }
-    }
-    return patternCache[cacheKey];
-  }
-  return null;
-};
-var tryDecode = (str, decoder) => {
-  try {
-    return decoder(str);
-  } catch {
-    return str.replace(/(?:%[0-9A-Fa-f]{2})+/g, (match2) => {
-      try {
-        return decoder(match2);
-      } catch {
-        return match2;
-      }
-    });
-  }
-};
-var tryDecodeURI = (str) => tryDecode(str, decodeURI);
-var getPath = (request) => {
-  const url = request.url;
-  const start = url.indexOf("/", url.indexOf(":") + 4);
-  let i = start;
-  for (; i < url.length; i++) {
-    const charCode = url.charCodeAt(i);
-    if (charCode === 37) {
-      const queryIndex = url.indexOf("?", i);
-      const hashIndex = url.indexOf("#", i);
-      const end = queryIndex === -1 ? hashIndex === -1 ? void 0 : hashIndex : hashIndex === -1 ? queryIndex : Math.min(queryIndex, hashIndex);
-      const path5 = url.slice(start, end);
-      return tryDecodeURI(path5.includes("%25") ? path5.replace(/%25/g, "%2525") : path5);
-    } else if (charCode === 63 || charCode === 35) {
-      break;
-    }
-  }
-  return url.slice(start, i);
-};
-var getPathNoStrict = (request) => {
-  const result = getPath(request);
-  return result.length > 1 && result.at(-1) === "/" ? result.slice(0, -1) : result;
-};
-var mergePath = (base, sub, ...rest) => {
-  if (rest.length) {
-    sub = mergePath(sub, ...rest);
-  }
-  return `${base?.[0] === "/" ? "" : "/"}${base}${sub === "/" ? "" : `${base?.at(-1) === "/" ? "" : "/"}${sub?.[0] === "/" ? sub.slice(1) : sub}`}`;
-};
-var checkOptionalParameter = (path5) => {
-  if (path5.charCodeAt(path5.length - 1) !== 63 || !path5.includes(":")) {
-    return null;
-  }
-  const segments = path5.split("/");
-  const results = [];
-  let basePath = "";
-  segments.forEach((segment) => {
-    if (segment !== "" && !/\:/.test(segment)) {
-      basePath += "/" + segment;
-    } else if (/\:/.test(segment)) {
-      if (/\?/.test(segment)) {
-        if (results.length === 0 && basePath === "") {
-          results.push("/");
-        } else {
-          results.push(basePath);
-        }
-        const optionalSegment = segment.replace("?", "");
-        basePath += "/" + optionalSegment;
-        results.push(basePath);
-      } else {
-        basePath += "/" + segment;
-      }
-    }
-  });
-  return results.filter((v, i, a) => a.indexOf(v) === i);
-};
-var _decodeURI = (value) => {
-  if (!/[%+]/.test(value)) {
-    return value;
-  }
-  if (value.indexOf("+") !== -1) {
-    value = value.replace(/\+/g, " ");
-  }
-  return value.indexOf("%") !== -1 ? tryDecode(value, decodeURIComponent_) : value;
-};
-var _getQueryParam = (url, key, multiple) => {
-  let encoded;
-  if (!multiple && key && !/[%+]/.test(key)) {
-    let keyIndex2 = url.indexOf("?", 8);
-    if (keyIndex2 === -1) {
-      return void 0;
-    }
-    if (!url.startsWith(key, keyIndex2 + 1)) {
-      keyIndex2 = url.indexOf(`&${key}`, keyIndex2 + 1);
-    }
-    while (keyIndex2 !== -1) {
-      const trailingKeyCode = url.charCodeAt(keyIndex2 + key.length + 1);
-      if (trailingKeyCode === 61) {
-        const valueIndex = keyIndex2 + key.length + 2;
-        const endIndex = url.indexOf("&", valueIndex);
-        return _decodeURI(url.slice(valueIndex, endIndex === -1 ? void 0 : endIndex));
-      } else if (trailingKeyCode == 38 || isNaN(trailingKeyCode)) {
-        return "";
-      }
-      keyIndex2 = url.indexOf(`&${key}`, keyIndex2 + 1);
-    }
-    encoded = /[%+]/.test(url);
-    if (!encoded) {
-      return void 0;
-    }
-  }
-  const results = {};
-  encoded ??= /[%+]/.test(url);
-  let keyIndex = url.indexOf("?", 8);
-  while (keyIndex !== -1) {
-    const nextKeyIndex = url.indexOf("&", keyIndex + 1);
-    let valueIndex = url.indexOf("=", keyIndex);
-    if (valueIndex > nextKeyIndex && nextKeyIndex !== -1) {
-      valueIndex = -1;
-    }
-    let name = url.slice(
-      keyIndex + 1,
-      valueIndex === -1 ? nextKeyIndex === -1 ? void 0 : nextKeyIndex : valueIndex
-    );
-    if (encoded) {
-      name = _decodeURI(name);
-    }
-    keyIndex = nextKeyIndex;
-    if (name === "") {
-      continue;
-    }
-    let value;
-    if (valueIndex === -1) {
-      value = "";
-    } else {
-      value = url.slice(valueIndex + 1, nextKeyIndex === -1 ? void 0 : nextKeyIndex);
-      if (encoded) {
-        value = _decodeURI(value);
-      }
-    }
-    if (multiple) {
-      if (!(results[name] && Array.isArray(results[name]))) {
-        results[name] = [];
-      }
-      ;
-      results[name].push(value);
-    } else {
-      results[name] ??= value;
-    }
-  }
-  return key ? results[key] : results;
-};
-var getQueryParam = _getQueryParam;
-var getQueryParams = (url, key) => {
-  return _getQueryParam(url, key, true);
-};
-var decodeURIComponent_ = decodeURIComponent;
-
-// node_modules/hono/dist/request.js
-var tryDecodeURIComponent = (str) => tryDecode(str, decodeURIComponent_);
-var HonoRequest = class {
-  /**
-   * `.raw` can get the raw Request object.
-   *
-   * @see {@link https://hono.dev/docs/api/request#raw}
-   *
-   * @example
-   * ```ts
-   * // For Cloudflare Workers
-   * app.post('/', async (c) => {
-   *   const metadata = c.req.raw.cf?.hostMetadata?
-   *   ...
-   * })
-   * ```
-   */
-  raw;
-  #validatedData;
-  // Short name of validatedData
-  #matchResult;
-  routeIndex = 0;
-  /**
-   * `.path` can get the pathname of the request.
-   *
-   * @see {@link https://hono.dev/docs/api/request#path}
-   *
-   * @example
-   * ```ts
-   * app.get('/about/me', (c) => {
-   *   const pathname = c.req.path // `/about/me`
-   * })
-   * ```
-   */
-  path;
-  bodyCache = {};
-  constructor(request, path5 = "/", matchResult = [[]]) {
-    this.raw = request;
-    this.path = path5;
-    this.#matchResult = matchResult;
-    this.#validatedData = {};
-  }
-  param(key) {
-    return key ? this.#getDecodedParam(key) : this.#getAllDecodedParams();
-  }
-  #getDecodedParam(key) {
-    const paramKey = this.#matchResult[0][this.routeIndex][1][key];
-    const param = this.#getParamValue(paramKey);
-    return param && /\%/.test(param) ? tryDecodeURIComponent(param) : param;
-  }
-  #getAllDecodedParams() {
-    const decoded = {};
-    const keys = Object.keys(this.#matchResult[0][this.routeIndex][1]);
-    for (const key of keys) {
-      const value = this.#getParamValue(this.#matchResult[0][this.routeIndex][1][key]);
-      if (value !== void 0) {
-        decoded[key] = /\%/.test(value) ? tryDecodeURIComponent(value) : value;
-      }
-    }
-    return decoded;
-  }
-  #getParamValue(paramKey) {
-    return this.#matchResult[1] ? this.#matchResult[1][paramKey] : paramKey;
-  }
-  query(key) {
-    return getQueryParam(this.url, key);
-  }
-  queries(key) {
-    return getQueryParams(this.url, key);
-  }
-  header(name) {
-    if (name) {
-      return this.raw.headers.get(name) ?? void 0;
-    }
-    const headerData = {};
-    this.raw.headers.forEach((value, key) => {
-      headerData[key] = value;
-    });
-    return headerData;
-  }
-  async parseBody(options) {
-    return parseBody(this, options);
-  }
-  #cachedBody = (key) => {
-    const { bodyCache, raw: raw2 } = this;
-    const cachedBody = bodyCache[key];
-    if (cachedBody) {
-      return cachedBody;
-    }
-    const anyCachedKey = Object.keys(bodyCache)[0];
-    if (anyCachedKey) {
-      return bodyCache[anyCachedKey].then((body) => {
-        if (anyCachedKey === "json") {
-          body = JSON.stringify(body);
-        }
-        return new Response(body)[key]();
-      });
-    }
-    return bodyCache[key] = raw2[key]();
-  };
-  /**
-   * `.json()` can parse Request body of type `application/json`
-   *
-   * @see {@link https://hono.dev/docs/api/request#json}
-   *
-   * @example
-   * ```ts
-   * app.post('/entry', async (c) => {
-   *   const body = await c.req.json()
-   * })
-   * ```
-   */
-  json() {
-    return this.#cachedBody("text").then((text) => JSON.parse(text));
-  }
-  /**
-   * `.text()` can parse Request body of type `text/plain`
-   *
-   * @see {@link https://hono.dev/docs/api/request#text}
-   *
-   * @example
-   * ```ts
-   * app.post('/entry', async (c) => {
-   *   const body = await c.req.text()
-   * })
-   * ```
-   */
-  text() {
-    return this.#cachedBody("text");
-  }
-  /**
-   * `.arrayBuffer()` parse Request body as an `ArrayBuffer`
-   *
-   * @see {@link https://hono.dev/docs/api/request#arraybuffer}
-   *
-   * @example
-   * ```ts
-   * app.post('/entry', async (c) => {
-   *   const body = await c.req.arrayBuffer()
-   * })
-   * ```
-   */
-  arrayBuffer() {
-    return this.#cachedBody("arrayBuffer");
-  }
-  /**
-   * `.bytes()` parses the request body as a `Uint8Array`.
-   *
-   * @see {@link https://hono.dev/docs/api/request#bytes}
-   *
-   * @example
-   * ```ts
-   * app.post('/entry', async (c) => {
-   *   const body = await c.req.bytes()
-   * })
-   * ```
-   */
-  bytes() {
-    return this.#cachedBody("arrayBuffer").then((buffer) => new Uint8Array(buffer));
-  }
-  /**
-   * Parses the request body as a `Blob`.
-   * @example
-   * ```ts
-   * app.post('/entry', async (c) => {
-   *   const body = await c.req.blob();
-   * });
-   * ```
-   * @see https://hono.dev/docs/api/request#blob
-   */
-  blob() {
-    return this.#cachedBody("blob");
-  }
-  /**
-   * Parses the request body as `FormData`.
-   * @example
-   * ```ts
-   * app.post('/entry', async (c) => {
-   *   const body = await c.req.formData();
-   * });
-   * ```
-   * @see https://hono.dev/docs/api/request#formdata
-   */
-  formData() {
-    return this.#cachedBody("formData");
-  }
-  /**
-   * Adds validated data to the request.
-   *
-   * @param target - The target of the validation.
-   * @param data - The validated data to add.
-   */
-  addValidatedData(target, data) {
-    this.#validatedData[target] = data;
-  }
-  valid(target) {
-    return this.#validatedData[target];
-  }
-  /**
-   * `.url()` can get the request url strings.
-   *
-   * @see {@link https://hono.dev/docs/api/request#url}
-   *
-   * @example
-   * ```ts
-   * app.get('/about/me', (c) => {
-   *   const url = c.req.url // `http://localhost:8787/about/me`
-   *   ...
-   * })
-   * ```
-   */
-  get url() {
-    return this.raw.url;
-  }
-  /**
-   * `.method()` can get the method name of the request.
-   *
-   * @see {@link https://hono.dev/docs/api/request#method}
-   *
-   * @example
-   * ```ts
-   * app.get('/about/me', (c) => {
-   *   const method = c.req.method // `GET`
-   * })
-   * ```
-   */
-  get method() {
-    return this.raw.method;
-  }
-  get [GET_MATCH_RESULT]() {
-    return this.#matchResult;
-  }
-  /**
-   * `.matchedRoutes()` can return a matched route in the handler
-   *
-   * @deprecated
-   *
-   * Use matchedRoutes helper defined in "hono/route" instead.
-   *
-   * @see {@link https://hono.dev/docs/api/request#matchedroutes}
-   *
-   * @example
-   * ```ts
-   * app.use('*', async function logger(c, next) {
-   *   await next()
-   *   c.req.matchedRoutes.forEach(({ handler, method, path }, i) => {
-   *     const name = handler.name || (handler.length < 2 ? '[handler]' : '[middleware]')
-   *     console.log(
-   *       method,
-   *       ' ',
-   *       path,
-   *       ' '.repeat(Math.max(10 - path.length, 0)),
-   *       name,
-   *       i === c.req.routeIndex ? '<- respond from here' : ''
-   *     )
-   *   })
-   * })
-   * ```
-   */
-  get matchedRoutes() {
-    return this.#matchResult[0].map(([[, route]]) => route);
-  }
-  /**
-   * `routePath()` can retrieve the path registered within the handler
-   *
-   * @deprecated
-   *
-   * Use routePath helper defined in "hono/route" instead.
-   *
-   * @see {@link https://hono.dev/docs/api/request#routepath}
-   *
-   * @example
-   * ```ts
-   * app.get('/posts/:id', (c) => {
-   *   return c.json({ path: c.req.routePath })
-   * })
-   * ```
-   */
-  get routePath() {
-    return this.#matchResult[0].map(([[, route]]) => route)[this.routeIndex].path;
-  }
-};
-
-// node_modules/hono/dist/utils/html.js
-var HtmlEscapedCallbackPhase = {
-  Stringify: 1,
-  BeforeStream: 2,
-  Stream: 3
-};
-var raw = (value, callbacks) => {
-  const escapedString = new String(value);
-  escapedString.isEscaped = true;
-  escapedString.callbacks = callbacks;
-  return escapedString;
-};
-var resolveCallback = async (str, phase, preserveCallbacks, context, buffer) => {
-  if (typeof str === "object" && !(str instanceof String)) {
-    if (!(str instanceof Promise)) {
-      str = str.toString();
-    }
-    if (str instanceof Promise) {
-      str = await str;
-    }
-  }
-  const callbacks = str.callbacks;
-  if (!callbacks?.length) {
-    return Promise.resolve(str);
-  }
-  if (buffer) {
-    buffer[0] += str;
-  } else {
-    buffer = [str];
-  }
-  const resStr = Promise.all(callbacks.map((c) => c({ phase, buffer, context }))).then(
-    (res) => Promise.all(
-      res.filter(Boolean).map((str2) => resolveCallback(str2, phase, false, context, buffer))
-    ).then(() => buffer[0])
-  );
-  if (preserveCallbacks) {
-    return raw(await resStr, callbacks);
-  } else {
-    return resStr;
-  }
-};
-
-// node_modules/hono/dist/context.js
-var TEXT_PLAIN = "text/plain; charset=UTF-8";
-var setDefaultContentType = (contentType2, headers) => {
-  return {
-    "Content-Type": contentType2,
-    ...headers
-  };
-};
-var createResponseInstance = (body, init) => new Response(body, init);
-var Context = class {
-  #rawRequest;
-  #req;
-  /**
-   * `.env` can get bindings (environment variables, secrets, KV namespaces, D1 database, R2 bucket etc.) in Cloudflare Workers.
-   *
-   * @see {@link https://hono.dev/docs/api/context#env}
-   *
-   * @example
-   * ```ts
-   * // Environment object for Cloudflare Workers
-   * app.get('*', async c => {
-   *   const counter = c.env.COUNTER
-   * })
-   * ```
-   */
-  env = {};
-  #var;
-  finalized = false;
-  /**
-   * `.error` can get the error object from the middleware if the Handler throws an error.
-   *
-   * @see {@link https://hono.dev/docs/api/context#error}
-   *
-   * @example
-   * ```ts
-   * app.use('*', async (c, next) => {
-   *   await next()
-   *   if (c.error) {
-   *     // do something...
-   *   }
-   * })
-   * ```
-   */
-  error;
-  #status;
-  #executionCtx;
-  #res;
-  #layout;
-  #renderer;
-  #notFoundHandler;
-  #preparedHeaders;
-  #matchResult;
-  #path;
-  /**
-   * Creates an instance of the Context class.
-   *
-   * @param req - The Request object.
-   * @param options - Optional configuration options for the context.
-   */
-  constructor(req, options) {
-    this.#rawRequest = req;
-    if (options) {
-      this.#executionCtx = options.executionCtx;
-      this.env = options.env;
-      this.#notFoundHandler = options.notFoundHandler;
-      this.#path = options.path;
-      this.#matchResult = options.matchResult;
-    }
-  }
-  /**
-   * `.req` is the instance of {@link HonoRequest}.
-   */
-  get req() {
-    this.#req ??= new HonoRequest(this.#rawRequest, this.#path, this.#matchResult);
-    return this.#req;
-  }
-  /**
-   * @see {@link https://hono.dev/docs/api/context#event}
-   * The FetchEvent associated with the current request.
-   *
-   * @throws Will throw an error if the context does not have a FetchEvent.
-   */
-  get event() {
-    if (this.#executionCtx && "respondWith" in this.#executionCtx) {
-      return this.#executionCtx;
-    } else {
-      throw Error("This context has no FetchEvent");
-    }
-  }
-  /**
-   * @see {@link https://hono.dev/docs/api/context#executionctx}
-   * The ExecutionContext associated with the current request.
-   *
-   * @throws Will throw an error if the context does not have an ExecutionContext.
-   */
-  get executionCtx() {
-    if (this.#executionCtx) {
-      return this.#executionCtx;
-    } else {
-      throw Error("This context has no ExecutionContext");
-    }
-  }
-  /**
-   * @see {@link https://hono.dev/docs/api/context#res}
-   * The Response object for the current request.
-   */
-  get res() {
-    return this.#res ||= createResponseInstance(null, {
-      headers: this.#preparedHeaders ??= new Headers()
-    });
-  }
-  /**
-   * Sets the Response object for the current request.
-   *
-   * @param _res - The Response object to set.
-   */
-  set res(_res) {
-    if (this.#res && _res) {
-      _res = createResponseInstance(_res.body, _res);
-      for (const [k, v] of this.#res.headers.entries()) {
-        if (k === "content-type") {
-          continue;
-        }
-        if (k === "set-cookie") {
-          const cookies = this.#res.headers.getSetCookie();
-          _res.headers.delete("set-cookie");
-          for (const cookie of cookies) {
-            _res.headers.append("set-cookie", cookie);
-          }
-        } else {
-          _res.headers.set(k, v);
-        }
-      }
-    }
-    this.#res = _res;
-    this.finalized = true;
-  }
-  /**
-   * `.render()` can create a response within a layout.
-   *
-   * @see {@link https://hono.dev/docs/api/context#render-setrenderer}
-   *
-   * @example
-   * ```ts
-   * app.get('/', (c) => {
-   *   return c.render('Hello!')
-   * })
-   * ```
-   */
-  render = (...args) => {
-    this.#renderer ??= (content) => this.html(content);
-    return this.#renderer(...args);
-  };
-  /**
-   * Sets the layout for the response.
-   *
-   * @param layout - The layout to set.
-   * @returns The layout function.
-   */
-  setLayout = (layout) => this.#layout = layout;
-  /**
-   * Gets the current layout for the response.
-   *
-   * @returns The current layout function.
-   */
-  getLayout = () => this.#layout;
-  /**
-   * `.setRenderer()` can set the layout in the custom middleware.
-   *
-   * @see {@link https://hono.dev/docs/api/context#render-setrenderer}
-   *
-   * @example
-   * ```tsx
-   * app.use('*', async (c, next) => {
-   *   c.setRenderer((content) => {
-   *     return c.html(
-   *       <html>
-   *         <body>
-   *           <p>{content}</p>
-   *         </body>
-   *       </html>
-   *     )
-   *   })
-   *   await next()
-   * })
-   * ```
-   */
-  setRenderer = (renderer) => {
-    this.#renderer = renderer;
-  };
-  /**
-   * `.header()` can set headers.
-   *
-   * @see {@link https://hono.dev/docs/api/context#header}
-   *
-   * @example
-   * ```ts
-   * app.get('/welcome', (c) => {
-   *   // Set headers
-   *   c.header('X-Message', 'Hello!')
-   *   c.header('Content-Type', 'text/plain')
-   *
-   *   return c.body('Thank you for coming')
-   * })
-   * ```
-   */
-  header = (name, value, options) => {
-    if (this.finalized) {
-      this.#res = createResponseInstance(this.#res.body, this.#res);
-    }
-    const headers = this.#res ? this.#res.headers : this.#preparedHeaders ??= new Headers();
-    if (value === void 0) {
-      headers.delete(name);
-    } else if (options?.append) {
-      headers.append(name, value);
-    } else {
-      headers.set(name, value);
-    }
-  };
-  status = (status) => {
-    this.#status = status;
-  };
-  /**
-   * `.set()` can set the value specified by the key.
-   *
-   * @see {@link https://hono.dev/docs/api/context#set-get}
-   *
-   * @example
-   * ```ts
-   * app.use('*', async (c, next) => {
-   *   c.set('message', 'Hono is hot!!')
-   *   await next()
-   * })
-   * ```
-   */
-  set = (key, value) => {
-    this.#var ??= /* @__PURE__ */ new Map();
-    this.#var.set(key, value);
-  };
-  /**
-   * `.get()` can use the value specified by the key.
-   *
-   * @see {@link https://hono.dev/docs/api/context#set-get}
-   *
-   * @example
-   * ```ts
-   * app.get('/', (c) => {
-   *   const message = c.get('message')
-   *   return c.text(`The message is "${message}"`)
-   * })
-   * ```
-   */
-  get = (key) => {
-    return this.#var ? this.#var.get(key) : void 0;
-  };
-  /**
-   * `.var` can access the value of a variable.
-   *
-   * @see {@link https://hono.dev/docs/api/context#var}
-   *
-   * @example
-   * ```ts
-   * const result = c.var.client.oneMethod()
-   * ```
-   */
-  // c.var.propName is a read-only
-  get var() {
-    if (!this.#var) {
-      return {};
-    }
-    return Object.fromEntries(this.#var);
-  }
-  #newResponse(data, arg, headers) {
-    const responseHeaders2 = this.#res ? new Headers(this.#res.headers) : this.#preparedHeaders ?? new Headers();
-    if (typeof arg === "object" && "headers" in arg) {
-      const argHeaders = arg.headers instanceof Headers ? arg.headers : new Headers(arg.headers);
-      for (const [key, value] of argHeaders) {
-        if (key.toLowerCase() === "set-cookie") {
-          responseHeaders2.append(key, value);
-        } else {
-          responseHeaders2.set(key, value);
-        }
-      }
-    }
-    if (headers) {
-      for (const [k, v] of Object.entries(headers)) {
-        if (typeof v === "string") {
-          responseHeaders2.set(k, v);
-        } else {
-          responseHeaders2.delete(k);
-          for (const v2 of v) {
-            responseHeaders2.append(k, v2);
-          }
-        }
-      }
-    }
-    const status = typeof arg === "number" ? arg : arg?.status ?? this.#status;
-    return createResponseInstance(data, { status, headers: responseHeaders2 });
-  }
-  newResponse = (...args) => this.#newResponse(...args);
-  /**
-   * `.body()` can return the HTTP response.
-   * You can set headers with `.header()` and set HTTP status code with `.status`.
-   * This can also be set in `.text()`, `.json()` and so on.
-   *
-   * @see {@link https://hono.dev/docs/api/context#body}
-   *
-   * @example
-   * ```ts
-   * app.get('/welcome', (c) => {
-   *   // Set headers
-   *   c.header('X-Message', 'Hello!')
-   *   c.header('Content-Type', 'text/plain')
-   *   // Set HTTP status code
-   *   c.status(201)
-   *
-   *   // Return the response body
-   *   return c.body('Thank you for coming')
-   * })
-   * ```
-   */
-  body = (data, arg, headers) => this.#newResponse(data, arg, headers);
-  /**
-   * `.text()` can render text as `Content-Type:text/plain`.
-   *
-   * @see {@link https://hono.dev/docs/api/context#text}
-   *
-   * @example
-   * ```ts
-   * app.get('/say', (c) => {
-   *   return c.text('Hello!')
-   * })
-   * ```
-   */
-  text = (text, arg, headers) => {
-    return !this.#preparedHeaders && !this.#status && !arg && !headers && !this.finalized ? new Response(text) : this.#newResponse(
-      text,
-      arg,
-      setDefaultContentType(TEXT_PLAIN, headers)
-    );
-  };
-  /**
-   * `.json()` can render JSON as `Content-Type:application/json`.
-   *
-   * @see {@link https://hono.dev/docs/api/context#json}
-   *
-   * @example
-   * ```ts
-   * app.get('/api', (c) => {
-   *   return c.json({ message: 'Hello!' })
-   * })
-   * ```
-   */
-  json = (object2, arg, headers) => {
-    return this.#newResponse(
-      JSON.stringify(object2),
-      arg,
-      setDefaultContentType("application/json", headers)
-    );
-  };
-  html = (html, arg, headers) => {
-    const res = (html2) => this.#newResponse(html2, arg, setDefaultContentType("text/html; charset=UTF-8", headers));
-    return typeof html === "object" ? resolveCallback(html, HtmlEscapedCallbackPhase.Stringify, false, {}).then(res) : res(html);
-  };
-  /**
-   * `.redirect()` can Redirect, default status code is 302.
-   *
-   * @see {@link https://hono.dev/docs/api/context#redirect}
-   *
-   * @example
-   * ```ts
-   * app.get('/redirect', (c) => {
-   *   return c.redirect('/')
-   * })
-   * app.get('/redirect-permanently', (c) => {
-   *   return c.redirect('/', 301)
-   * })
-   * ```
-   */
-  redirect = (location, status) => {
-    const locationString = String(location);
-    this.header(
-      "Location",
-      // Multibyes should be encoded
-      // eslint-disable-next-line no-control-regex
-      !/[^\x00-\xFF]/.test(locationString) ? locationString : encodeURI(locationString)
-    );
-    return this.newResponse(null, status ?? 302);
-  };
-  /**
-   * `.notFound()` can return the Not Found Response.
-   *
-   * @see {@link https://hono.dev/docs/api/context#notfound}
-   *
-   * @example
-   * ```ts
-   * app.get('/notfound', (c) => {
-   *   return c.notFound()
-   * })
-   * ```
-   */
-  notFound = () => {
-    this.#notFoundHandler ??= () => createResponseInstance();
-    return this.#notFoundHandler(this);
-  };
-};
-
-// node_modules/hono/dist/router.js
-var METHOD_NAME_ALL = "ALL";
-var METHOD_NAME_ALL_LOWERCASE = "all";
-var METHODS = ["get", "post", "put", "delete", "options", "patch"];
-var MESSAGE_MATCHER_IS_ALREADY_BUILT = "Can not add a route since the matcher is already built.";
-var UnsupportedPathError = class extends Error {
-};
-
-// node_modules/hono/dist/utils/constants.js
-var COMPOSED_HANDLER = "__COMPOSED_HANDLER";
-
-// node_modules/hono/dist/hono-base.js
-var notFoundHandler = (c) => {
-  return c.text("404 Not Found", 404);
-};
-var errorHandler = (err, c) => {
-  if ("getResponse" in err) {
-    const res = err.getResponse();
-    return c.newResponse(res.body, res);
-  }
-  console.error(err);
-  return c.text("Internal Server Error", 500);
-};
-var Hono = class _Hono {
-  get;
-  post;
-  put;
-  delete;
-  options;
-  patch;
-  all;
-  on;
-  use;
-  /*
-    This class is like an abstract class and does not have a router.
-    To use it, inherit the class and implement router in the constructor.
-  */
-  router;
-  getPath;
-  // Cannot use `#` because it requires visibility at JavaScript runtime.
-  _basePath = "/";
-  #path = "/";
-  routes = [];
-  constructor(options = {}) {
-    const allMethods = [...METHODS, METHOD_NAME_ALL_LOWERCASE];
-    allMethods.forEach((method) => {
-      this[method] = (args1, ...args) => {
-        if (typeof args1 === "string") {
-          this.#path = args1;
-        } else {
-          this.#addRoute(method, this.#path, args1);
-        }
-        args.forEach((handler) => {
-          this.#addRoute(method, this.#path, handler);
-        });
-        return this;
-      };
-    });
-    this.on = (method, path5, ...handlers) => {
-      for (const p of [path5].flat()) {
-        this.#path = p;
-        for (const m of [method].flat()) {
-          handlers.map((handler) => {
-            this.#addRoute(m.toUpperCase(), this.#path, handler);
-          });
-        }
-      }
-      return this;
-    };
-    this.use = (arg1, ...handlers) => {
-      if (typeof arg1 === "string") {
-        this.#path = arg1;
-      } else {
-        this.#path = "*";
-        handlers.unshift(arg1);
-      }
-      handlers.forEach((handler) => {
-        this.#addRoute(METHOD_NAME_ALL, this.#path, handler);
-      });
-      return this;
-    };
-    const { strict, ...optionsWithoutStrict } = options;
-    Object.assign(this, optionsWithoutStrict);
-    this.getPath = strict ?? true ? options.getPath ?? getPath : getPathNoStrict;
-  }
-  #clone() {
-    const clone = new _Hono({
-      router: this.router,
-      getPath: this.getPath
-    });
-    clone.errorHandler = this.errorHandler;
-    clone.#notFoundHandler = this.#notFoundHandler;
-    clone.routes = this.routes;
-    return clone;
-  }
-  #notFoundHandler = notFoundHandler;
-  // Cannot use `#` because it requires visibility at JavaScript runtime.
-  errorHandler = errorHandler;
-  /**
-   * `.route()` allows grouping other Hono instance in routes.
-   *
-   * @see {@link https://hono.dev/docs/api/routing#grouping}
-   *
-   * @param {string} path - base Path
-   * @param {Hono} app - other Hono instance
-   * @returns {Hono} routed Hono instance
-   *
-   * @example
-   * ```ts
-   * const app = new Hono()
-   * const app2 = new Hono()
-   *
-   * app2.get("/user", (c) => c.text("user"))
-   * app.route("/api", app2) // GET /api/user
-   * ```
-   */
-  route(path5, app) {
-    const subApp = this.basePath(path5);
-    app.routes.map((r) => {
-      let handler;
-      if (app.errorHandler === errorHandler) {
-        handler = r.handler;
-      } else {
-        handler = async (c, next) => (await compose([], app.errorHandler)(c, () => r.handler(c, next))).res;
-        handler[COMPOSED_HANDLER] = r.handler;
-      }
-      subApp.#addRoute(r.method, r.path, handler, r.basePath);
-    });
-    return this;
-  }
-  /**
-   * `.basePath()` allows base paths to be specified.
-   *
-   * @see {@link https://hono.dev/docs/api/routing#base-path}
-   *
-   * @param {string} path - base Path
-   * @returns {Hono} changed Hono instance
-   *
-   * @example
-   * ```ts
-   * const api = new Hono().basePath('/api')
-   * ```
-   */
-  basePath(path5) {
-    const subApp = this.#clone();
-    subApp._basePath = mergePath(this._basePath, path5);
-    return subApp;
-  }
-  /**
-   * `.onError()` handles an error and returns a customized Response.
-   *
-   * @see {@link https://hono.dev/docs/api/hono#error-handling}
-   *
-   * @param {ErrorHandler} handler - request Handler for error
-   * @returns {Hono} changed Hono instance
-   *
-   * @example
-   * ```ts
-   * app.onError((err, c) => {
-   *   console.error(`${err}`)
-   *   return c.text('Custom Error Message', 500)
-   * })
-   * ```
-   */
-  onError = (handler) => {
-    this.errorHandler = handler;
-    return this;
-  };
-  /**
-   * `.notFound()` allows you to customize a Not Found Response.
-   *
-   * @see {@link https://hono.dev/docs/api/hono#not-found}
-   *
-   * @param {NotFoundHandler} handler - request handler for not-found
-   * @returns {Hono} changed Hono instance
-   *
-   * @example
-   * ```ts
-   * app.notFound((c) => {
-   *   return c.text('Custom 404 Message', 404)
-   * })
-   * ```
-   */
-  notFound = (handler) => {
-    this.#notFoundHandler = handler;
-    return this;
-  };
-  /**
-   * `.mount()` allows you to mount applications built with other frameworks into your Hono application.
-   *
-   * @see {@link https://hono.dev/docs/api/hono#mount}
-   *
-   * @param {string} path - base Path
-   * @param {Function} applicationHandler - other Request Handler
-   * @param {MountOptions} [options] - options of `.mount()`
-   * @returns {Hono} mounted Hono instance
-   *
-   * @example
-   * ```ts
-   * import { Router as IttyRouter } from 'itty-router'
-   * import { Hono } from 'hono'
-   * // Create itty-router application
-   * const ittyRouter = IttyRouter()
-   * // GET /itty-router/hello
-   * ittyRouter.get('/hello', () => new Response('Hello from itty-router'))
-   *
-   * const app = new Hono()
-   * app.mount('/itty-router', ittyRouter.handle)
-   * ```
-   *
-   * @example
-   * ```ts
-   * const app = new Hono()
-   * // Send the request to another application without modification.
-   * app.mount('/app', anotherApp, {
-   *   replaceRequest: (req) => req,
-   * })
-   * ```
-   */
-  mount(path5, applicationHandler, options) {
-    let replaceRequest;
-    let optionHandler;
-    if (options) {
-      if (typeof options === "function") {
-        optionHandler = options;
-      } else {
-        optionHandler = options.optionHandler;
-        if (options.replaceRequest === false) {
-          replaceRequest = (request) => request;
-        } else {
-          replaceRequest = options.replaceRequest;
-        }
-      }
-    }
-    const getOptions = optionHandler ? (c) => {
-      const options2 = optionHandler(c);
-      return Array.isArray(options2) ? options2 : [options2];
-    } : (c) => {
-      let executionContext = void 0;
-      try {
-        executionContext = c.executionCtx;
-      } catch {
-      }
-      return [c.env, executionContext];
-    };
-    replaceRequest ||= (() => {
-      const mergedPath = mergePath(this._basePath, path5);
-      const pathPrefixLength = mergedPath === "/" ? 0 : mergedPath.length;
-      return (request) => {
-        const url = new URL(request.url);
-        url.pathname = this.getPath(request).slice(pathPrefixLength) || "/";
-        return new Request(url, request);
-      };
-    })();
-    const handler = async (c, next) => {
-      const res = await applicationHandler(replaceRequest(c.req.raw), ...getOptions(c));
-      if (res) {
-        return res;
-      }
-      await next();
-    };
-    this.#addRoute(METHOD_NAME_ALL, mergePath(path5, "*"), handler);
-    return this;
-  }
-  #addRoute(method, path5, handler, baseRoutePath) {
-    method = method.toUpperCase();
-    path5 = mergePath(this._basePath, path5);
-    const r = {
-      basePath: baseRoutePath !== void 0 ? mergePath(this._basePath, baseRoutePath) : this._basePath,
-      path: path5,
-      method,
-      handler
-    };
-    this.router.add(method, path5, [handler, r]);
-    this.routes.push(r);
-  }
-  #handleError(err, c) {
-    if (err instanceof Error) {
-      return this.errorHandler(err, c);
-    }
-    throw err;
-  }
-  #dispatch(request, executionCtx, env, method) {
-    if (method === "HEAD") {
-      return (async () => new Response(null, await this.#dispatch(request, executionCtx, env, "GET")))();
-    }
-    const path5 = this.getPath(request, { env });
-    const matchResult = this.router.match(method, path5);
-    const c = new Context(request, {
-      path: path5,
-      matchResult,
-      env,
-      executionCtx,
-      notFoundHandler: this.#notFoundHandler
-    });
-    if (matchResult[0].length === 1) {
-      let res;
-      try {
-        res = matchResult[0][0][0][0](c, async () => {
-          c.res = await this.#notFoundHandler(c);
-        });
-      } catch (err) {
-        return this.#handleError(err, c);
-      }
-      return res instanceof Promise ? res.then(
-        (resolved) => resolved || (c.finalized ? c.res : this.#notFoundHandler(c))
-      ).catch((err) => this.#handleError(err, c)) : res ?? this.#notFoundHandler(c);
-    }
-    const composed = compose(matchResult[0], this.errorHandler, this.#notFoundHandler);
-    return (async () => {
-      try {
-        const context = await composed(c);
-        if (!context.finalized) {
-          throw new Error(
-            "Context is not finalized. Did you forget to return a Response object or `await next()`?"
-          );
-        }
-        return context.res;
-      } catch (err) {
-        return this.#handleError(err, c);
-      }
-    })();
-  }
-  /**
-   * `.fetch()` will be entry point of your app.
-   *
-   * @see {@link https://hono.dev/docs/api/hono#fetch}
-   *
-   * @param {Request} request - request Object of request
-   * @param {Env} Env - env Object
-   * @param {ExecutionContext} - context of execution
-   * @returns {Response | Promise<Response>} response of request
-   *
-   */
-  fetch = (request, ...rest) => {
-    return this.#dispatch(request, rest[1], rest[0], request.method);
-  };
-  /**
-   * `.request()` is a useful method for testing.
-   * You can pass a URL or pathname to send a GET request.
-   * app will return a Response object.
-   * ```ts
-   * test('GET /hello is ok', async () => {
-   *   const res = await app.request('/hello')
-   *   expect(res.status).toBe(200)
-   * })
-   * ```
-   * @see https://hono.dev/docs/api/hono#request
-   */
-  request = (input, requestInit, Env, executionCtx) => {
-    if (input instanceof Request) {
-      return this.fetch(requestInit ? new Request(input, requestInit) : input, Env, executionCtx);
-    }
-    input = input.toString();
-    return this.fetch(
-      new Request(
-        /^https?:\/\//.test(input) ? input : `http://localhost${mergePath("/", input)}`,
-        requestInit
-      ),
-      Env,
-      executionCtx
-    );
-  };
-  /**
-   * `.fire()` automatically adds a global fetch event listener.
-   * This can be useful for environments that adhere to the Service Worker API, such as non-ES module Cloudflare Workers.
-   * @deprecated
-   * Use `fire` from `hono/service-worker` instead.
-   * ```ts
-   * import { Hono } from 'hono'
-   * import { fire } from 'hono/service-worker'
-   *
-   * const app = new Hono()
-   * // ...
-   * fire(app)
-   * ```
-   * @see https://hono.dev/docs/api/hono#fire
-   * @see https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API
-   * @see https://developers.cloudflare.com/workers/reference/migrate-to-module-workers/
-   */
-  fire = () => {
-    addEventListener("fetch", (event) => {
-      event.respondWith(this.#dispatch(event.request, event, void 0, event.request.method));
-    });
-  };
-};
-
-// node_modules/hono/dist/router/reg-exp-router/matcher.js
-var emptyParam = [];
-function match(method, path5) {
-  const matchers = this.buildAllMatchers();
-  const match2 = ((method2, path22) => {
-    const matcher = matchers[method2] || matchers[METHOD_NAME_ALL];
-    const staticMatch = matcher[2][path22];
-    if (staticMatch) {
-      return staticMatch;
-    }
-    const match3 = path22.match(matcher[0]);
-    if (!match3) {
-      return [[], emptyParam];
-    }
-    const index = match3.indexOf("", 1);
-    return [matcher[1][index], match3];
-  });
-  this.match = match2;
-  return match2(method, path5);
-}
-
-// node_modules/hono/dist/router/reg-exp-router/node.js
-var LABEL_REG_EXP_STR = "[^/]+";
-var ONLY_WILDCARD_REG_EXP_STR = ".*";
-var TAIL_WILDCARD_REG_EXP_STR = "(?:|/.*)";
-var PATH_ERROR = /* @__PURE__ */ Symbol();
-var regExpMetaChars = new Set(".\\+*[^]$()");
-function compareKey(a, b) {
-  if (a.length === 1) {
-    return b.length === 1 ? a < b ? -1 : 1 : -1;
-  }
-  if (b.length === 1) {
-    return 1;
-  }
-  if (a === ONLY_WILDCARD_REG_EXP_STR || a === TAIL_WILDCARD_REG_EXP_STR) {
-    return 1;
-  } else if (b === ONLY_WILDCARD_REG_EXP_STR || b === TAIL_WILDCARD_REG_EXP_STR) {
-    return -1;
-  }
-  if (a === LABEL_REG_EXP_STR) {
-    return 1;
-  } else if (b === LABEL_REG_EXP_STR) {
-    return -1;
-  }
-  return a.length === b.length ? a < b ? -1 : 1 : b.length - a.length;
-}
-var Node = class _Node {
-  #index;
-  #varIndex;
-  #children = /* @__PURE__ */ Object.create(null);
-  insert(tokens, index, paramMap, context, pathErrorCheckOnly) {
-    if (tokens.length === 0) {
-      if (this.#index !== void 0) {
-        throw PATH_ERROR;
-      }
-      if (pathErrorCheckOnly) {
-        return;
-      }
-      this.#index = index;
-      return;
-    }
-    const [token, ...restTokens] = tokens;
-    const pattern = token === "*" ? restTokens.length === 0 ? ["", "", ONLY_WILDCARD_REG_EXP_STR] : ["", "", LABEL_REG_EXP_STR] : token === "/*" ? ["", "", TAIL_WILDCARD_REG_EXP_STR] : token.match(/^\:([^\{\}]+)(?:\{(.+)\})?$/);
-    let node;
-    if (pattern) {
-      const name = pattern[1];
-      let regexpStr = pattern[2] || LABEL_REG_EXP_STR;
-      if (name && pattern[2]) {
-        if (regexpStr === ".*") {
-          throw PATH_ERROR;
-        }
-        regexpStr = regexpStr.replace(/^\((?!\?:)(?=[^)]+\)$)/, "(?:");
-        if (/\((?!\?:)/.test(regexpStr)) {
-          throw PATH_ERROR;
-        }
-      }
-      node = this.#children[regexpStr];
-      if (!node) {
-        if (Object.keys(this.#children).some(
-          (k) => k !== ONLY_WILDCARD_REG_EXP_STR && k !== TAIL_WILDCARD_REG_EXP_STR
-        )) {
-          throw PATH_ERROR;
-        }
-        if (pathErrorCheckOnly) {
-          return;
-        }
-        node = this.#children[regexpStr] = new _Node();
-        if (name !== "") {
-          node.#varIndex = context.varIndex++;
-        }
-      }
-      if (!pathErrorCheckOnly && name !== "") {
-        paramMap.push([name, node.#varIndex]);
-      }
-    } else {
-      node = this.#children[token];
-      if (!node) {
-        if (Object.keys(this.#children).some(
-          (k) => k.length > 1 && k !== ONLY_WILDCARD_REG_EXP_STR && k !== TAIL_WILDCARD_REG_EXP_STR
-        )) {
-          throw PATH_ERROR;
-        }
-        if (pathErrorCheckOnly) {
-          return;
-        }
-        node = this.#children[token] = new _Node();
-      }
-    }
-    node.insert(restTokens, index, paramMap, context, pathErrorCheckOnly);
-  }
-  buildRegExpStr() {
-    const childKeys = Object.keys(this.#children).sort(compareKey);
-    const strList = childKeys.map((k) => {
-      const c = this.#children[k];
-      return (typeof c.#varIndex === "number" ? `(${k})@${c.#varIndex}` : regExpMetaChars.has(k) ? `\\${k}` : k) + c.buildRegExpStr();
-    });
-    if (typeof this.#index === "number") {
-      strList.unshift(`#${this.#index}`);
-    }
-    if (strList.length === 0) {
-      return "";
-    }
-    if (strList.length === 1) {
-      return strList[0];
-    }
-    return "(?:" + strList.join("|") + ")";
-  }
-};
-
-// node_modules/hono/dist/router/reg-exp-router/trie.js
-var Trie = class {
-  #context = { varIndex: 0 };
-  #root = new Node();
-  insert(path5, index, pathErrorCheckOnly) {
-    const paramAssoc = [];
-    const groups = [];
-    for (let i = 0; ; ) {
-      let replaced = false;
-      path5 = path5.replace(/\{[^}]+\}/g, (m) => {
-        const mark = `@\\${i}`;
-        groups[i] = [mark, m];
-        i++;
-        replaced = true;
-        return mark;
-      });
-      if (!replaced) {
-        break;
-      }
-    }
-    const tokens = path5.match(/(?::[^\/]+)|(?:\/\*$)|./g) || [];
-    for (let i = groups.length - 1; i >= 0; i--) {
-      const [mark] = groups[i];
-      for (let j = tokens.length - 1; j >= 0; j--) {
-        if (tokens[j].indexOf(mark) !== -1) {
-          tokens[j] = tokens[j].replace(mark, groups[i][1]);
-          break;
-        }
-      }
-    }
-    this.#root.insert(tokens, index, paramAssoc, this.#context, pathErrorCheckOnly);
-    return paramAssoc;
-  }
-  buildRegExp() {
-    let regexp = this.#root.buildRegExpStr();
-    if (regexp === "") {
-      return [/^$/, [], []];
-    }
-    let captureIndex = 0;
-    const indexReplacementMap = [];
-    const paramReplacementMap = [];
-    regexp = regexp.replace(/#(\d+)|@(\d+)|\.\*\$/g, (_, handlerIndex, paramIndex) => {
-      if (handlerIndex !== void 0) {
-        indexReplacementMap[++captureIndex] = Number(handlerIndex);
-        return "$()";
-      }
-      if (paramIndex !== void 0) {
-        paramReplacementMap[Number(paramIndex)] = ++captureIndex;
-        return "";
-      }
-      return "";
-    });
-    return [new RegExp(`^${regexp}`), indexReplacementMap, paramReplacementMap];
-  }
-};
-
-// node_modules/hono/dist/router/reg-exp-router/router.js
-var nullMatcher = [/^$/, [], /* @__PURE__ */ Object.create(null)];
-var wildcardRegExpCache = /* @__PURE__ */ Object.create(null);
-function buildWildcardRegExp(path5) {
-  return wildcardRegExpCache[path5] ??= new RegExp(
-    path5 === "*" ? "" : `^${path5.replace(
-      /\/\*$|([.\\+*[^\]$()])/g,
-      (_, metaChar) => metaChar ? `\\${metaChar}` : "(?:|/.*)"
-    )}$`
-  );
-}
-function clearWildcardRegExpCache() {
-  wildcardRegExpCache = /* @__PURE__ */ Object.create(null);
-}
-function buildMatcherFromPreprocessedRoutes(routes) {
-  const trie = new Trie();
-  const handlerData = [];
-  if (routes.length === 0) {
-    return nullMatcher;
-  }
-  const routesWithStaticPathFlag = routes.map(
-    (route) => [!/\*|\/:/.test(route[0]), ...route]
-  ).sort(
-    ([isStaticA, pathA], [isStaticB, pathB]) => isStaticA ? 1 : isStaticB ? -1 : pathA.length - pathB.length
-  );
-  const staticMap = /* @__PURE__ */ Object.create(null);
-  for (let i = 0, j = -1, len = routesWithStaticPathFlag.length; i < len; i++) {
-    const [pathErrorCheckOnly, path5, handlers] = routesWithStaticPathFlag[i];
-    if (pathErrorCheckOnly) {
-      staticMap[path5] = [handlers.map(([h]) => [h, /* @__PURE__ */ Object.create(null)]), emptyParam];
-    } else {
-      j++;
-    }
-    let paramAssoc;
-    try {
-      paramAssoc = trie.insert(path5, j, pathErrorCheckOnly);
-    } catch (e) {
-      throw e === PATH_ERROR ? new UnsupportedPathError(path5) : e;
-    }
-    if (pathErrorCheckOnly) {
-      continue;
-    }
-    handlerData[j] = handlers.map(([h, paramCount]) => {
-      const paramIndexMap = /* @__PURE__ */ Object.create(null);
-      paramCount -= 1;
-      for (; paramCount >= 0; paramCount--) {
-        const [key, value] = paramAssoc[paramCount];
-        paramIndexMap[key] = value;
-      }
-      return [h, paramIndexMap];
-    });
-  }
-  const [regexp, indexReplacementMap, paramReplacementMap] = trie.buildRegExp();
-  for (let i = 0, len = handlerData.length; i < len; i++) {
-    for (let j = 0, len2 = handlerData[i].length; j < len2; j++) {
-      const map = handlerData[i][j]?.[1];
-      if (!map) {
-        continue;
-      }
-      const keys = Object.keys(map);
-      for (let k = 0, len3 = keys.length; k < len3; k++) {
-        map[keys[k]] = paramReplacementMap[map[keys[k]]];
-      }
-    }
-  }
-  const handlerMap = [];
-  for (const i in indexReplacementMap) {
-    handlerMap[i] = handlerData[indexReplacementMap[i]];
-  }
-  return [regexp, handlerMap, staticMap];
-}
-function findMiddleware(middleware, path5) {
-  if (!middleware) {
-    return void 0;
-  }
-  for (const k of Object.keys(middleware).sort((a, b) => b.length - a.length)) {
-    if (buildWildcardRegExp(k).test(path5)) {
-      return [...middleware[k]];
-    }
-  }
-  return void 0;
-}
-var RegExpRouter = class {
-  name = "RegExpRouter";
-  #middleware;
-  #routes;
-  constructor() {
-    this.#middleware = { [METHOD_NAME_ALL]: /* @__PURE__ */ Object.create(null) };
-    this.#routes = { [METHOD_NAME_ALL]: /* @__PURE__ */ Object.create(null) };
-  }
-  add(method, path5, handler) {
-    const middleware = this.#middleware;
-    const routes = this.#routes;
-    if (!middleware || !routes) {
-      throw new Error(MESSAGE_MATCHER_IS_ALREADY_BUILT);
-    }
-    if (!middleware[method]) {
-      ;
-      [middleware, routes].forEach((handlerMap) => {
-        handlerMap[method] = /* @__PURE__ */ Object.create(null);
-        Object.keys(handlerMap[METHOD_NAME_ALL]).forEach((p) => {
-          handlerMap[method][p] = [...handlerMap[METHOD_NAME_ALL][p]];
-        });
-      });
-    }
-    if (path5 === "/*") {
-      path5 = "*";
-    }
-    const paramCount = (path5.match(/\/:/g) || []).length;
-    if (/\*$/.test(path5)) {
-      const re = buildWildcardRegExp(path5);
-      if (method === METHOD_NAME_ALL) {
-        Object.keys(middleware).forEach((m) => {
-          middleware[m][path5] ||= findMiddleware(middleware[m], path5) || findMiddleware(middleware[METHOD_NAME_ALL], path5) || [];
-        });
-      } else {
-        middleware[method][path5] ||= findMiddleware(middleware[method], path5) || findMiddleware(middleware[METHOD_NAME_ALL], path5) || [];
-      }
-      Object.keys(middleware).forEach((m) => {
-        if (method === METHOD_NAME_ALL || method === m) {
-          Object.keys(middleware[m]).forEach((p) => {
-            re.test(p) && middleware[m][p].push([handler, paramCount]);
-          });
-        }
-      });
-      Object.keys(routes).forEach((m) => {
-        if (method === METHOD_NAME_ALL || method === m) {
-          Object.keys(routes[m]).forEach(
-            (p) => re.test(p) && routes[m][p].push([handler, paramCount])
-          );
-        }
-      });
-      return;
-    }
-    const paths = checkOptionalParameter(path5) || [path5];
-    for (let i = 0, len = paths.length; i < len; i++) {
-      const path22 = paths[i];
-      Object.keys(routes).forEach((m) => {
-        if (method === METHOD_NAME_ALL || method === m) {
-          routes[m][path22] ||= [
-            ...findMiddleware(middleware[m], path22) || findMiddleware(middleware[METHOD_NAME_ALL], path22) || []
-          ];
-          routes[m][path22].push([handler, paramCount - len + i + 1]);
-        }
-      });
-    }
-  }
-  match = match;
-  buildAllMatchers() {
-    const matchers = /* @__PURE__ */ Object.create(null);
-    Object.keys(this.#routes).concat(Object.keys(this.#middleware)).forEach((method) => {
-      matchers[method] ||= this.#buildMatcher(method);
-    });
-    this.#middleware = this.#routes = void 0;
-    clearWildcardRegExpCache();
-    return matchers;
-  }
-  #buildMatcher(method) {
-    const routes = [];
-    let hasOwnRoute = method === METHOD_NAME_ALL;
-    [this.#middleware, this.#routes].forEach((r) => {
-      const ownRoute = r[method] ? Object.keys(r[method]).map((path5) => [path5, r[method][path5]]) : [];
-      if (ownRoute.length !== 0) {
-        hasOwnRoute ||= true;
-        routes.push(...ownRoute);
-      } else if (method !== METHOD_NAME_ALL) {
-        routes.push(
-          ...Object.keys(r[METHOD_NAME_ALL]).map((path5) => [path5, r[METHOD_NAME_ALL][path5]])
-        );
-      }
-    });
-    if (!hasOwnRoute) {
-      return null;
-    } else {
-      return buildMatcherFromPreprocessedRoutes(routes);
-    }
-  }
-};
-
-// node_modules/hono/dist/router/smart-router/router.js
-var SmartRouter = class {
-  name = "SmartRouter";
-  #routers = [];
-  #routes = [];
-  constructor(init) {
-    this.#routers = init.routers;
-  }
-  add(method, path5, handler) {
-    if (!this.#routes) {
-      throw new Error(MESSAGE_MATCHER_IS_ALREADY_BUILT);
-    }
-    this.#routes.push([method, path5, handler]);
-  }
-  match(method, path5) {
-    if (!this.#routes) {
-      throw new Error("Fatal error");
-    }
-    const routers = this.#routers;
-    const routes = this.#routes;
-    const len = routers.length;
-    let i = 0;
-    let res;
-    for (; i < len; i++) {
-      const router = routers[i];
-      try {
-        for (let i2 = 0, len2 = routes.length; i2 < len2; i2++) {
-          router.add(...routes[i2]);
-        }
-        res = router.match(method, path5);
-      } catch (e) {
-        if (e instanceof UnsupportedPathError) {
-          continue;
-        }
-        throw e;
-      }
-      this.match = router.match.bind(router);
-      this.#routers = [router];
-      this.#routes = void 0;
-      break;
-    }
-    if (i === len) {
-      throw new Error("Fatal error");
-    }
-    this.name = `SmartRouter + ${this.activeRouter.name}`;
-    return res;
-  }
-  get activeRouter() {
-    if (this.#routes || this.#routers.length !== 1) {
-      throw new Error("No active router has been determined yet.");
-    }
-    return this.#routers[0];
-  }
-};
-
-// node_modules/hono/dist/router/trie-router/node.js
-var emptyParams = /* @__PURE__ */ Object.create(null);
-var hasChildren = (children) => {
-  for (const _ in children) {
-    return true;
-  }
-  return false;
-};
-var Node2 = class _Node2 {
-  #methods;
-  #children;
-  #patterns;
-  #order = 0;
-  #params = emptyParams;
-  constructor(method, handler, children) {
-    this.#children = children || /* @__PURE__ */ Object.create(null);
-    this.#methods = [];
-    if (method && handler) {
-      const m = /* @__PURE__ */ Object.create(null);
-      m[method] = { handler, possibleKeys: [], score: 0 };
-      this.#methods = [m];
-    }
-    this.#patterns = [];
-  }
-  insert(method, path5, handler) {
-    this.#order = ++this.#order;
-    let curNode = this;
-    const parts = splitRoutingPath(path5);
-    const possibleKeys = [];
-    for (let i = 0, len = parts.length; i < len; i++) {
-      const p = parts[i];
-      const nextP = parts[i + 1];
-      const pattern = getPattern(p, nextP);
-      const key = Array.isArray(pattern) ? pattern[0] : p;
-      if (key in curNode.#children) {
-        curNode = curNode.#children[key];
-        if (pattern) {
-          possibleKeys.push(pattern[1]);
-        }
-        continue;
-      }
-      curNode.#children[key] = new _Node2();
-      if (pattern) {
-        curNode.#patterns.push(pattern);
-        possibleKeys.push(pattern[1]);
-      }
-      curNode = curNode.#children[key];
-    }
-    curNode.#methods.push({
-      [method]: {
-        handler,
-        possibleKeys: possibleKeys.filter((v, i, a) => a.indexOf(v) === i),
-        score: this.#order
-      }
-    });
-    return curNode;
-  }
-  #pushHandlerSets(handlerSets, node, method, nodeParams, params) {
-    for (let i = 0, len = node.#methods.length; i < len; i++) {
-      const m = node.#methods[i];
-      const handlerSet = m[method] || m[METHOD_NAME_ALL];
-      const processedSet = {};
-      if (handlerSet !== void 0) {
-        handlerSet.params = /* @__PURE__ */ Object.create(null);
-        handlerSets.push(handlerSet);
-        if (nodeParams !== emptyParams || params && params !== emptyParams) {
-          for (let i2 = 0, len2 = handlerSet.possibleKeys.length; i2 < len2; i2++) {
-            const key = handlerSet.possibleKeys[i2];
-            const processed = processedSet[handlerSet.score];
-            handlerSet.params[key] = params?.[key] && !processed ? params[key] : nodeParams[key] ?? params?.[key];
-            processedSet[handlerSet.score] = true;
-          }
-        }
-      }
-    }
-  }
-  search(method, path5) {
-    const handlerSets = [];
-    this.#params = emptyParams;
-    const curNode = this;
-    let curNodes = [curNode];
-    const parts = splitPath(path5);
-    const curNodesQueue = [];
-    const len = parts.length;
-    let partOffsets = null;
-    for (let i = 0; i < len; i++) {
-      const part = parts[i];
-      const isLast = i === len - 1;
-      const tempNodes = [];
-      for (let j = 0, len2 = curNodes.length; j < len2; j++) {
-        const node = curNodes[j];
-        const nextNode = node.#children[part];
-        if (nextNode) {
-          nextNode.#params = node.#params;
-          if (isLast) {
-            if (nextNode.#children["*"]) {
-              this.#pushHandlerSets(handlerSets, nextNode.#children["*"], method, node.#params);
-            }
-            this.#pushHandlerSets(handlerSets, nextNode, method, node.#params);
-          } else {
-            tempNodes.push(nextNode);
-          }
-        }
-        for (let k = 0, len3 = node.#patterns.length; k < len3; k++) {
-          const pattern = node.#patterns[k];
-          const params = node.#params === emptyParams ? {} : { ...node.#params };
-          if (pattern === "*") {
-            const astNode = node.#children["*"];
-            if (astNode) {
-              this.#pushHandlerSets(handlerSets, astNode, method, node.#params);
-              astNode.#params = params;
-              tempNodes.push(astNode);
-            }
-            continue;
-          }
-          const [key, name, matcher] = pattern;
-          if (!part && !(matcher instanceof RegExp)) {
-            continue;
-          }
-          const child = node.#children[key];
-          if (matcher instanceof RegExp) {
-            if (partOffsets === null) {
-              partOffsets = new Array(len);
-              let offset = path5[0] === "/" ? 1 : 0;
-              for (let p = 0; p < len; p++) {
-                partOffsets[p] = offset;
-                offset += parts[p].length + 1;
-              }
-            }
-            const restPathString = path5.substring(partOffsets[i]);
-            const m = matcher.exec(restPathString);
-            if (m) {
-              params[name] = m[0];
-              this.#pushHandlerSets(handlerSets, child, method, node.#params, params);
-              if (hasChildren(child.#children)) {
-                child.#params = params;
-                const componentCount = m[0].match(/\//)?.length ?? 0;
-                const targetCurNodes = curNodesQueue[componentCount] ||= [];
-                targetCurNodes.push(child);
-              }
-              continue;
-            }
-          }
-          if (matcher === true || matcher.test(part)) {
-            params[name] = part;
-            if (isLast) {
-              this.#pushHandlerSets(handlerSets, child, method, params, node.#params);
-              if (child.#children["*"]) {
-                this.#pushHandlerSets(
-                  handlerSets,
-                  child.#children["*"],
-                  method,
-                  params,
-                  node.#params
-                );
-              }
-            } else {
-              child.#params = params;
-              tempNodes.push(child);
-            }
-          }
-        }
-      }
-      const shifted = curNodesQueue.shift();
-      curNodes = shifted ? tempNodes.concat(shifted) : tempNodes;
-    }
-    if (handlerSets.length > 1) {
-      handlerSets.sort((a, b) => {
-        return a.score - b.score;
-      });
-    }
-    return [handlerSets.map(({ handler, params }) => [handler, params])];
-  }
-};
-
-// node_modules/hono/dist/router/trie-router/router.js
-var TrieRouter = class {
-  name = "TrieRouter";
-  #node;
-  constructor() {
-    this.#node = new Node2();
-  }
-  add(method, path5, handler) {
-    const results = checkOptionalParameter(path5);
-    if (results) {
-      for (let i = 0, len = results.length; i < len; i++) {
-        this.#node.insert(method, results[i], handler);
-      }
-      return;
-    }
-    this.#node.insert(method, path5, handler);
-  }
-  match(method, path5) {
-    return this.#node.search(method, path5);
-  }
-};
-
-// node_modules/hono/dist/hono.js
-var Hono2 = class extends Hono {
-  /**
-   * Creates an instance of the Hono class.
-   *
-   * @param options - Optional configuration options for the Hono instance.
-   */
-  constructor(options = {}) {
-    super(options);
-    this.router = options.router ?? new SmartRouter({
-      routers: [new RegExpRouter(), new TrieRouter()]
-    });
-  }
-};
-
-// src/mlclaw-space-runtime/csrf.ts
-import { createHmac as createHmac2, randomBytes as randomBytes2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
-var CSRF_TTL_SECONDS = 60 * 60;
-function createCsrfToken(params) {
-  const now = params.now ?? Date.now();
-  const body = Buffer.from(JSON.stringify({
-    username: params.username,
-    nonce: randomBytes2(24).toString("base64url"),
-    exp: Math.floor(now / 1e3) + CSRF_TTL_SECONDS
-  })).toString("base64url");
-  return `${body}.${sign(body, params.sessionSecret)}`;
-}
-function verifyCsrfToken(params) {
-  if (!params.token) {
-    return false;
-  }
-  const [body, signature] = params.token.split(".");
-  if (!body || !signature || !signatureMatches(signature, sign(body, params.sessionSecret))) {
-    return false;
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
-  } catch {
-    return false;
-  }
-  if (!parsed || typeof parsed !== "object") {
-    return false;
-  }
-  const payload = parsed;
-  const now = Math.floor((params.now ?? Date.now()) / 1e3);
-  return payload.username === params.username && typeof payload.exp === "number" && payload.exp > now && typeof payload.nonce === "string" && payload.nonce.length > 0;
-}
-function sign(value, secret) {
-  return createHmac2("sha256", secret).update(value).digest("base64url");
-}
-function signatureMatches(a, b) {
-  const left = Buffer.from(a);
-  const right = Buffer.from(b);
-  return left.length === right.length && timingSafeEqual2(left, right);
-}
-
-// src/mlclaw-space-runtime/delegated-brokerkit.ts
-import { createHash as createHash2, createHmac as createHmac3, randomBytes as randomBytes4, timingSafeEqual as timingSafeEqual3 } from "node:crypto";
-
-// src/mlclaw-space-runtime/delegated-revisions.ts
-import { randomBytes as randomBytes3 } from "node:crypto";
-var DelegatedRevisions = class {
-  epoch = randomBytes3(16).toString("base64url");
-  revision = 0;
-  material = "";
-  current;
-  waiters = /* @__PURE__ */ new Set();
-  publish(material, value) {
-    if (this.current && material === this.material) return this.current;
-    this.material = material;
-    this.revision += 1;
-    this.current = value(this.cursor());
-    for (const waiter of [...this.waiters])
-      this.finish(waiter, { api_version: "brokerkit.io/operator-ui/v1", cursor: this.cursor(), changed: true });
-    return this.current;
-  }
-  wait(cursor, waitSeconds, signal) {
-    const observed = this.parse(cursor);
-    if (observed === void 0) return Promise.reject(revisionError("cursor_expired"));
-    if (observed !== this.revision) {
-      return Promise.resolve({ api_version: "brokerkit.io/operator-ui/v1", cursor: this.cursor(), changed: true });
-    }
-    if (this.waiters.size >= 256) return Promise.reject(revisionError("source_unavailable"));
-    if (signal?.aborted) return Promise.reject(abortError());
-    return new Promise((resolve, reject) => {
-      const waiter = {
-        resolve,
-        reject,
-        timer: setTimeout(() => {
-          this.finish(waiter, { api_version: "brokerkit.io/operator-ui/v1", cursor: this.cursor(), changed: false });
-        }, waitSeconds * 1e3),
-        ...signal ? { signal } : {}
-      };
-      waiter.timer.unref();
-      if (signal) {
-        waiter.abort = () => this.fail(waiter, abortError());
-        signal.addEventListener("abort", waiter.abort, { once: true });
-      }
-      this.waiters.add(waiter);
-    });
-  }
-  cursor() {
-    return `${this.epoch}.${this.revision.toString(36)}`;
-  }
-  parse(value) {
-    const match2 = /^([A-Za-z0-9_-]{22})\.([0-9a-z]{1,13})$/u.exec(value);
-    if (!match2 || match2[1] !== this.epoch) return void 0;
-    const revision = Number.parseInt(match2[2] ?? "", 36);
-    return Number.isSafeInteger(revision) && revision <= this.revision ? revision : void 0;
-  }
-  finish(waiter, value) {
-    this.cleanup(waiter);
-    waiter.resolve(value);
-  }
-  fail(waiter, error) {
-    this.cleanup(waiter);
-    waiter.reject(error);
-  }
-  cleanup(waiter) {
-    if (!this.waiters.delete(waiter)) return;
-    clearTimeout(waiter.timer);
-    if (waiter.signal && waiter.abort) waiter.signal.removeEventListener("abort", waiter.abort);
-  }
-};
-function revisionError(code) {
-  return Object.assign(new Error(code), { code });
-}
-function abortError() {
-  return new DOMException("The operation was aborted", "AbortError");
-}
-
-// src/mlclaw-space-runtime/delegated-brokerkit.ts
-var API_VERSION = "brokerkit.io/delegated-web/v1";
-var TOKEN_LIFETIME_SECONDS = 4 * 60;
-var MAX_PAGES_PER_SOURCE = 32;
-var MAX_HANDLES = 4096;
-var SOURCE_DEADLINE_MS = 15e3;
-var DelegatedBrokerKit = class {
-  constructor(registry, sessionSecret, now = () => /* @__PURE__ */ new Date(), sourceDeadlineMs = SOURCE_DEADLINE_MS) {
-    this.registry = registry;
-    this.now = now;
-    this.sourceDeadlineMs = sourceDeadlineMs;
-    this.key = createHmac3("sha256", sessionSecret).update("mlclaw/brokerkit-delegated-web/v1", "utf8").digest();
-  }
-  key;
-  handles = /* @__PURE__ */ new Map();
-  handlesByIdentity = /* @__PURE__ */ new Map();
-  snapshotInFlight;
-  revisions = new DelegatedRevisions();
-  issueSession(actor, access) {
-    const issuedAt = Math.floor(this.now().getTime() / 1e3);
-    const expiresAt = issuedAt + TOKEN_LIFETIME_SECONDS;
-    const payload = {
-      version: 1,
-      audience: "brokerkit-delegated-web",
-      subject: actor,
-      issuedAt,
-      expiresAt,
-      nonce: randomBytes4(16).toString("base64url"),
-      access
-    };
-    const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
-    const signature = this.sign(encoded);
-    return {
-      api_version: API_VERSION,
-      token: `${encoded}.${signature}`,
-      expires_at: new Date(expiresAt * 1e3).toISOString(),
-      access,
-      renewal_transport: "direct"
-    };
-  }
-  authorize(token) {
-    return this.authorizeSession(token)?.actor;
-  }
-  authorizeSession(token) {
-    const encoded = authenticatedTokenPayload(token, (value) => this.sign(value));
-    if (!encoded) return void 0;
-    const payload = parseTokenPayload(encoded);
-    return payload && tokenIsCurrent(payload, this.now()) ? { actor: payload.subject, sessionId: payload.nonce, access: payload.access } : void 0;
-  }
-  async snapshot() {
-    if (this.snapshotInFlight) return this.snapshotInFlight;
-    const pending = this.buildSnapshot();
-    this.snapshotInFlight = pending;
-    try {
-      return await pending;
-    } finally {
-      if (this.snapshotInFlight === pending) this.snapshotInFlight = void 0;
-    }
-  }
-  async buildSnapshot() {
-    this.pruneHandles();
-    const synchronizedAt = this.now().toISOString();
-    const results = await Promise.all(
-      this.registry.entries().map(async ([summary, client]) => this.sourceSnapshot(summary, client, synchronizedAt))
-    );
-    const selected = selectSnapshotRequests(results, MAX_HANDLES);
-    const reservedHandles = this.selectedExistingHandles(selected);
-    const sources = results.map((result) => result.source);
-    const requests = selected.map(
-      ({ source, request }) => project(source, request, this.handle(source.id, request, reservedHandles))
-    );
-    const material = JSON.stringify({
-      sources: sources.map((source) => ({
-        id: source.id,
-        label: source.label,
-        healthy: source.healthy,
-        ...source.error ? { error: source.error } : {}
-      })),
-      requests
-    });
-    return this.revisions.publish(material, (cursor) => ({
-      api_version: "brokerkit.io/operator-ui/v1",
-      cursor,
-      sources,
-      requests,
-      synchronized_at: synchronizedAt
-    }));
-  }
-  async events(cursor, waitSeconds, signal) {
-    await this.snapshot();
-    const waiting = this.revisions.wait(cursor, waitSeconds, signal);
-    const refresh = setInterval(() => void this.snapshot().catch(() => void 0), 1e3);
-    refresh.unref();
-    try {
-      return await waiting;
-    } catch (error) {
-      if (error instanceof Error && "code" in error && (error.code === "cursor_expired" || error.code === "source_unavailable")) {
-        throw delegatedError(error.code);
-      }
-      throw error;
-    } finally {
-      clearInterval(refresh);
-    }
-  }
-  async summary() {
-    const snapshot = await this.snapshot();
-    return {
-      api_version: snapshot.api_version,
-      cursor: snapshot.cursor,
-      pending: snapshot.requests.filter((value) => value.request.status === "pending").length,
-      healthy: snapshot.sources.every((source) => source.healthy)
-    };
-  }
-  async detail(handle) {
-    const record = this.resolveHandle(handle);
-    const source = this.registry.get(record.sourceId);
-    if (!source) throw delegatedError("source_unavailable");
-    const request = await source.get(record.requestId);
-    if (request.revision !== record.revision) throw delegatedError("revision_stale");
-    return project(source.summary(), request, handle);
-  }
-  async decide(handle, action, expectedRevision, actor, options = {}) {
-    const record = this.resolveHandle(handle);
-    const source = this.registry.get(record.sourceId);
-    if (!source) throw delegatedError("source_unavailable");
-    const current = await source.get(record.requestId);
-    assertDecisionAllowed(current, record, action, expectedRevision, options);
-    const decision = decisionOptions(record, action, expectedRevision, actor, options);
-    const updated = await decideWithRecovery(source, record.requestId, action, decision);
-    if (updated.status === "pending" || updated.status === "active") {
-      this.removeHandle(handle, record);
-      return project(source.summary(), updated, this.handle(record.sourceId, updated));
-    }
-    this.removeHandle(handle, record);
-    return project(source.summary(), updated, handle);
-  }
-  async sourceSnapshot(summary, client, synchronizedAt) {
-    const deadline = new AbortController();
-    const timer = setTimeout(() => deadline.abort(), this.sourceDeadlineMs);
-    timer.unref?.();
-    try {
-      await client.discover(deadline.signal);
-      const pages = await Promise.all([
-        this.sourceRequests(client, "pending", deadline.signal),
-        this.sourceRequests(client, "active", deadline.signal)
-      ]);
-      const requests = reconcileRequests(pages.map((page2) => page2.requests));
-      return {
-        source: deadline.signal.aborted ? { ...summary, healthy: false, error: "broker_timeout" } : pages.some((page2) => page2.truncated) ? { ...summary, healthy: false, error: "source_truncated" } : { ...summary, healthy: true, last_sync_at: synchronizedAt },
-        requests
-      };
-    } catch (error) {
-      return {
-        source: { ...summary, healthy: false, error: safeSourceError(error) },
-        requests: []
-      };
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  async sourceRequests(client, status, signal) {
-    const requests = [];
-    let cursor;
-    try {
-      for (let pageNumber = 0; pageNumber < MAX_PAGES_PER_SOURCE; pageNumber += 1) {
-        const page2 = await client.list({ status, ...cursor ? { cursor } : {}, limit: 100 }, signal);
-        requests.push(...page2.requests);
-        cursor = page2.next_cursor;
-        if (!cursor) return { requests, truncated: false };
-      }
-    } catch (error) {
-      if (!signal.aborted) throw error;
-    }
-    return { requests, truncated: Boolean(cursor) };
-  }
-  selectedExistingHandles(selected) {
-    const handles = /* @__PURE__ */ new Set();
-    for (const { source, request } of selected) {
-      const handle = this.handlesByIdentity.get(requestIdentity(source.id, request.id, request.revision));
-      if (handle && this.handles.has(handle)) handles.add(handle);
-    }
-    return handles;
-  }
-  handle(sourceId, request, reservedHandles = /* @__PURE__ */ new Set()) {
-    const identity = requestIdentity(sourceId, request.id, request.revision);
-    const existing = this.handlesByIdentity.get(identity);
-    if (existing && this.handles.has(existing)) {
-      reservedHandles.add(existing);
-      return existing;
-    }
-    if (this.handles.size >= MAX_HANDLES && !this.pruneOldestHandle(reservedHandles)) {
-      throw delegatedError("source_unavailable");
-    }
-    const handle = randomBytes4(18).toString("base64url");
-    const requestExpiry = Date.parse(handleExpiry(request));
-    const expiresAtMs = Number.isFinite(requestExpiry) ? Math.min(requestExpiry, this.now().getTime() + 24 * 60 * 6e4) : this.now().getTime() + 5 * 6e4;
-    this.handles.set(handle, { sourceId, requestId: request.id, revision: request.revision, expiresAtMs });
-    this.handlesByIdentity.set(identity, handle);
-    reservedHandles.add(handle);
-    return handle;
-  }
-  resolveHandle(handle) {
-    if (!/^[A-Za-z0-9_-]{24}$/u.test(handle)) throw delegatedError("request_not_found");
-    const record = this.handles.get(handle);
-    if (!record || record.expiresAtMs <= this.now().getTime()) {
-      if (record) this.removeHandle(handle, record);
-      throw delegatedError("request_not_found");
-    }
-    return record;
-  }
-  pruneHandles() {
-    for (const [handle, record] of this.handles) {
-      if (record.expiresAtMs <= this.now().getTime()) this.removeHandle(handle, record);
-    }
-  }
-  pruneOldestHandle(reservedHandles) {
-    for (const [handle, record] of this.handles) {
-      if (reservedHandles.has(handle)) continue;
-      this.removeHandle(handle, record);
-      return true;
-    }
-    return false;
-  }
-  removeHandle(handle, record) {
-    this.handles.delete(handle);
-    this.handlesByIdentity.delete(requestIdentity(record.sourceId, record.requestId, record.revision));
-  }
-  sign(encoded) {
-    return createHmac3("sha256", this.key).update(encoded, "utf8").digest("base64url");
-  }
-};
-async function decideWithRecovery(source, requestId, action, decision) {
-  try {
-    return await source.decide(requestId, action, decision);
-  } catch (error) {
-    if (error instanceof BrokerOperatorError) throw error;
-    try {
-      await source.get(requestId);
-    } catch {
-      throw delegatedError("source_unavailable");
-    }
-    try {
-      return await source.decide(requestId, action, decision);
-    } catch (retryError) {
-      if (retryError instanceof BrokerOperatorError) throw retryError;
-      throw delegatedError("source_unavailable");
-    }
-  }
-}
-function selectSnapshotRequests(results, limit) {
-  const buckets = results.flatMap(
-    (result) => ["pending", "active"].map((status) => ({
-      source: result.source,
-      requests: result.requests.filter((request) => request.status === status),
-      index: 0
-    }))
-  );
-  const selected = [];
-  while (selected.length < limit) {
-    let added = false;
-    for (const bucket of buckets) {
-      const request = bucket.requests[bucket.index];
-      if (!request) continue;
-      selected.push({ source: bucket.source, request });
-      bucket.index += 1;
-      added = true;
-      if (selected.length === limit) break;
-    }
-    if (!added) break;
-  }
-  return selected;
-}
-function reconcileRequests(pages) {
-  const requests = /* @__PURE__ */ new Map();
-  for (const request of pages.flat()) {
-    const current = requests.get(request.id);
-    if (!current || request.revision > current.revision || request.revision === current.revision && request.status === "active" && current.status !== "active") {
-      requests.set(request.id, request);
-    }
-  }
-  return [...requests.values()];
-}
-var DelegatedBrokerKitError = class extends Error {
-  constructor(code) {
-    super(code);
-    this.code = code;
-  }
-};
-function delegatedError(code) {
-  return new DelegatedBrokerKitError(code);
-}
-function project(source, request, handle) {
-  return { source_id: source.id, source_label: source.label, handle, request };
-}
-function requestIdentity(sourceId, requestId, revision) {
-  return `${sourceId}\0${requestId}\0${revision}`;
-}
-function handleExpiry(request) {
-  if (request.status === "active") return request.active_expires_at ?? "";
-  return request.pending_expires_at ?? request.active_expires_at ?? "";
-}
-function decisionKey(record, action, actor) {
-  return createHash2("sha256").update(
-    ["mlclaw-brokerkit-decision-v1", record.sourceId, record.requestId, String(record.revision), action, actor].join(
-      "\0"
-    ),
-    "utf8"
-  ).digest("base64url");
-}
-function decisionOptions(record, action, expectedRevision, actor, options) {
-  return {
-    expectedRevision,
-    idempotencyKey: decisionKey(record, action, actor),
-    onBehalfOf: `mlclaw:${actor}`,
-    ...options.durationSeconds ? { durationSeconds: options.durationSeconds } : {},
-    ...options.maxUses !== void 0 ? { maxUses: options.maxUses } : {}
-  };
-}
-function decisionWithinBounds(action, request, options) {
-  if (options.durationSeconds === void 0 && options.maxUses === void 0) return true;
-  const bounds = request.approval_bounds;
-  return Boolean(
-    action === "approve" && bounds && options.durationSeconds !== void 0 && options.durationSeconds <= bounds.max_duration_seconds && useLimitWithinBounds(options.maxUses, bounds.max_uses)
-  );
-}
-function useLimitWithinBounds(requested, maximum) {
-  if (requested === void 0) return false;
-  if (requested === null) return maximum === null;
-  return maximum === null || requested <= maximum;
-}
-function assertDecisionAllowed(request, record, action, expectedRevision, options) {
-  if (request.revision !== record.revision || request.revision !== expectedRevision) {
-    throw delegatedError("revision_stale");
-  }
-  if (!request.allowed_actions.includes(action) || !decisionWithinBounds(action, request, options)) {
-    throw delegatedError("action_not_allowed");
-  }
-}
-function authenticatedTokenPayload(token, sign3) {
-  if (!token || token.length > 4096 || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u.test(token)) return void 0;
-  const [encoded, signature, extra] = token.split(".");
-  return encoded && signature && extra === void 0 && safeEqual(signature, sign3(encoded)) ? encoded : void 0;
-}
-function parseTokenPayload(encoded) {
-  try {
-    const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
-    return validTokenPayload(payload) ? payload : void 0;
-  } catch {
-    return void 0;
-  }
-}
-function tokenIsCurrent(payload, now) {
-  const current = Math.floor(now.getTime() / 1e3);
-  return payload.issuedAt <= current + 5 && payload.expiresAt > current && payload.expiresAt - payload.issuedAt <= TOKEN_LIFETIME_SECONDS;
-}
-function validTokenPayload(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const record = value;
-  return hasExactTokenFields(record) && validTokenIdentity(record) && validTokenTimes(record) && validTokenNonce(record);
-}
-function hasExactTokenFields(record) {
-  return Object.keys(record).sort().join(",") === "access,audience,expiresAt,issuedAt,nonce,subject,version";
-}
-function validTokenIdentity(record) {
-  return record.version === 1 && record.audience === "brokerkit-delegated-web" && (record.access === "read" || record.access === "decide") && typeof record.subject === "string" && record.subject.length >= 1 && record.subject.length <= 200;
-}
-function validTokenTimes(record) {
-  return typeof record.issuedAt === "number" && Number.isSafeInteger(record.issuedAt) && typeof record.expiresAt === "number" && Number.isSafeInteger(record.expiresAt);
-}
-function validTokenNonce(record) {
-  return typeof record.nonce === "string" && /^[A-Za-z0-9_-]{22}$/u.test(record.nonce);
-}
-function safeEqual(left, right) {
-  const a = Buffer.from(left, "utf8");
-  const b = Buffer.from(right, "utf8");
-  return a.length === b.length && timingSafeEqual3(a, b);
-}
-function safeSourceError(error) {
-  const code = error instanceof BrokerOperatorError ? error.code : error instanceof DelegatedBrokerKitError ? error.code : void 0;
-  if (code === "broker_timeout" || code === "unavailable" || code === "source_unavailable") return code;
-  return "source_unavailable";
-}
-
-// src/mlclaw-space-runtime/hub-settings.ts
-function runtimeSettings(config2) {
-  return {
-    agentName: config2.agentName ?? null,
-    model: config2.model,
-    stateBucket: config2.stateBucket ?? null,
-    stateMountDir: config2.stateMountDir ?? null,
-    statePrefix: config2.statePrefix ?? null,
-    gatewayLocation: config2.gatewayLocation ?? null,
-    runtimeImage: config2.runtimeImage ?? null,
-    runtimeId: config2.runtimeId ?? null,
-    templateRev: config2.templateRev ?? null,
-    allowedUsers: config2.allowedUsers,
-    adminUsers: config2.adminUsers,
-    modelChoices: config2.modelChoices,
-    presetModels: PRESET_MODEL_CHOICES,
-    branding: publicBranding(config2.branding)
-  };
-}
-function normalizeModel(value) {
-  return normalizeModelRef(value);
-}
-async function setCurrentSpaceVariable(config2, key, value) {
-  if (!config2.spaceId || !config2.hfToken) {
-    throw new Error("Space mutation requires SPACE_ID and HF_TOKEN");
-  }
-  await hubRequest(config2, `/api/spaces/${config2.spaceId}/variables`, {
-    method: "POST",
-    body: JSON.stringify({ key, value }),
-    headers: { "content-type": "application/json" }
-  });
-}
-async function setCurrentSpaceSecret(config2, key, value) {
-  if (!config2.spaceId || !config2.hfToken) {
-    throw new Error("Space mutation requires SPACE_ID and HF_TOKEN");
-  }
-  await hubRequest(config2, `/api/spaces/${config2.spaceId}/secrets`, {
-    method: "POST",
-    body: JSON.stringify({ key, value }),
-    headers: { "content-type": "application/json" }
-  });
-}
-async function restartCurrentSpace(config2) {
-  if (!config2.spaceId || !config2.hfToken) {
-    return false;
-  }
-  await hubRequest(config2, `/api/spaces/${config2.spaceId}/restart`, {
-    method: "POST",
-    body: JSON.stringify({ factoryReboot: false }),
-    headers: { "content-type": "application/json" }
-  });
-  return true;
-}
-async function hubRequest(config2, path5, init) {
-  const response = await fetch(`${config2.hubUrl.replace(/\/+$/, "")}${path5}`, {
-    ...init,
-    headers: {
-      authorization: `Bearer ${config2.hfToken}`,
-      ...init.headers
-    }
-  });
-  if (!response.ok) {
-    throw new Error(`Hub request failed: ${response.status} ${await response.text()}`);
-  }
-  return response;
-}
 
 // src/mlclaw-space-runtime/oauth.ts
 var HF_MCP_OAUTH_SCOPES = [

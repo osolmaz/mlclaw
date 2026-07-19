@@ -1,6 +1,13 @@
 import { isAbsolute } from "node:path";
 import { readFileSync } from "node:fs";
-import { z } from "zod";
+import {
+  parseDescriptor,
+  parseErrorEnvelope,
+  parseRequest,
+  parseRequestPage,
+  type BrokerRequest,
+  type RequestPage,
+} from "openclaw-brokerkit/operator-v1";
 
 const MAX_CONFIG_BYTES = 64 * 1024;
 const MAX_TOKEN_BYTES = 4096;
@@ -18,44 +25,8 @@ export type OperatorBrokerConfig = OperatorBrokerSummary & {
   token: string;
 };
 
-export type BrokerDisplayField = {
-  label: string;
-  value: string;
-};
-
-export type BrokerApproval = {
-  id: string;
-  revision: number;
-  requester: string;
-  operation: string;
-  status: "pending" | "active" | "denied" | "canceled" | "expired" | "consumed" | "revoked";
-  requested_at: string;
-  pending_expires_at?: string;
-  active_expires_at?: string;
-  requested_duration_seconds: number;
-  requested_max_uses: number | null;
-  granted_max_uses: number | null;
-  used_count: number;
-  request_reason?: string;
-  decided_at?: string;
-  decided_by?: string;
-  decided_on_behalf_of?: string;
-  presentation: {
-    risk: "unknown" | "low" | "medium" | "high" | "critical";
-    title: string;
-    summary?: string;
-    facts?: BrokerDisplayField[];
-  };
-  presentation_unavailable?: boolean;
-  allowed_actions: Array<"approve" | "deny" | "revoke">;
-  approval_bounds?: { max_duration_seconds: number; max_uses: number | null };
-};
-
-export type BrokerApprovalPage = {
-  requests: BrokerApproval[];
-  next_cursor?: string;
-  event_cursor?: string;
-};
+export type BrokerApproval = BrokerRequest;
+export type BrokerApprovalPage = RequestPage;
 
 export type BrokerDecision = {
   expectedRevision: number;
@@ -69,70 +40,6 @@ export type BrokerOperatorClientOptions = OperatorBrokerConfig & {
   fetch?: typeof fetch;
   requestTimeoutMs?: number;
 };
-
-const displayFieldSchema = z
-  .object({
-    label: z.string().min(1).max(80),
-    value: z.string().min(1).max(500),
-  })
-  .strict();
-
-const approvalSchema = z
-  .object({
-    id: z.string().min(1).max(128),
-    revision: z.number().int().positive().safe(),
-    requester: z.string().min(1).max(80),
-    operation: z.string().min(1).max(500),
-    status: z.enum(["pending", "active", "denied", "canceled", "expired", "consumed", "revoked"]),
-    requested_at: z.string().datetime({ offset: true }),
-    pending_expires_at: z.string().datetime({ offset: true }).optional(),
-    active_expires_at: z.string().datetime({ offset: true }).optional(),
-    requested_duration_seconds: z.number().int().positive().safe(),
-    requested_max_uses: z.number().int().positive().safe().nullable(),
-    granted_max_uses: z.number().int().positive().safe().nullable(),
-    used_count: z.number().int().nonnegative().safe(),
-    request_reason: z.string().max(2_000).optional(),
-    decided_at: z.string().datetime({ offset: true }).optional(),
-    decided_by: z.string().max(200).optional(),
-    decided_on_behalf_of: z.string().max(200).optional(),
-    presentation: z
-      .object({
-        risk: z.enum(["unknown", "low", "medium", "high", "critical"]),
-        title: z.string().min(1).max(200),
-        summary: z.string().max(2_000).optional(),
-        facts: z.array(displayFieldSchema).max(20).optional(),
-      })
-      .strict(),
-    presentation_unavailable: z.boolean().optional(),
-    allowed_actions: z.array(z.enum(["approve", "deny", "revoke"])).max(3),
-    approval_bounds: z
-      .object({
-        max_duration_seconds: z.number().int().positive().safe(),
-        max_uses: z.number().int().positive().safe().nullable(),
-      })
-      .strict()
-      .optional(),
-  })
-  .strict();
-
-const approvalPageSchema = z
-  .object({
-    requests: z.array(approvalSchema).max(100),
-    next_cursor: z.string().min(1).max(1_024).optional(),
-    event_cursor: z.string().min(1).max(1_024).optional(),
-  })
-  .strict();
-
-const operatorErrorSchema = z
-  .object({
-    error: z
-      .object({
-        code: z.string().min(1).max(200).optional(),
-        message: z.string().min(1).max(2_000).optional(),
-      })
-      .optional(),
-  })
-  .passthrough();
 
 export class BrokerOperatorError extends Error {
   constructor(
@@ -178,7 +85,7 @@ export class BrokerOperatorClient {
     return this.request(
       "/.well-known/brokerkit-operator",
       signal ? { signal } : undefined,
-      z.object({ api_version: z.literal("brokerkit.io/operator/v1") }).passthrough(),
+      parseDescriptor,
       "discovery",
     );
   }
@@ -201,7 +108,7 @@ export class BrokerOperatorClient {
     return this.request<BrokerApprovalPage>(
       `/api/operator/v1/requests${suffix}`,
       signal ? { signal } : undefined,
-      approvalPageSchema,
+      parseRequestPage,
       "request list",
     );
   }
@@ -210,7 +117,7 @@ export class BrokerOperatorClient {
     return this.request<BrokerApproval>(
       `/api/operator/v1/requests/${approvalId(id)}`,
       undefined,
-      approvalSchema,
+      parseRequest,
       "request",
     );
   }
@@ -235,7 +142,7 @@ export class BrokerOperatorClient {
             : {}),
         }),
       },
-      approvalSchema,
+      parseRequest,
       "request",
     );
   }
@@ -269,7 +176,7 @@ export class BrokerOperatorClient {
   private async request<T>(
     pathname: string,
     init: RequestInit | undefined,
-    schema: z.ZodTypeAny,
+    parser: (value: unknown) => T,
     label: string,
   ): Promise<T> {
     const headers = new Headers(init?.headers);
@@ -286,7 +193,7 @@ export class BrokerOperatorClient {
       if (!response.ok) {
         throw await this.operatorError(response);
       }
-      return validatedBrokerPayload(await boundedJson(response), schema, label);
+      return validatedBrokerPayload(await boundedJson(response), parser, label);
     } catch (err) {
       if (deadline.timedOut()) {
         throw new BrokerOperatorError(
@@ -305,13 +212,9 @@ export class BrokerOperatorClient {
   private async operatorError(response: Response): Promise<BrokerOperatorError> {
     const fallback = `${this.options.label} operator request failed`;
     try {
-      const value = validatedBrokerPayload<z.infer<typeof operatorErrorSchema>>(
-        await boundedJson(response),
-        operatorErrorSchema,
-        "error",
-      );
-      const message = value.error?.message?.trim() || fallback;
-      const code = value.error?.code?.trim();
+      const value = validatedBrokerPayload(await boundedJson(response), parseErrorEnvelope, "error");
+      const message = value?.error.message.trim() || fallback;
+      const code = value?.error.code.trim();
       return new BrokerOperatorError(this.summary(), response.status, code, message);
     } catch {
       return new BrokerOperatorError(this.summary(), response.status, undefined, fallback);
@@ -468,10 +371,10 @@ async function boundedJson(response: Response): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
 }
 
-function validatedBrokerPayload<T>(value: unknown, schema: z.ZodTypeAny, label: string): T {
-  const parsed = schema.safeParse(value);
-  if (!parsed.success) {
+function validatedBrokerPayload<T>(value: unknown, parser: (value: unknown) => T, label: string): T {
+  try {
+    return parser(value);
+  } catch {
     throw new Error(`broker ${label} response is invalid`);
   }
-  return parsed.data as T;
 }

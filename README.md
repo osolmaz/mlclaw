@@ -54,21 +54,24 @@ app; the bootstrapper runs locally.
 
 The `hf` CLI login is a provisioning credential: ML Claw uses it to create and
 configure resources owned by your account. HF Broker uses a separate, durable
-fine-grained credential whose required permissions are versioned by BrokerKit.
-Interactive bootstrap opens Hugging Face's token form with those fields
-preselected, then accepts the new token through a hidden local prompt. Creating
-or replacing this credential never changes the active `hf` CLI login. For
-automation, pass a `0600` file through `--broker-hf-token-file`; ML Claw does
-not accept the token as a command-line value.
+fine-grained credential whose selected permissions form BrokerKit's hard
+upstream authority ceiling. Interactive bootstrap opens an empty Hugging Face
+token form so you can choose those permissions and resources, then accepts the
+new token through a hidden local prompt. Creating or replacing this credential
+never changes the active `hf` CLI login. For automation, pass a `0600` file
+through `--broker-hf-token-file`; ML Claw does not accept the token as a
+command-line value.
 
 The broker owns the selected credential; OpenClaw receives only a separate
 agent credential that can call the broker's typed, policy-checked routes. It
 cannot read the token or use the admin-only operator API. Rerunning bootstrap
 reuses a healthy saved broker credential without reopening the form. A missing,
-invalid, wrong-account, or under-scoped credential must be repaired before ML
-Claw continues; it never silently substitutes the active CLI login. Existing
-dedicated inference tokens remain supported through `MLCLAW_ROUTER_TOKEN`,
-`HF_ROUTER_TOKEN`, or `--router-token-file` during migration.
+invalid, or wrong-account credential must be repaired before ML Claw continues;
+it never silently substitutes the active CLI login. When a selected permission
+does not cover an operation, HF Broker denies that operation without weakening
+the rest of the deployment. Existing dedicated inference tokens remain
+supported through `MLCLAW_ROUTER_TOKEN`, `HF_ROUTER_TOKEN`, or
+`--router-token-file`.
 
 ## Default Flow
 
