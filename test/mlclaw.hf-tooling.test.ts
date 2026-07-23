@@ -102,6 +102,7 @@ describe("Hugging Face tooling baseline", () => {
     const rawManifest = await fs.readFile(path.join(workspaceDir, ".agents/.mlclaw-hf-tooling.json"), "utf8");
     expect(rawManifest).toContain("\"installedAt\": \"2026-07-09T00:00:00.000Z\"");
     expect(rawManifest).toContain("\"hf-discover\"");
+    expect(rawManifest).toContain("\"hf_xet\": \"1.5.2\"");
     expect(rawManifest).toContain("\"uv\"");
 
     const second = await seedHuggingFaceTooling({

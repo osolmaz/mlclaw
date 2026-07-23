@@ -23,6 +23,7 @@
   "python": {
     "packages": {
       "huggingface_hub": "1.19.0",
+      "hf_xet": "1.5.2",
       "datasets": "5.0.0",
       "safetensors": "0.8.0"
     }

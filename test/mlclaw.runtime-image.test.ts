@@ -62,6 +62,7 @@ describe("runtime image Dockerfile", () => {
     expect(dockerfile).toContain("/health");
     expect(dockerfile).toContain("python3 -m pip install --break-system-packages --no-cache-dir");
     expect(dockerfile).toContain('"huggingface_hub==1.19.0"');
+    expect(dockerfile).toContain('"hf-xet==1.5.2"');
     expect(dockerfile).toContain('"datasets==5.0.0"');
     expect(dockerfile).toContain('"safetensors==0.8.0"');
     expect(dockerfile).toContain('"hf-discover==1.3.7"');
