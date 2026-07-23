@@ -384,8 +384,15 @@ across Space rebuilds, local container replacement, and gateway migration. The
 Space does not use `HF_TOKEN` or `HUGGINGFACE_HUB_TOKEN` secrets. Its broad
 credential is stored as `MLCLAW_BROKER_HF_TOKEN`, written to a broker-owned
 `0600` file during startup, and removed from child-process environments.
-OpenClaw uses only the generated broker agent credential. Broker grant and
-event state and encrypted control credentials live under the root-owned
+OpenClaw uses only the generated broker agent credential. At startup, ML Claw
+asks HF Broker to render the active policy with the exact deployment state
+bucket protected. Agent requests against that bucket are denied before an
+approval is created. Other repository paths and bucket key prefixes can use
+operator-approved grants lasting up to 24 hours or seven days; the installed
+`hf-broker` skill explains request, wait, recovery, write, read, and revocation
+workflows.
+
+Broker grant and event state and encrypted control credentials live under the root-owned
 `/var/lib/mlclaw-protected` tree. They are included in the durable snapshot
 through a root-only `.mlclaw-protected` staging step, then restored outside the
 agent-owned live directory before OpenClaw starts. Rebuildable Git mirrors, the

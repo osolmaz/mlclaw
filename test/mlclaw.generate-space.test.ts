@@ -29,6 +29,7 @@ describe("generated Space repository", () => {
       "assets/mlclaw.svg",
       "assets/mlclaw-control-ui/index.html",
       "assets/hf-tooling/manifest.json",
+      "assets/hf-tooling/skills/hf-broker/SKILL.md",
       "assets/hf-tooling/skills/hf-cli/SKILL.md",
     ];
 
@@ -72,6 +73,7 @@ describe("generated Space repository", () => {
       "assets/mlclaw.svg",
       "assets/mlclaw-control-ui/index.html",
       "assets/hf-tooling/manifest.json",
+      "assets/hf-tooling/skills/hf-broker/SKILL.md",
       "assets/hf-tooling/skills/hf-cli/SKILL.md",
       "runtime/entrypoint.sh",
       "runtime/hf-state-sync.js",
@@ -135,6 +137,7 @@ describe("generated Space repository", () => {
     expect([...Buffer.from(encodedHfLogo.trim(), "base64").subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
     expect(dockerfile).toContain("COPY --chown=node:node runtime/hf-state-sync.js /app/hf-state-sync.js");
     expect(dockerfile).toContain("COPY --chown=node:node runtime/hf-tooling-seed.js /app/hf-tooling-seed.js");
+    expect(dockerfile).toContain('"hf-xet==1.5.2"');
     expect(dockerfile).toContain('"hf-discover==1.3.7"');
     expect(dockerfile).toContain('"uv==0.11.28"');
     expect(dockerfile).toContain('CMD ["/app/entrypoint.sh"]');

@@ -140,6 +140,13 @@ conflict is durable: inspect the existing operation instead of restarting the
 broker. Protected actions appear in the ML Claw BrokerKit control and may also
 be sent through configured OpenClaw channels.
 
+For repeated repository or bucket writes, request the narrowest temporary grant
+with \`hf_grant_request\`. A bounded wait may return a pending grant; continue
+with \`hf_grant_wait\` using the same grant ID. Revoke the grant when the work is
+finished. Use the installed \`hf-broker\` client for local file upload and
+verified download streams. Never use the deployment state bucket for agent
+work; its exact target is denied by policy.
+
 After repository creation, use the brokered Git transport for repository
 contents. The limited broker credential is not a Hugging Face Hub token; do
 not report it as missing Hub access.
@@ -210,10 +217,20 @@ function assertToolingManifest(value) {
   if (!skills || !Array.isArray(skills.installed) || !skills.installed.every((skill) => typeof skill === "string")) {
     throw new Error("HF tooling manifest must list installed skills");
   }
+  if (!Array.isArray(skills.managed) || !skills.managed.every(isManagedSkillSource)) {
+    throw new Error("HF tooling manifest must list managed skill sources");
+  }
   const python = record.python;
   if (!python || typeof python.packages !== "object" || python.packages === null) {
     throw new Error("HF tooling manifest must list Python packages");
   }
+}
+function isManagedSkillSource(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const source = value;
+  return [source.name, source.source, source.revision].every(
+    (field) => typeof field === "string" && field.trim().length > 0
+  );
 }
 async function copyMissingTree(sourceRoot, targetRoot) {
   const copied = [];

@@ -1,8 +1,8 @@
 ARG OPENCLAW_VERSION=2026.7.1
 ARG OPENCLAW_BASE_IMAGE=ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}
 ARG BROKERKIT_PLUGIN_VERSION=0.4.1
-ARG BROKERKIT_VERSION=hf-broker/v0.5.2
-ARG MLCLAW_RUNTIME_IMAGE=ghcr.io/huggingface/mlclaw:0.4.10-openclaw-2026.7.1
+ARG BROKERKIT_VERSION=hf-broker/v0.6.1
+ARG MLCLAW_RUNTIME_IMAGE=ghcr.io/huggingface/mlclaw:0.5.0-openclaw-2026.7.1
 
 FROM golang:1.26.5-bookworm AS hf-broker-build
 ARG BROKERKIT_VERSION
@@ -43,6 +43,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 RUN python3 -m pip install --break-system-packages --no-cache-dir \
   "huggingface_hub==1.19.0" \
+  "hf-xet==1.5.2" \
   "datasets==5.0.0" \
   "safetensors==0.8.0" \
   "fastapi==0.137.1" \

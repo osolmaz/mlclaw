@@ -24,8 +24,23 @@ describe.runIf(brokerBinary)("pinned BrokerKit agent tools", () => {
       expect(tool.inputSchema.properties.request_id, tool.name).toBeDefined();
       expect(tool.inputSchema.required ?? [], tool.name).not.toContain("request_id");
       expect(tool.inputSchema.properties, tool.name).not.toHaveProperty("idempotency_key");
-      expect(tool.inputSchema.properties, tool.name).not.toHaveProperty("wait_seconds");
+      if (tool.name !== "hf_grant_request") {
+        expect(tool.inputSchema.properties, tool.name).not.toHaveProperty("wait_seconds");
+      }
     }
+
+    for (const name of ["hf_grant_request", "hf_grant_get", "hf_grant_wait", "hf_grant_cancel", "hf_grant_revoke"]) {
+      expect(byName.has(name), name).toBe(true);
+    }
+    expect(byName.get("hf_grant_request")?.inputSchema.properties.minutes).toMatchObject({ maximum: 10_080 });
+    expect(byName.get("hf_grant_request")?.inputSchema.properties.wait_seconds).toMatchObject({
+      default: 25,
+      maximum: 25,
+    });
+    const bucketStream = objectValue(byName.get("hf_bucket_object_write")?.inputSchema.properties.stream_input);
+    const bucketStreamProperties = objectValue(bucketStream?.properties) ?? {};
+    expect(bucketStreamProperties).toHaveProperty("transfer_id");
+    expect(bucketStreamProperties).not.toHaveProperty("request_key");
 
     const variableArguments = schemaProperties(byName, "hf_space_variable_set", "arguments");
     expect(variableArguments).toHaveProperty("variable_name");
@@ -35,6 +50,38 @@ describe.runIf(brokerBinary)("pinned BrokerKit agent tools", () => {
     expect(secretArguments).not.toHaveProperty("key");
     expect(byName.get("hf_operation_wait")?.inputSchema.properties.timeout_seconds).toMatchObject({ maximum: 25 });
     expect(byName.get("hf_grant_wait")?.inputSchema.properties.wait_seconds).toMatchObject({ maximum: 25 });
+  });
+
+  it("requests a scoped seven-day reusable bucket grant", async () => {
+    const backend = await startAgentBackend();
+    cleanups.push(backend.close);
+
+    const grant = await toolResult(backend.url, "hf_grant_request", {
+      operation: "bucket.object.write",
+      target: { kind: "bucket", owner: "alice", name: "artifacts", keys: ["runs/**"] },
+      minutes: 10_080,
+      max_uses: null,
+      reason: "Write one artifact prefix for a week",
+      request_id: "weekly-bucket-write",
+    });
+
+    expect(grant).toMatchObject({
+      api_version: "brokerkit.io/mcp-grant/v1",
+      request_id: "weekly-bucket-write",
+      status: "active",
+      operation: "bucket.object.write",
+      minutes: 10_080,
+      max_uses: null,
+    });
+    expect(backend.grantRequests).toEqual([
+      expect.objectContaining({
+        operation: "bucket.object.write",
+        target: { kind: "bucket", owner: "alice", name: "artifacts", keys: ["runs/**"] },
+        minutes: 10_080,
+        max_uses: null,
+        client_request_id: "weekly-bucket-write",
+      }),
+    ]);
   });
 
   it("submits, replays, conflicts, and recovers operations without transcript corruption", async () => {
@@ -125,9 +172,11 @@ async function callMcp(url: string, method: string, params?: Record<string, unkn
 
 async function startAgentBackend(): Promise<{
   url: string;
+  grantRequests: JsonObject[];
   close: () => Promise<void>;
 }> {
   const operations = new Map<string, AgentOperation>();
+  const grantRequests: JsonObject[] = [];
   let sequence = 0;
   const server = http.createServer(async (request, response) => {
     response.setHeader("content-type", "application/json");
@@ -142,13 +191,47 @@ async function startAgentBackend(): Promise<{
           api_version: "brokerkit.io/agent/v1",
           contract_digest: "sha256:dedfef7e6b34e5058302c1c2eb379130b45905cdd9f220298d46ccabd248e876",
           build_id: "test",
-          operations: ["repo.create", "space.secret.set", "space.variable.set"],
+          operations: [
+            "repo.create",
+            "space.secret.set",
+            "space.variable.set",
+            "bucket.object.write",
+            "bucket.object.read",
+            "bucket.object.list",
+          ],
           credential: {
             ready: true,
             provider: "huggingface",
             credential_kind: "fine_grained_user_token",
             generation: 1,
             verification_state: "valid",
+          },
+        }),
+      );
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/grants") {
+      const grantRequest = jsonObject(JSON.parse(await readBody(request)), "grant request");
+      grantRequests.push(grantRequest);
+      response.writeHead(201).end(
+        JSON.stringify({
+          status: "success",
+          data: {
+            grant: {
+              id: "grant_1",
+              status: "active",
+              operation: grantRequest.operation,
+              target: grantRequest.target,
+              attrs: grantRequest.attrs ?? {},
+              mode: "window",
+              minutes: grantRequest.minutes,
+              max_uses: grantRequest.max_uses,
+              uses_remaining: -1,
+              used_count: 0,
+              pending_until: null,
+              expires_at: "2026-07-30T00:00:00Z",
+              client_request_id: grantRequest.client_request_id,
+            },
           },
         }),
       );
@@ -199,6 +282,7 @@ async function startAgentBackend(): Promise<{
   if (!address || typeof address === "string") throw new Error("test backend did not bind TCP");
   return {
     url: `http://127.0.0.1:${address.port}`,
+    grantRequests,
     close: () => new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
   };
 }

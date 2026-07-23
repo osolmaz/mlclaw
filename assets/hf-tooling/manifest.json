@@ -23,6 +23,7 @@
   "python": {
     "packages": {
       "huggingface_hub": "1.19.0",
+      "hf_xet": "1.5.2",
       "datasets": "5.0.0",
       "safetensors": "0.8.0"
     }
@@ -30,7 +31,15 @@
   "skills": {
     "source": "https://github.com/huggingface/skills",
     "revision": "89d91fd4d0e6d4330471ba35f1c388489e94b496",
+    "managed": [
+      {
+        "name": "hf-broker",
+        "source": "https://github.com/osolmaz/brokerkit",
+        "revision": "hf-broker/v0.6.1"
+      }
+    ],
     "installed": [
+      "hf-broker",
       "hf-cli",
       "huggingface-spaces",
       "huggingface-datasets",

@@ -9,6 +9,8 @@ export MLCLAW_OPENCLAW_UID="$OPENCLAW_UID"
 export MLCLAW_OPENCLAW_GID="$OPENCLAW_GID"
 HF_BROKER_ENABLED=0
 HF_BROKER_RUN_DIR="/run/mlclaw-hf-broker"
+HF_BROKER_POLICY_DIR="$HF_BROKER_RUN_DIR/policy"
+HF_BROKER_SCOPE_FILE="$HF_BROKER_POLICY_DIR/scope.json"
 STATE_HF_TOKEN=""
 RESTORED_PROTECTED_STATE_DIR="$LIVE_DIR/.mlclaw-protected"
 PROTECTED_STATE_DIR="/var/lib/mlclaw-protected"
@@ -50,6 +52,8 @@ prepare_hf_broker() {
 
   export MLCLAW_HF_BROKER_URL="http://127.0.0.1:7863"
   export MLCLAW_HF_BROKER_AGENT_SECRET_FILE="$agent_secret_file"
+  export HF_BROKER_AGENT_ENDPOINT="tcp://127.0.0.1:7863"
+  export HF_BROKER_SHARED_SECRET_FILE="$agent_secret_file"
   if [ "${MLCLAW_GATEWAY_LOCATION:-}" = "local" ]; then
     export MLCLAW_TRUSTED_HF_TOKEN_FILE="$token_file"
   fi
@@ -81,6 +85,32 @@ restore_protected_state() {
   chmod 0700 "$PROTECTED_STATE_DIR/control" "$HF_BROKER_STATE_DIR"
 }
 
+render_hf_broker_policy() {
+  if [ "$HF_BROKER_ENABLED" != "1" ]; then
+    return
+  fi
+
+  local state_bucket="${OPENCLAW_HF_STATE_BUCKET:-}"
+  local protected_target=()
+  if [ -n "$state_bucket" ]; then
+    protected_target=(--protect-bucket "$state_bucket")
+  fi
+
+  install -d -m 0700 -o hf-broker -g hf-broker "$HF_BROKER_POLICY_DIR"
+  gosu hf-broker:hf-broker /usr/local/bin/hf-broker policy render \
+    --preset request-all-agent-operations \
+    --client default \
+    --profile-out "$HF_BROKER_POLICY_DIR/profile.json" \
+    --output "$HF_BROKER_SCOPE_FILE" \
+    --manifest-out "$HF_BROKER_POLICY_DIR/manifest.json" \
+    --replace \
+    "${protected_target[@]}"
+  gosu hf-broker:hf-broker /usr/local/bin/hf-broker doctor policy \
+    --profile "$HF_BROKER_POLICY_DIR/profile.json" \
+    --scope "$HF_BROKER_SCOPE_FILE" \
+    --manifest "$HF_BROKER_POLICY_DIR/manifest.json"
+}
+
 start_hf_broker() {
   if [ "$HF_BROKER_ENABLED" != "1" ]; then
     return
@@ -95,7 +125,8 @@ start_hf_broker() {
   HF_BROKER_OPERATOR_SECRETS_FILE="$HF_BROKER_RUN_DIR/operator-secrets.conf" \
   HF_BROKER_AGENT_ENDPOINT=tcp://127.0.0.1:7863 \
   HF_BROKER_OPERATOR_ENDPOINT=tcp://127.0.0.1:7864 \
-  HF_BROKER_SCOPE_FILE=/app/hf-broker.scope.json \
+  HF_BROKER_SCOPE_FILE="$HF_BROKER_SCOPE_FILE" \
+  HF_BROKER_XET_PYTHON=/usr/bin/python3 \
   HF_BROKER_STATE_DIR="$HF_BROKER_STATE_DIR" \
   gosu hf-broker:hf-broker /usr/local/bin/hf-broker &
   HF_BROKER_PID=$!
@@ -172,6 +203,7 @@ mkdir -p "$LIVE_DIR" "$WORKSPACE_DIR" "$STATE_DIR"
 chown_openclaw_live
 install -d -m 0710 -o root -g hf-broker "$PROTECTED_STATE_DIR"
 install -d -m 0700 -o root -g root "$PROTECTED_STATE_DIR/control"
+render_hf_broker_policy
 start_hf_broker
 
 if [ -n "${OPENCLAW_AGENT_NAME:-}" ]; then
