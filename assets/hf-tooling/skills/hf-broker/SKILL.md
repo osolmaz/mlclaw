@@ -75,7 +75,7 @@ in MCP JSON, chat messages, plans, approvals, or logs.
 
 ```sh
 hf-broker client bucket object write \
-  --target-json '{"kind":"bucket","owner":"OWNER","name":"BUCKET"}' \
+  --target-json '{"kind":"bucket","namespace":"OWNER","name":"BUCKET"}' \
   --arguments-json '{"path":"artifacts/result.bin"}' \
   --source ./result.bin \
   --media-type application/octet-stream \
@@ -92,7 +92,7 @@ Read into a new destination and let the client verify the returned stream:
 
 ```sh
 hf-broker client bucket object read \
-  --target-json '{"kind":"bucket","owner":"OWNER","name":"BUCKET"}' \
+  --target-json '{"kind":"bucket","namespace":"OWNER","name":"BUCKET"}' \
   --arguments-json '{"path":"artifacts/result.bin"}' \
   --output ./downloaded-result.bin \
   --reason "Read the requested result" \
@@ -113,9 +113,11 @@ or recover it by request ID:
 ```sh
 hf-broker client operation get OPERATION-ID
 hf-broker client operation wait --wait-timeout 15m OPERATION-ID
-hf-broker client operation list --request-id STABLE-WRITE-REQUEST-ID
 hf-broker client operation cancel OPERATION-ID
 ```
+
+If the operation ID was lost, call the `hf_operation_list` MCP tool with the
+stable `request_id`, then continue with the returned operation ID.
 
 Stop only after a terminal result, explicit cancellation, or an unrecoverable
 broker error. Revocation and expiry prevent later matching writes from reaching

@@ -2,10 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-  seedHuggingFaceTooling,
-  waitForBootstrapAndSeedHuggingFaceTooling,
-} from "../src/hf-tooling/seed.js";
+import { seedHuggingFaceTooling, waitForBootstrapAndSeedHuggingFaceTooling } from "../src/hf-tooling/seed.js";
 
 const BASELINE_SKILLS = [
   "hf-broker",
@@ -54,6 +51,10 @@ describe("Hugging Face tooling baseline", () => {
     for (const skill of BASELINE_SKILLS) {
       await expect(fs.access(path.join("assets/hf-tooling/skills", skill, "SKILL.md"))).resolves.toBeUndefined();
     }
+    const brokerSkill = await fs.readFile("assets/hf-tooling/skills/hf-broker/SKILL.md", "utf8");
+    expect(brokerSkill).toContain('"namespace":"OWNER"');
+    expect(brokerSkill).not.toContain('"kind":"bucket","owner"');
+    expect(brokerSkill).not.toContain("client operation list");
     for (const skill of OPTIONAL_ONLY_SKILLS) {
       await expect(fs.access(path.join("assets/hf-tooling/skills", skill, "SKILL.md"))).rejects.toMatchObject({
         code: "ENOENT",
@@ -84,9 +85,13 @@ describe("Hugging Face tooling baseline", () => {
     expect(first.wroteContextFile).toBe(true);
     expect(first.wroteManifest).toBe(true);
     await expect(fs.readFile(path.join(existingSkill, "SKILL.md"), "utf8")).resolves.toBe("# User customized hf-cli\n");
-    await expect(fs.readFile(path.join(existingWorkspaceSkill, "SKILL.md"), "utf8")).resolves.toBe("# User workspace hf-cli\n");
+    await expect(fs.readFile(path.join(existingWorkspaceSkill, "SKILL.md"), "utf8")).resolves.toBe(
+      "# User workspace hf-cli\n",
+    );
     await expect(fs.access(path.join(workspaceDir, "skills/huggingface-spaces/SKILL.md"))).resolves.toBeUndefined();
-    await expect(fs.access(path.join(workspaceDir, ".agents/skills/huggingface-spaces/SKILL.md"))).resolves.toBeUndefined();
+    await expect(
+      fs.access(path.join(workspaceDir, ".agents/skills/huggingface-spaces/SKILL.md")),
+    ).resolves.toBeUndefined();
     await expect(fs.access(path.join(workspaceDir, ".agents/mcp/huggingface.json"))).resolves.toBeUndefined();
     await expect(fs.access(path.join(workspaceDir, "examples/huggingface/README.md"))).resolves.toBeUndefined();
     await expect(fs.access(path.join(workspaceDir, ".env.example"))).resolves.toBeUndefined();
@@ -100,10 +105,10 @@ describe("Hugging Face tooling baseline", () => {
     expect(agentsMd).toContain("`skills`");
 
     const rawManifest = await fs.readFile(path.join(workspaceDir, ".agents/.mlclaw-hf-tooling.json"), "utf8");
-    expect(rawManifest).toContain("\"installedAt\": \"2026-07-09T00:00:00.000Z\"");
-    expect(rawManifest).toContain("\"hf-discover\"");
-    expect(rawManifest).toContain("\"hf_xet\": \"1.5.2\"");
-    expect(rawManifest).toContain("\"uv\"");
+    expect(rawManifest).toContain('"installedAt": "2026-07-09T00:00:00.000Z"');
+    expect(rawManifest).toContain('"hf-discover"');
+    expect(rawManifest).toContain('"hf_xet": "1.5.2"');
+    expect(rawManifest).toContain('"uv"');
 
     const second = await seedHuggingFaceTooling({
       assetRoot: path.resolve("assets/hf-tooling"),
@@ -115,7 +120,9 @@ describe("Hugging Face tooling baseline", () => {
     expect(second.copiedWorkspaceSkills).toEqual([]);
     expect(second.wroteContextFile).toBe(false);
     expect(second.wroteManifest).toBe(false);
-    await expect(fs.readFile(path.join(workspaceDir, ".agents/.mlclaw-hf-tooling.json"), "utf8")).resolves.toBe(rawManifest);
+    await expect(fs.readFile(path.join(workspaceDir, ".agents/.mlclaw-hf-tooling.json"), "utf8")).resolves.toBe(
+      rawManifest,
+    );
   });
 
   it("updates the managed AGENTS.md block without deleting user instructions", async () => {
@@ -186,11 +193,15 @@ describe("Hugging Face tooling baseline", () => {
     await fs.rm(path.join(workspaceDir, "BOOTSTRAP.md"));
     await fs.writeFile(
       path.join(workspaceDir, "openclaw-workspace-state.json"),
-      `${JSON.stringify({
-        version: 1,
-        bootstrapSeededAt: "2026-07-10T00:00:00.000Z",
-        setupCompletedAt: "2026-07-10T00:00:30.000Z",
-      }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          version: 1,
+          bootstrapSeededAt: "2026-07-10T00:00:00.000Z",
+          setupCompletedAt: "2026-07-10T00:00:30.000Z",
+        },
+        null,
+        2,
+      )}\n`,
       "utf8",
     );
 
