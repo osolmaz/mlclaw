@@ -60,7 +60,7 @@ describe.runIf(brokerBinary)("pinned BrokerKit agent tools", () => {
       operation: "bucket.object.write",
       target: { kind: "bucket", owner: "alice", name: "artifacts", keys: ["runs/**"] },
       minutes: 10_080,
-      max_uses: null,
+      max_uses: 25,
       reason: "Write one artifact prefix for a week",
       request_id: "weekly-bucket-write",
     });
@@ -71,14 +71,15 @@ describe.runIf(brokerBinary)("pinned BrokerKit agent tools", () => {
       status: "active",
       operation: "bucket.object.write",
       minutes: 10_080,
-      max_uses: null,
+      max_uses: 25,
+      uses_remaining: 25,
     });
     expect(backend.grantRequests).toEqual([
       expect.objectContaining({
         operation: "bucket.object.write",
         target: { kind: "bucket", owner: "alice", name: "artifacts", keys: ["runs/**"] },
         minutes: 10_080,
-        max_uses: null,
+        max_uses: 25,
         client_request_id: "weekly-bucket-write",
       }),
     ]);
@@ -226,7 +227,7 @@ async function startAgentBackend(): Promise<{
               mode: "window",
               minutes: grantRequest.minutes,
               max_uses: grantRequest.max_uses,
-              uses_remaining: -1,
+              uses_remaining: grantRequest.max_uses,
               used_count: 0,
               pending_until: null,
               expires_at: "2026-07-30T00:00:00Z",

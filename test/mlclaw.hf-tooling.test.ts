@@ -55,6 +55,8 @@ describe("Hugging Face tooling baseline", () => {
     expect(brokerSkill).toContain('"namespace":"OWNER"');
     expect(brokerSkill).not.toContain('"kind":"bucket","owner"');
     expect(brokerSkill).not.toContain("client operation list");
+    expect(brokerSkill).toContain("--max-uses 25");
+    expect(brokerSkill).not.toContain("--max-uses unlimited");
     for (const skill of OPTIONAL_ONLY_SKILLS) {
       await expect(fs.access(path.join("assets/hf-tooling/skills", skill, "SKILL.md"))).rejects.toMatchObject({
         code: "ENOENT",

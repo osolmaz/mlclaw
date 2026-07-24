@@ -26,6 +26,8 @@ grant instead of submitting another mutation.
 
 Request a temporary grant only when repeated writes are needed. Keep the scope
 as narrow as possible. A day is 1,440 minutes and a week is 10,080 minutes.
+These repeated-write examples explicitly request the deployment policy's
+25-use ceiling; the operator may approve a smaller use budget.
 
 For one bucket key prefix:
 
@@ -33,7 +35,7 @@ For one bucket key prefix:
 hf-broker client grant request bucket.object.write OWNER/BUCKET \
   --key 'artifacts/**' \
   --minutes 10080 \
-  --max-uses unlimited \
+  --max-uses 25 \
   --reason "Write the requested artifacts for one week" \
   --request-id STABLE-GRANT-REQUEST-ID
 ```
@@ -45,7 +47,7 @@ hf-broker client grant request repo.commit.create OWNER/REPO \
   --type dataset \
   --path 'data/**' \
   --minutes 1440 \
-  --max-uses unlimited \
+  --max-uses 25 \
   --reason "Update the requested dataset path for one day" \
   --request-id STABLE-GRANT-REQUEST-ID
 ```
