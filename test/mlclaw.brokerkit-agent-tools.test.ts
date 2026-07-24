@@ -72,6 +72,7 @@ describe.runIf(brokerBinary)("pinned BrokerKit agent tools", () => {
       operation: "bucket.object.write",
       minutes: 10_080,
       max_uses: 25,
+      uses_remaining: 25,
     });
     expect(backend.grantRequests).toEqual([
       expect.objectContaining({
@@ -226,7 +227,7 @@ async function startAgentBackend(): Promise<{
               mode: "window",
               minutes: grantRequest.minutes,
               max_uses: grantRequest.max_uses,
-              uses_remaining: -1,
+              uses_remaining: grantRequest.max_uses,
               used_count: 0,
               pending_until: null,
               expires_at: "2026-07-30T00:00:00Z",
